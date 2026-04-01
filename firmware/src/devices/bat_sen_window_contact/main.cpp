@@ -4,7 +4,7 @@
 #include "PinConfig.h"
 
 #define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 1
-#include "../../basetypes/bat_sen/main.cpp"
+#include "../../basetypes/bat_sen/BatSenRuntime.h"
 
 namespace {
 bool kontakt_offen = false;

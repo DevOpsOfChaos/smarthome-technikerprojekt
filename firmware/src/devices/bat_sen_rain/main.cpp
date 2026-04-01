@@ -4,7 +4,7 @@
 #include "PinConfig.h"
 
 #define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 1
-#include "../../basetypes/bat_sen/main.cpp"
+#include "../../basetypes/bat_sen/BatSenRuntime.h"
 
 static_assert(BAT_SEN_RAIN_SIGNAL_PIN >= 0, "bat_sen_rain braucht einen gueltigen ADC-Pin.");
 static_assert(BAT_SEN_RAIN_STATE_DELTA_RAW > 0U, "BAT_SEN_RAIN_STATE_DELTA_RAW muss groesser als 0 sein.");

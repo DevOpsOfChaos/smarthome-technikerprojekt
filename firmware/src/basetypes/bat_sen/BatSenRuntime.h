@@ -1,0 +1,731 @@
+#pragma once
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_sleep.h>
+#include <esp_wifi.h>
+#include <stdarg.h>
+#include <string.h>
+
+#if __has_include(<esp_arduino_version.h>)
+  #include <esp_arduino_version.h>
+#endif
+
+#ifndef ESP_ARDUINO_VERSION_MAJOR
+  #define ESP_ARDUINO_VERSION_MAJOR 2
+#endif
+
+#include "AppConfig.h"
+#include "PinConfig.h"
+#include "../../../include/DebugConfig.h"
+#include "../../../include/ProjectVersion.h"
+#include "../../../lib/sh_protocol/src/DeviceTypes.h"
+#include "../../../lib/sh_protocol/src/Protocol.h"
+
+constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
+constexpr char DATEI_GERAET[] = "BAT-SEN";
+constexpr char DATEI_VERSION[] = "0.1.0";
+const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+RTC_DATA_ATTR uint32_t RTC_BOOT_COUNTER = 0U;
+
+#ifndef BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS
+#define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 0
+#endif
+
+#ifndef BAT_SEN_GPIO_WAKE_LEVEL_HIGH
+#define BAT_SEN_GPIO_WAKE_LEVEL_HIGH 1
+#endif
+
+struct GenericStateChannels {
+    uint8_t channel_bool_1;
+    uint16_t channel_u16_1;
+    uint8_t channel_mask_1;
+    bool fault;
+};
+
+struct GenericEventData {
+    bool vorhanden;
+    uint8_t event_type;
+    uint8_t trigger;
+    uint8_t param1;
+    uint16_t param2;
+};
+
+struct NodeState {
+    bool master_bekannt;
+    bool master_mac_gueltig;
+    bool state_report_offen;
+    bool event_report_offen;
+    unsigned long boot_ms;
+    unsigned long letztes_hello_ms;
+    unsigned long letzter_state_ms;
+    unsigned long letzte_batterie_probe_ms;
+    unsigned long schlaf_ab_ms;
+    unsigned long report_interval_ms;
+    unsigned long wake_interval_s;
+    unsigned long rx_window_ms;
+    uint8_t master_mac[6];
+    uint8_t naechste_seq;
+    uint8_t battery_pct;
+    uint16_t battery_mv;
+    bool battery_fault;
+    uint8_t wake_reason;
+    uint32_t boot_counter;
+    GenericStateChannels kanaele;
+    GenericEventData event;
+};
+
+NodeState nodeStatus = {};
+
+#if BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS
+void device_init_io();
+bool device_poll_inputs();
+void device_build_state_channels(
+    uint8_t* channelBool1,
+    uint16_t* channelU16_1,
+    uint8_t* channelMask1,
+    bool* fault);
+bool device_map_event(
+    uint8_t* eventType,
+    uint8_t* trigger,
+    uint8_t* param1,
+    uint16_t* param2);
+uint64_t device_wake_candidates();
+#else
+void device_init_io() {}
+bool device_poll_inputs() { return false; }
+
+void device_build_state_channels(
+    uint8_t* channelBool1,
+    uint16_t* channelU16_1,
+    uint8_t* channelMask1,
+    bool* fault)
+{
+    if (channelBool1 != nullptr) *channelBool1 = 0U;
+    if (channelU16_1 != nullptr) *channelU16_1 = 0U;
+    if (channelMask1 != nullptr) *channelMask1 = 0U;
+    if (fault != nullptr) *fault = false;
+}
+
+bool device_map_event(
+    uint8_t* eventType,
+    uint8_t* trigger,
+    uint8_t* param1,
+    uint16_t* param2)
+{
+    if (eventType != nullptr) *eventType = 0U;
+    if (trigger != nullptr) *trigger = SH_TRIGGER_UNKNOWN;
+    if (param1 != nullptr) *param1 = 0U;
+    if (param2 != nullptr) *param2 = 0U;
+    return false;
+}
+
+uint64_t device_wake_candidates() { return 0ULL; }
+#endif
+
+void logf(const char* level, const char* format, ...) {
+    if (!DEBUG_LOKAL_AKTIV) return;
+
+    char message[224];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    Serial.print("[");
+    Serial.print(level);
+    Serial.print("] ");
+    Serial.println(message);
+}
+
+void copyText(char* target, size_t targetSize, const char* source) {
+    if (!target || targetSize == 0U) return;
+    if (!source) {
+        target[0] = '\0';
+        return;
+    }
+
+    strncpy(target, source, targetSize - 1U);
+    target[targetSize - 1U] = '\0';
+}
+
+uint16_t deltaU16(uint16_t a, uint16_t b) {
+    return (a >= b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
+}
+
+uint8_t deltaU8(uint8_t a, uint8_t b) {
+    return (a >= b) ? (uint8_t)(a - b) : (uint8_t)(b - a);
+}
+
+bool istBroadcastMac(const uint8_t* mac) {
+    return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
+}
+
+const uint8_t* helloZielMac() {
+    return nodeStatus.master_mac_gueltig ? nodeStatus.master_mac : BROADCAST_MAC;
+}
+
+bool istZeitErreicht(unsigned long jetzt, unsigned long ziel) {
+    return (long)(jetzt - ziel) >= 0;
+}
+
+uint8_t wakeReasonCode() {
+    const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause == ESP_SLEEP_WAKEUP_TIMER) return 1U;
+#if CONFIG_IDF_TARGET_ESP32C3
+    if (cause == ESP_SLEEP_WAKEUP_GPIO) return 2U;
+#else
+    if (cause == ESP_SLEEP_WAKEUP_EXT1) return 2U;
+#endif
+    return 0U;
+}
+
+uint64_t validiereWakeMask(uint64_t kandidatMask) {
+    if (kandidatMask == 0ULL) return 0ULL;
+
+    uint64_t gueltigMask = 0ULL;
+    for (uint8_t pin = 0U; pin < 64U; ++pin) {
+        const uint64_t bit = (1ULL << pin);
+        if ((kandidatMask & bit) == 0ULL) continue;
+
+        if (esp_sleep_is_valid_wakeup_gpio((gpio_num_t)pin)) {
+            gueltigMask |= bit;
+        } else {
+            logf("WARN", "GPIO %u ist kein gueltiger Deep-Sleep-Wake-Pin", pin);
+        }
+    }
+    return gueltigMask;
+}
+
+uint8_t berechneBatterieProzent(uint16_t batteryMv) {
+    if (batteryMv <= BATTERY_EMPTY_MV) return 0U;
+    if (batteryMv >= BATTERY_FULL_MV) return 100U;
+
+    const int32_t span = (int32_t)BATTERY_FULL_MV - (int32_t)BATTERY_EMPTY_MV;
+    const int32_t pos = (int32_t)batteryMv - (int32_t)BATTERY_EMPTY_MV;
+    const int32_t pct = (pos * 100) / span;
+    if (pct <= 0) return 0U;
+    if (pct >= 100) return 100U;
+    return (uint8_t)pct;
+}
+
+bool leseBatterie(uint16_t* batteryMv, uint8_t* batteryPct) {
+    if (batteryMv == nullptr || batteryPct == nullptr) return false;
+    if (!BATTERY_ADC_AKTIV || PIN_BATTERY_ADC < 0) return false;
+
+    uint32_t adcSumMv = 0UL;
+    for (uint8_t i = 0U; i < BATTERY_ADC_SAMPLE_COUNT; ++i) {
+        adcSumMv += (uint32_t)analogReadMilliVolts(PIN_BATTERY_ADC);
+    }
+
+    const uint32_t adcMv = (adcSumMv + ((uint32_t)BATTERY_ADC_SAMPLE_COUNT / 2UL)) /
+                           (uint32_t)BATTERY_ADC_SAMPLE_COUNT;
+    if (adcMv == 0UL) return false;
+
+    uint32_t scaledMv = ((adcMv * (uint32_t)BATTERY_DIVIDER_NUM) + ((uint32_t)BATTERY_DIVIDER_DEN / 2UL)) /
+                        (uint32_t)BATTERY_DIVIDER_DEN;
+    if (scaledMv > 65535UL) scaledMv = 65535UL;
+
+    *batteryMv = (uint16_t)scaledMv;
+    *batteryPct = berechneBatterieProzent(*batteryMv);
+    return true;
+}
+
+void aktualisiereBatterie(bool* geaendert) {
+    if (geaendert != nullptr) *geaendert = false;
+
+    uint16_t neueMv = nodeStatus.battery_mv;
+    uint8_t neuerPct = nodeStatus.battery_pct;
+    const bool messungOk = leseBatterie(&neueMv, &neuerPct);
+    const bool neuerFault = !messungOk;
+
+    if (messungOk) {
+        const bool mvDelta = deltaU16(neueMv, nodeStatus.battery_mv) >= BATTERY_STATE_DELTA_MV;
+        const bool pctDelta = deltaU8(neuerPct, nodeStatus.battery_pct) >= BATTERY_STATE_DELTA_PCT;
+        const bool faultDelta = nodeStatus.battery_fault != neuerFault;
+        if (geaendert != nullptr && (mvDelta || pctDelta || faultDelta)) {
+            *geaendert = true;
+        }
+        nodeStatus.battery_mv = neueMv;
+        nodeStatus.battery_pct = neuerPct;
+        nodeStatus.battery_fault = false;
+        return;
+    }
+
+    if (geaendert != nullptr && nodeStatus.battery_fault != neuerFault) {
+        *geaendert = true;
+    }
+    nodeStatus.battery_fault = true;
+}
+
+GenericStateChannels leseDeviceKanaele() {
+    GenericStateChannels channels = {};
+    device_build_state_channels(
+        &channels.channel_bool_1,
+        &channels.channel_u16_1,
+        &channels.channel_mask_1,
+        &channels.fault);
+    return channels;
+}
+
+bool sindKanaeleUnterschiedlich(const GenericStateChannels& a, const GenericStateChannels& b) {
+    return a.channel_bool_1 != b.channel_bool_1 ||
+           a.channel_u16_1 != b.channel_u16_1 ||
+           a.channel_mask_1 != b.channel_mask_1 ||
+           a.fault != b.fault;
+}
+
+void pruefeDeviceEvent() {
+    uint8_t eventType = 0U;
+    uint8_t trigger = SH_TRIGGER_UNKNOWN;
+    uint8_t param1 = 0U;
+    uint16_t param2 = 0U;
+    if (!device_map_event(&eventType, &trigger, &param1, &param2)) return;
+    if (eventType == 0U) return;
+
+    nodeStatus.event.vorhanden = true;
+    nodeStatus.event.event_type = eventType;
+    nodeStatus.event.trigger = trigger;
+    nodeStatus.event.param1 = param1;
+    nodeStatus.event.param2 = param2;
+    nodeStatus.event_report_offen = true;
+    nodeStatus.state_report_offen = true;
+}
+
+void aktualisiereSchlafFenster(unsigned long fensterMs) {
+    nodeStatus.schlaf_ab_ms = millis() + fensterMs;
+}
+
+void buildSensorMask(char* target, size_t targetSize) {
+    if (!target || targetSize == 0U) return;
+    copyText(target, targetSize, "XXXXXXXXXX");
+}
+
+void buildInputMask(char* target, size_t targetSize) {
+    if (!target || targetSize == 0U) return;
+    copyText(target, targetSize, "XXXXX");
+}
+
+bool stellePeerSicher(const uint8_t* mac) {
+    if (mac == nullptr) return false;
+    if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
+    if (esp_now_is_peer_exist(mac)) return true;
+
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, mac, 6);
+    peerInfo.channel = (uint8_t)WLAN_KANAL;
+    peerInfo.encrypt = false;
+
+    const esp_err_t err = esp_now_add_peer(&peerInfo);
+    if (err != ESP_OK) {
+        logf("WARN", "Peer konnte nicht angelegt werden (err=%d)", (int)err);
+        return false;
+    }
+    return true;
+}
+
+bool sendePaket(
+    const uint8_t* zielMac,
+    uint8_t msgType,
+    const void* payload,
+    size_t payloadLen,
+    const char* label)
+{
+    if (zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
+    if (!stellePeerSicher(zielMac)) return false;
+
+    uint8_t packet[SH_ESPNOW_MAX_BYTES] = {0};
+    SmartHome::MsgHeader header = {};
+    SmartHome::fillHeader(header, msgType, nodeStatus.naechste_seq++, 0U, (uint16_t)payloadLen);
+
+    uint8_t* payloadBuffer = packet + SH_HEADER_SIZE;
+    if (payloadLen > 0U && payload != nullptr) {
+        memcpy(payloadBuffer, payload, payloadLen);
+    }
+
+    SmartHome::finalizePacketCrc(header, payloadBuffer);
+    memcpy(packet, &header, sizeof(header));
+
+    const esp_err_t err = esp_now_send(zielMac, packet, SH_HEADER_SIZE + payloadLen);
+    if (err != ESP_OK) {
+        logf("WARN", "%s konnte nicht gesendet werden (err=%d)", label, (int)err);
+        return false;
+    }
+    return true;
+}
+
+bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
+    SmartHome::AckPayload payload = {};
+    payload.ack_seq = ackSeq;
+    payload.ack_msg_type = ackMsgType;
+    payload.status = status;
+    return sendePaket(zielMac, SH_MSG_ACK, &payload, sizeof(payload), "ACK");
+}
+
+bool sendeHello() {
+    SmartHome::HelloPayload payload = {};
+    char sensorMask[SH_SENSOR_MASK_LEN] = {0};
+    char inputMask[SH_INPUT_MASK_LEN] = {0};
+
+    buildSensorMask(sensorMask, sizeof(sensorMask));
+    buildInputMask(inputMask, sizeof(inputMask));
+
+    copyText(payload.device_id, sizeof(payload.device_id), DEVICE_ID);
+    copyText(payload.device_name, sizeof(payload.device_name), DEVICE_NAME);
+    payload.device_class = SH_CLASS_BAT_SEN;
+    payload.caps_hi = (uint8_t)((DEVICE_CAPS >> 8) & 0xFFU);
+    payload.caps_lo = (uint8_t)(DEVICE_CAPS & 0xFFU);
+    payload.power_type = SH_POWER_BATTERY;
+    payload.fw_version = 1U;
+    payload.boot_counter = nodeStatus.boot_counter;
+    payload.meta_schema_version = DEVICE_META_SCHEMA_VERSION;
+    payload.control_mode = DEVICE_CONTROL_MODE;
+    payload.config_profile = DEVICE_CONFIG_PROFILE;
+    payload.reporting_mode = DEVICE_REPORTING_MODE;
+    copyText(payload.sensor_mask, sizeof(payload.sensor_mask), sensorMask);
+    copyText(payload.input_mask, sizeof(payload.input_mask), inputMask);
+
+    nodeStatus.letztes_hello_ms = millis();
+    return sendePaket(helloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
+}
+
+bool sendeState() {
+    if (!nodeStatus.master_mac_gueltig) return false;
+
+    SmartHome::BatteryConfigStateReportPayload payload = {};
+    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+    payload.battery_pct = nodeStatus.battery_pct;
+    payload.battery_mv = nodeStatus.battery_mv;
+
+    // Die Felder sind im Protokoll historisch benannt.
+    // Der Basistyp behandelt sie als neutrale Device-Kanaele.
+    payload.window_open = nodeStatus.kanaele.channel_bool_1;
+    payload.rain_raw = nodeStatus.kanaele.channel_u16_1;
+    payload.button_flags = nodeStatus.kanaele.channel_mask_1;
+    payload.fault = (nodeStatus.battery_fault || nodeStatus.kanaele.fault) ? 1U : 0U;
+    payload.report_interval_s = (uint16_t)(nodeStatus.report_interval_ms / 1000UL);
+
+    if (!sendePaket(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
+        return false;
+    }
+
+    nodeStatus.state_report_offen = false;
+    nodeStatus.letzter_state_ms = millis();
+    return true;
+}
+
+bool sendeEvent() {
+    if (!nodeStatus.master_mac_gueltig || !nodeStatus.event.vorhanden) return false;
+
+    SmartHome::EventReportPayload payload = {};
+    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+    payload.event_type = nodeStatus.event.event_type;
+    payload.trigger = nodeStatus.event.trigger;
+    payload.param1 = nodeStatus.event.param1;
+    payload.param2 = nodeStatus.event.param2;
+
+    if (!sendePaket(nodeStatus.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT")) {
+        return false;
+    }
+
+    nodeStatus.event_report_offen = false;
+    nodeStatus.event.vorhanden = false;
+    return true;
+}
+
+void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
+    if (payload.ack_status != SH_ACK_OK) {
+        logf("WARN", "HELLO_ACK abgelehnt");
+        return;
+    }
+
+    memcpy(nodeStatus.master_mac, senderMac, sizeof(nodeStatus.master_mac));
+    nodeStatus.master_mac_gueltig = true;
+    nodeStatus.master_bekannt = true;
+    nodeStatus.state_report_offen = true;
+    stellePeerSicher(nodeStatus.master_mac);
+    aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+    logf("INFO", "HELLO_ACK empfangen");
+}
+
+void verarbeiteCmd(const SmartHome::CmdPayload& payload) {
+    if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
+        nodeStatus.state_report_offen = true;
+        aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+    }
+}
+
+bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
+    switch (payload.param_id) {
+        case SH_CFG_REPORT_INTERVAL_S:
+            if (payload.value < MIN_REPORT_INTERVAL_S || payload.value > MAX_REPORT_INTERVAL_S) {
+                return false;
+            }
+            nodeStatus.report_interval_ms = (unsigned long)payload.value * 1000UL;
+            nodeStatus.state_report_offen = true;
+            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+            return true;
+
+        case SH_CFG_WAKE_INTERVAL_S:
+            if (payload.value < MIN_WAKE_INTERVAL_S || payload.value > MAX_WAKE_INTERVAL_S) {
+                return false;
+            }
+            nodeStatus.wake_interval_s = (unsigned long)payload.value;
+            nodeStatus.state_report_offen = true;
+            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+            return true;
+
+        case SH_CFG_RX_WINDOW_MS:
+            if (payload.value < MIN_RX_WINDOW_MS || payload.value > MAX_RX_WINDOW_MS) {
+                return false;
+            }
+            nodeStatus.rx_window_ms = (unsigned long)payload.value;
+            nodeStatus.state_report_offen = true;
+            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    const bool ok = uebernehmeCfg(payload);
+    if (header.flags & SH_FLAG_ACK_REQUEST) {
+        sendeAck(senderMac, header.seq, header.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
+    }
+}
+
+void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int len) {
+    if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
+    if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) return;
+
+    const SmartHome::MsgHeader* header = reinterpret_cast<const SmartHome::MsgHeader*>(data);
+    const uint8_t* payload = data + SH_HEADER_SIZE;
+
+    switch (header->msg_type) {
+        case SH_MSG_HELLO_ACK:
+            if (header->payload_len == sizeof(SmartHome::HelloAckPayload)) {
+                verarbeiteHelloAck(senderMac, *reinterpret_cast<const SmartHome::HelloAckPayload*>(payload));
+            }
+            break;
+
+        case SH_MSG_CMD:
+            if (header->payload_len == sizeof(SmartHome::CmdPayload)) {
+                verarbeiteCmd(*reinterpret_cast<const SmartHome::CmdPayload*>(payload));
+            }
+            break;
+
+        case SH_MSG_CFG:
+            if (header->payload_len == sizeof(SmartHome::CfgPayload)) {
+                verarbeiteCfg(senderMac, *header, *reinterpret_cast<const SmartHome::CfgPayload*>(payload));
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+void onEspNowReceive(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+    if (!info) return;
+    verarbeiteEspNowPaket(info->src_addr, data, len);
+}
+#else
+void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
+    verarbeiteEspNowPaket(senderMac, data, len);
+}
+#endif
+
+void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+    if (status != ESP_NOW_SEND_SUCCESS) {
+        logf("WARN", "ESP-NOW Versand fehlgeschlagen");
+    }
+}
+
+void initialisiereFunk() {
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    WiFi.setSleep(false);
+
+    const esp_err_t kanalErr = esp_wifi_set_channel((uint8_t)WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
+    if (kanalErr != ESP_OK) {
+        logf("WARN", "WLAN-Kanal %d konnte nicht gesetzt werden (err=%d)", WLAN_KANAL, (int)kanalErr);
+    }
+
+    if (esp_now_init() != ESP_OK) {
+        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen");
+        return;
+    }
+
+    esp_now_register_send_cb(onEspNowSend);
+    esp_now_register_recv_cb(onEspNowReceive);
+    stellePeerSicher(BROADCAST_MAC);
+}
+
+void initialisiereIO() {
+    if (PIN_STATUS_LED >= 0) {
+        pinMode(PIN_STATUS_LED, OUTPUT);
+        digitalWrite(PIN_STATUS_LED, LOW);
+    }
+
+    if (PIN_BATTERY_ADC >= 0) {
+        pinMode(PIN_BATTERY_ADC, INPUT);
+    }
+
+    if (PIN_WAKE_INPUT >= 0) {
+        pinMode(PIN_WAKE_INPUT, INPUT);
+    }
+
+    device_init_io();
+}
+
+void pollLokaleHooks() {
+    const bool hookDelta = device_poll_inputs();
+    const GenericStateChannels neueKanaele = leseDeviceKanaele();
+    if (hookDelta || sindKanaeleUnterschiedlich(nodeStatus.kanaele, neueKanaele)) {
+        nodeStatus.kanaele = neueKanaele;
+        nodeStatus.state_report_offen = true;
+    }
+    pruefeDeviceEvent();
+}
+
+bool darfInDeepSleep(unsigned long jetzt) {
+    if (!DEEP_SLEEP_AKTIV) return false;
+
+    if (nodeStatus.master_mac_gueltig &&
+        (nodeStatus.state_report_offen || nodeStatus.event_report_offen || nodeStatus.event.vorhanden)) {
+        return false;
+    }
+
+    if (!nodeStatus.master_bekannt) {
+        return (jetzt - nodeStatus.boot_ms) >= DISCOVERY_WINDOW_MS;
+    }
+
+    return istZeitErreicht(jetzt, nodeStatus.schlaf_ab_ms);
+}
+
+void aktiviereWakeQuellen() {
+    const uint64_t wakeUs = (uint64_t)nodeStatus.wake_interval_s * 1000000ULL;
+    esp_sleep_enable_timer_wakeup(wakeUs);
+
+#if BAT_SEN_ENABLE_GPIO_WAKE
+    uint64_t wakeMask = device_wake_candidates();
+    if (PIN_WAKE_INPUT >= 0 && PIN_WAKE_INPUT < 64) {
+        wakeMask |= (1ULL << (uint8_t)PIN_WAKE_INPUT);
+    }
+    wakeMask = validiereWakeMask(wakeMask);
+
+    if (wakeMask == 0ULL) {
+        logf("WARN", "GPIO-Wake aktiv, aber kein gueltiger Wake-Pin konfiguriert");
+        return;
+    }
+
+#if CONFIG_IDF_TARGET_ESP32C3
+    const esp_deepsleep_gpio_wake_up_mode_t wakeMode =
+        BAT_SEN_GPIO_WAKE_LEVEL_HIGH ? ESP_GPIO_WAKEUP_GPIO_HIGH : ESP_GPIO_WAKEUP_GPIO_LOW;
+    const esp_err_t wakeErr = esp_deep_sleep_enable_gpio_wakeup(wakeMask, wakeMode);
+#else
+    const esp_err_t wakeErr = esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_HIGH);
+#endif
+
+    if (wakeErr != ESP_OK) {
+        logf("WARN", "GPIO-Wake konnte nicht aktiviert werden (err=%d)", (int)wakeErr);
+    }
+#endif
+}
+
+void starteDeepSleep() {
+    if (!DEEP_SLEEP_AKTIV) return;
+    aktiviereWakeQuellen();
+    logf("INFO", "Deep-Sleep fuer %lus", nodeStatus.wake_interval_s);
+    if (DEBUG_LOKAL_AKTIV) {
+        Serial.flush();
+        delay(20);
+    }
+    esp_deep_sleep_start();
+}
+
+void setup() {
+    if (DEBUG_LOKAL_AKTIV) {
+        Serial.begin(115200);
+        delay(150);
+    }
+
+    nodeStatus = {};
+    nodeStatus.boot_ms = millis();
+    nodeStatus.letztes_hello_ms = nodeStatus.boot_ms - HELLO_RETRY_INTERVAL_MS;
+    nodeStatus.report_interval_ms = DEFAULT_REPORT_INTERVAL_S * 1000UL;
+    nodeStatus.wake_interval_s = DEFAULT_WAKE_INTERVAL_S;
+    nodeStatus.rx_window_ms = DEFAULT_RX_WINDOW_MS;
+    nodeStatus.state_report_offen = true;
+    nodeStatus.event_report_offen = false;
+    nodeStatus.battery_fault = true;
+    nodeStatus.wake_reason = wakeReasonCode();
+
+    RTC_BOOT_COUNTER += 1U;
+    nodeStatus.boot_counter = RTC_BOOT_COUNTER;
+
+    initialisiereIO();
+    nodeStatus.kanaele = leseDeviceKanaele();
+
+    bool batteryChanged = false;
+    aktualisiereBatterie(&batteryChanged);
+    nodeStatus.letzte_batterie_probe_ms = millis();
+    aktualisiereSchlafFenster(DISCOVERY_WINDOW_MS);
+
+    logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
+    logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
+    logf("INFO", "WakeReason=%u BootCounter=%lu", nodeStatus.wake_reason, (unsigned long)nodeStatus.boot_counter);
+
+    initialisiereFunk();
+    sendeHello();
+}
+
+void loop() {
+    const unsigned long jetzt = millis();
+
+    pollLokaleHooks();
+
+    if ((jetzt - nodeStatus.letzte_batterie_probe_ms) >= BATTERY_SAMPLE_INTERVAL_MS) {
+        nodeStatus.letzte_batterie_probe_ms = jetzt;
+        bool batteryChanged = false;
+        aktualisiereBatterie(&batteryChanged);
+        if (batteryChanged) {
+            nodeStatus.state_report_offen = true;
+        }
+    }
+
+    if (!nodeStatus.master_bekannt &&
+        (jetzt - nodeStatus.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) {
+        sendeHello();
+    }
+
+    if (nodeStatus.master_mac_gueltig && nodeStatus.event_report_offen) {
+        if (sendeEvent()) {
+            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+        }
+    }
+
+    const bool stateFaellig =
+        nodeStatus.master_mac_gueltig &&
+        (nodeStatus.state_report_offen ||
+         (nodeStatus.report_interval_ms > 0UL &&
+          (jetzt - nodeStatus.letzter_state_ms) >= nodeStatus.report_interval_ms));
+
+    if (stateFaellig) {
+        if (sendeState()) {
+            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+        }
+    }
+
+    if (darfInDeepSleep(jetzt)) {
+        starteDeepSleep();
+    }
+
+    delay(LOOP_INTERVAL_MS);
+}
+

@@ -1,0 +1,45 @@
+PROTOKOLL - bat_sen structure cleanup (2026-04-01)
+
+Ziel
+- Die direkte Device-Bindung ueber `#include "../../basetypes/bat_sen/main.cpp"` entfernen.
+- Einen klaren Basistyp-Einstiegspunkt schaffen, ohne die Fachsemantik von `bat_sen_window_contact` und `bat_sen_rain` zu aendern.
+
+Geaenderte Dateien
+- firmware/src/basetypes/bat_sen/BatSenRuntime.h
+- firmware/src/basetypes/bat_sen/main.cpp
+- firmware/src/devices/bat_sen_window_contact/main.cpp
+- firmware/src/devices/bat_sen_rain/main.cpp
+- PROTOKOLL/PROTOKOLL_2026-04-01_bat_sen_structure_cleanup.txt
+
+Alter Bindungspfad
+- `bat_sen_window_contact/main.cpp`:
+  - `#include "../../basetypes/bat_sen/main.cpp"`
+- `bat_sen_rain/main.cpp`:
+  - `#include "../../basetypes/bat_sen/main.cpp"`
+
+Neuer Bindungspfad
+- Neue Basistyp-Runtime-Datei: `firmware/src/basetypes/bat_sen/BatSenRuntime.h`
+- `firmware/src/basetypes/bat_sen/main.cpp` ist jetzt ein duenner Einstiegspunkt und inkludiert nur noch `BatSenRuntime.h`.
+- Devices binden den Basistyp nun ueber:
+  - `#include "../../basetypes/bat_sen/BatSenRuntime.h"`
+
+Was im Basistyp blieb
+- Wake/Sleep-Grundmechanik
+- HELLO/HELLO_ACK/STATE/EVENT/ACK/CFG-Transport
+- Batteriemesspfad und neutrale State-Kanaele
+- Hook-Vertrag fuer Device-Logik
+
+Was im Geraet blieb
+- Fensterkontakt- und Regen-Fachlogik
+- jeweiliges Event-Mapping
+- jeweilige Input-/Sensor-Readout-Logik
+
+Build/Test
+- pio run -e bat_sen -> SUCCESS
+- pio run -e bat_sen_window_contact -> SUCCESS
+- pio run -e bat_sen_rain -> SUCCESS
+
+Grenzen/Risiken
+- Der Umbau ist ein Strukturcleanup, kein Architektur-Neubau.
+- Die Runtime wird weiterhin pro Device-Translation-Unit eingebunden (jetzt ueber klaren Runtime-Einstiegspunkt statt `main.cpp`-Include).
+- Semantik von `window_contact` und `rain` wurde bewusst nicht erweitert.
