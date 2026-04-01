@@ -1,0 +1,50 @@
+Grosses Ziel
+- Ersten real belegten DHT22-Referenzpfad fuer den neuen net_sen-Basistyp im oeffentlichen Repo als separaten Device-Pfad anlegen.
+
+Ausgangslage
+- net_sen liegt als neutraler Basistyp mit Device-Hooks vor.
+- net_sen_room existiert bereits mit BME280/VEML7700 und durfte in diesem Schritt nicht umgebaut werden.
+- DHT22 ist im Alt-Repo als realer Referenzpfad fuer net_sen dokumentiert.
+
+Ziel dieses Schritts
+- Neuen Device-Pfad net_sen_dht22_reference anlegen.
+- DHT22 auf GPIO6 als konkrete, geraetespezifische Festlegung setzen.
+- Nur temp/hum liefern, lux und motion bewusst auf 0 halten.
+- Fault sauber fuer ungueltige Messung abbilden.
+- Eigenes Build-Environment und validierbaren Build bereitstellen.
+
+Umsetzung
+- Neuer Ordner angelegt: firmware/src/devices/net_sen_dht22_reference/
+- Neue Dateien:
+  - DeviceConfig.h
+  - PinConfig.h
+  - main.cpp
+  - README.md
+- platformio.ini um Environment net_sen_dht22_reference erweitert.
+- DHT-Library fuer dieses Environment gesetzt:
+  - adafruit/DHT sensor library @ ^1.4.6
+
+Begruendung der gewaehlten Loesung
+- Eigener Device-Pfad statt Umbau von net_sen_room trennt Referenzsensorik klar von spaeteren Umweltpfaden.
+- Hook-Muster ueber include des neutralen basetypes/net_sen/main.cpp bleibt konsistent mit dem bestehenden Device-Stil.
+- DHT22 bleibt in diesem Schritt bewusst klein und nachvollziehbar:
+  - warmup/read-Intervalle aus dem belegten Altpfad
+  - klare fault-Semantik
+  - keine vorgezogene Mehrsensor-Architektur
+
+Pruefung / Validierung
+- Relevanter Build im oeffentlichen Repo:
+  - pio run -e net_sen_dht22_reference
+- Ergebnis: erfolgreich.
+
+Ergebnis / Nutzen
+- net_sen hat jetzt einen separaten, kleinen DHT22-Referenzpfad fuer fruehen Hardware- und End-to-End-Abgleich.
+- net_sen_room bleibt unveraendert als eigenstaendiger Pfad fuer spaetere Umweltarbeit.
+- Scope blieb eng ohne Nebenbaustellen.
+
+Grenzen / offene Punkte
+- Dieser Referenzpfad liefert absichtlich keine Lux-, Motion-, BME680-, VEML7700- oder ENS160-Daten.
+- Reale Hardware-Validierung (Flash/Serial/Serverpfad) fuer diesen neuen Device-Pfad ist noch separat durchzufuehren.
+
+Naechster sinnvoller Schritt
+- Nach erfolgreichem Referenzpfad-Hardwarecheck die priorisierte Umweltuebernahme fuer net_sen in kleinem, getrenntem Folgeschritt angehen.
