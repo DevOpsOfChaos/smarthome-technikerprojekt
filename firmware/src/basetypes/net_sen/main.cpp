@@ -25,15 +25,27 @@ constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "NET-SEN";
 constexpr char DATEI_VERSION[] = "0.2.0";
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
+constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
+constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
 
 #ifndef NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 0
+#endif
+
+#ifndef NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS
+#define NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS 0
 #endif
 
 struct SensorState {
     int16_t temp_01c;
     uint16_t hum_01pct;
     uint16_t lux;
+    uint32_t pressure_pa;
+    uint32_t gas_ohm;
+    uint16_t aqi;
+    uint16_t tvoc_ppb;
+    uint16_t eco2_ppm;
     uint8_t motion;
     bool fault;
 };
@@ -74,6 +86,46 @@ bool netSenDeviceSensorPoll(
     return false;
 }
 #endif
+
+#if NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS
+void netSenDeviceExtendedStateInit();
+bool netSenDeviceExtendedStatePoll(
+    uint32_t* pressure_pa,
+    uint32_t* gas_ohm,
+    uint16_t* aqi,
+    uint16_t* tvoc_ppb,
+    uint16_t* eco2_ppm);
+#else
+void netSenDeviceExtendedStateInit() {}
+
+bool netSenDeviceExtendedStatePoll(
+    uint32_t* /*pressure_pa*/,
+    uint32_t* /*gas_ohm*/,
+    uint16_t* /*aqi*/,
+    uint16_t* /*tvoc_ppb*/,
+    uint16_t* /*eco2_ppm*/)
+{
+    return false;
+}
+#endif
+
+bool netSenVerwendetErweitertenState() {
+    return (DEVICE_CAPS & (SH_CAP_PRESSURE | SH_CAP_AQI)) != 0U;
+}
+
+void setzeSensorDefaults(SensorState* sensor) {
+    if (!sensor) return;
+    sensor->temp_01c = INT16_MIN;
+    sensor->hum_01pct = 0xFFFFU;
+    sensor->lux = 0xFFFFU;
+    sensor->pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
+    sensor->gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+    sensor->aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
+    sensor->tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
+    sensor->eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
+    sensor->motion = 0U;
+    sensor->fault = true;
+}
 
 void logf(const char* level, const char* format, ...) {
     if (!DEBUG_LOKAL_AKTIV) return;
@@ -222,17 +274,38 @@ bool sendeHeartbeat() {
 bool sendeState() {
     if (!nodeStatus.master_mac_gueltig) return false;
 
-    SmartHome::SensorConfigStateReportPayload payload = {};
-    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
-    payload.temp_01c = nodeStatus.sensor.temp_01c;
-    payload.hum_01pct = nodeStatus.sensor.hum_01pct;
-    payload.lux = nodeStatus.sensor.lux;
-    payload.motion = nodeStatus.sensor.motion;
-    payload.fault = nodeStatus.sensor.fault ? 1U : 0U;
-    payload.report_interval_s = (uint16_t)(nodeStatus.state_interval_ms / 1000UL);
+    const uint16_t reportIntervalS = (uint16_t)(nodeStatus.state_interval_ms / 1000UL);
+    if (netSenVerwendetErweitertenState()) {
+        SmartHome::ExtendedSensorGasConfigStateReportPayload payload = {};
+        copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+        payload.temp_01c = nodeStatus.sensor.temp_01c;
+        payload.hum_01pct = nodeStatus.sensor.hum_01pct;
+        payload.lux = nodeStatus.sensor.lux;
+        payload.pressure_pa = nodeStatus.sensor.pressure_pa;
+        payload.gas_ohm = nodeStatus.sensor.gas_ohm;
+        payload.aqi = nodeStatus.sensor.aqi;
+        payload.tvoc_ppb = nodeStatus.sensor.tvoc_ppb;
+        payload.eco2_ppm = nodeStatus.sensor.eco2_ppm;
+        payload.motion = nodeStatus.sensor.motion;
+        payload.fault = nodeStatus.sensor.fault ? 1U : 0U;
+        payload.report_interval_s = reportIntervalS;
 
-    if (!sendePaket(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
-        return false;
+        if (!sendePaket(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE_EXT_GAS")) {
+            return false;
+        }
+    } else {
+        SmartHome::SensorConfigStateReportPayload payload = {};
+        copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+        payload.temp_01c = nodeStatus.sensor.temp_01c;
+        payload.hum_01pct = nodeStatus.sensor.hum_01pct;
+        payload.lux = nodeStatus.sensor.lux;
+        payload.motion = nodeStatus.sensor.motion;
+        payload.fault = nodeStatus.sensor.fault ? 1U : 0U;
+        payload.report_interval_s = reportIntervalS;
+
+        if (!sendePaket(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
+            return false;
+        }
     }
 
     nodeStatus.state_report_offen = false;
@@ -350,16 +423,24 @@ void initialisiereSensorik() {
     }
 
     netSenDeviceSensorInit();
+    netSenDeviceExtendedStateInit();
 }
 
 void pollSensorik() {
     SensorState neuerState = nodeStatus.sensor;
-    const bool geaendert = netSenDeviceSensorPoll(
+    bool geaendert = netSenDeviceSensorPoll(
         &neuerState.temp_01c,
         &neuerState.hum_01pct,
         &neuerState.lux,
         &neuerState.motion,
         &neuerState.fault);
+    const bool extendedGeaendert = netSenDeviceExtendedStatePoll(
+        &neuerState.pressure_pa,
+        &neuerState.gas_ohm,
+        &neuerState.aqi,
+        &neuerState.tvoc_ppb,
+        &neuerState.eco2_ppm);
+    geaendert = geaendert || extendedGeaendert;
 
     nodeStatus.sensor = neuerState;
     if (geaendert) {
@@ -376,7 +457,7 @@ void setup() {
     nodeStatus = {};
     nodeStatus.state_interval_ms = STATE_INTERVAL_MS;
     nodeStatus.state_report_offen = true;
-    nodeStatus.sensor.fault = true;
+    setzeSensorDefaults(&nodeStatus.sensor);
 
     if (PIN_STATUS_LED >= 0) {
         pinMode(PIN_STATUS_LED, OUTPUT);

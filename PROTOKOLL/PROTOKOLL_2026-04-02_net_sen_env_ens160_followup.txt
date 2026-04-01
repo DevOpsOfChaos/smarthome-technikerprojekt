@@ -1,0 +1,74 @@
+Grosses Ziel
+- Den bestehenden net_sen-Umweltpfad im oeffentlichen Repo kontrolliert um ENS160 erweitern, ohne neuen Device-Zweig und ohne Architektur-Ausweitung.
+
+Ausgangslage
+- Der vorbereitende net_sen-Vertragsstand war im Repo bereits vorhanden (Master verarbeitet einfache und erweiterte net_sen-STATE-Varianten).
+- Der bestehende Device-Pfad `net_sen_env_bme680_veml` lieferte bereits BME680 (temp/hum, intern pressure/gas) und VEML7700 (lux), aber noch keinen ENS160-Folgepfad.
+- Alt-Repo-Nachweis zeigt fuer ENS160 den real validierten technischen Kopplungspfad ueber externe Temperatur-/Feuchtekompensation via BME680, aber keinen quantitativen Luftqualitaets-Wirkungsnachweis.
+
+Ziel dieses Schritts
+- Bestehenden Device-Pfad `net_sen_env_bme680_veml` um ENS160 erweitern.
+- BME680-Temperatur/Feuchte als ENS160-Kompensationsquelle nutzen.
+- Bestehende Werte (`temp_01c`, `hum_01pct`, `lux`) stabil halten.
+- Erweiterte Aussenwerte (`pressure_pa`, `gas_ohm`, `aqi`, `tvoc_ppb`, `eco2_ppm`) vertraglich sauber senden.
+- Fault-Logik fuer den kombinierten Pfad klar und nachvollziehbar halten.
+
+Umsetzung
+- Datei geaendert: `firmware/src/basetypes/net_sen/main.cpp`
+  - Basistyp kann jetzt optional erweiterte Device-State-Hooks nutzen.
+  - Wenn `SH_CAP_PRESSURE` oder `SH_CAP_AQI` aktiv sind, sendet net_sen einen erweiterten `STATE`-Payload (`ExtendedSensorGasConfigStateReportPayload`).
+  - Unbekannt-Sentinels fuer `pressure_pa`, `gas_ohm`, `aqi`, `tvoc_ppb`, `eco2_ppm` sind sauber initialisiert.
+
+- Datei geaendert: `firmware/src/devices/net_sen_env_bme680_veml/DeviceConfig.h`
+  - Device-Caps auf `TEMP | HUM | LUX | PRESSURE | AQI` erweitert.
+  - ENS160- und Delta-/Timeout-Konstanten fuer den Folgepfad hinzugefuegt.
+  - Device-Name auf den kombinierten Pfad aktualisiert.
+
+- Datei geaendert: `firmware/src/devices/net_sen_env_bme680_veml/main.cpp`
+  - ENS160 integriert (Adresssuche 0x52, Fallback 0x53, Standardmodus).
+  - Externe Kompensation direkt ueber ENS160-ENV-Register mit BME680-Temp/Hum umgesetzt.
+  - Diagnosemarker fuer den Kopplungspfad aktiv geloggt:
+    - `kompensation=aktiv|aus`
+    - `bme_valid=true|false`
+    - `ens_comp_call=ja|nein`
+    - `ens_comp_result=<code>`
+  - Erweiterte Werte gepflegt:
+    - `pressure_pa` aus BME680
+    - `gas_ohm` aus BME680 erst nach Warm-up
+    - `aqi`, `tvoc_ppb`, `eco2_ppm` aus ENS160
+  - Delta-basierte Aenderungserkennung fuer erweiterte Werte hinzugefuegt.
+
+- Datei geaendert: `firmware/src/devices/net_sen_env_bme680_veml/README.md`
+  - Scope und Grenzen auf BME680+VEML7700+ENS160 aktualisiert.
+
+- Datei geaendert: `firmware/platformio.ini`
+  - Environment `net_sen_env_bme680_veml` um ENS160-Bibliothek erweitert.
+
+Begruendung der gewaehlten Loesung
+- Kein neuer Device-Pfad: der bestehende Umweltpfad wurde wie gefordert erweitert.
+- Keine Scope-Ausweitung: keine neuen Sensorfamilien, kein Serverumbau, kein Struktur-Refactor.
+- Der ENS160-Folgepfad nutzt den im Alt-Repo belegten technischen Kern (BME680-basierte Kompensation), ohne qualitative oder quantitative Luftqualitaetsversprechen zu erfinden.
+
+Pruefung / Validierung
+- Erfolgreiche Builds:
+  - `pio run -e master`
+  - `pio run -e net_sen_env_bme680_veml`
+  - `pio run -e net_sen_dht22_reference`
+
+Ergebnis / Nutzen
+- Der offizielle net_sen-Umweltpfad kann jetzt neben den bisherigen Werten zusaetzlich ENS160-gestuetzte Luftdaten liefern.
+- Die Master-Vertragsvorbereitung wird praktisch genutzt: erweiterte net_sen-STATEs sind jetzt im echten Device-Pfad aktiv.
+- Der Pfad bleibt ehrlich: Kopplung technisch implementiert, aber ohne ueberzogene Luftqualitaetsbehauptungen.
+
+Fault-Regel dieses Schritts
+- Pflichtpfade bleiben `BME680` und `VEML7700`: wenn einer davon in einem Poll-Zyklus ungueltig ist, wird `fault=true`.
+- ENS160-Fehler werden nicht verschwiegen: nach ENS160-Warm-up wird `fault=true`, wenn ENS160 zu lange keine gueltigen Daten liefert (`stale timeout`).
+- Kurzzeitige ENS160-Luecken vor Ablauf des Stale-Timeouts setzen nicht sofort den Gesamtpfad hart auf Fehler.
+
+Grenzen / offene Punkte
+- Es gibt weiterhin keinen quantitativen Nutzennachweis, dass Kompensation die ENS160-Ausgaenge fachlich verbessert; der Schritt belegt die technische Kopplung im Produktivpfad.
+- `gas_ohm` bleibt Rohgas und wird nicht zu IAQ/CO2 umgedeutet.
+- Ein echter Hardwarelauf fuer diesen neuen Kombipfad ist als separater Realtest noch erforderlich.
+
+Naechster sinnvoller Schritt
+- Reale Hardwarevalidierung des kombinierten Pfads auf Zielboard: Logmarker fuer Kompensation pruefen, Warm-up-Verhalten beobachten, und die Aussenwerte im Master/MQTT-Ende-zu-Ende gegenchecken.
