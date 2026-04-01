@@ -1,7 +1,10 @@
 #pragma once
 
-// Verbindlicher Hardware-Pinstandard fuer die aktuellen Basistyp-Platinen.
-// Abweichungen muessen in der jeweiligen Geraetedoku sauber dokumentiert werden.
+// ============================================================
+// Verbindlicher Hardware-Pinstandard fuer die aktuellen Boards
+// ============================================================
+// Diese Konstanten bilden die feste Platinenvorgabe ab.
+// Abweichungen muessen explizit dokumentiert werden.
 
 namespace SmartHome {
 namespace HardwarePinStandard {
