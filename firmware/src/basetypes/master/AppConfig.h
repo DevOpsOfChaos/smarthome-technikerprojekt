@@ -51,24 +51,12 @@
 #define MASTER_COMMAND_ACK_TIMEOUT_MS 800UL
 #endif
 
-#ifndef MASTER_COMMAND_MAX_RETRIES
-#define MASTER_COMMAND_MAX_RETRIES 3U
-#endif
-
-#ifndef MASTER_COMMAND_ACK_CACHE_MS
-#define MASTER_COMMAND_ACK_CACHE_MS 30000UL
-#endif
-
 #ifndef MASTER_NODE_OFFLINE_TIMEOUT_MS
 #define MASTER_NODE_OFFLINE_TIMEOUT_MS 15000UL
 #endif
 
 #ifndef MASTER_MQTT_BUFFER_BYTES
 #define MASTER_MQTT_BUFFER_BYTES 768U
-#endif
-
-#ifndef MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS
-#define MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS 900000UL
 #endif
 
 #ifndef MASTER_LOOP_INTERVAL_MS
@@ -110,20 +98,11 @@ constexpr int WLAN_KANAL = MASTER_WLAN_CHANNEL;
 constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS = MASTER_WIFI_RECONNECT_INTERVAL_MS;
 constexpr unsigned long MQTT_RECONNECT_INTERVAL_MS = MASTER_MQTT_RECONNECT_INTERVAL_MS;
 
-// ACK-/Retry-Handling bleibt aktuell auf einen kleinen, kontrollierten
-// Master-Slot begrenzt. Der Pfad ist damit noch keine generische
-// Mehrgeraete-Orchestrierung, bildet aber den neutralen oberen
-// Befehlskanal bereits ehrlicher ab.
+// Minimaler ACK-Timeout fuer den kleinen Pending-Slot.
 constexpr unsigned long COMMAND_ACK_TIMEOUT_MS = MASTER_COMMAND_ACK_TIMEOUT_MS;
-constexpr uint8_t COMMAND_MAX_RETRIES = MASTER_COMMAND_MAX_RETRIES;
-constexpr unsigned long COMMAND_ACK_CACHE_MS = MASTER_COMMAND_ACK_CACHE_MS;
 
-// Node gilt nach ausbleibenden Meldungen nicht fuer alle Basen gleich
-// sofort als komplett offline. Besonders bei Batterieknoten wird oberhalb
-// des Masters zusaetzlich zwischen erwartet schlafend, verspaetet und
-// wirklich offline unterschieden.
+// Einfaches Availability-Timeout fuer bekannte Nodes.
 constexpr unsigned long NODE_OFFLINE_TIMEOUT_MS = MASTER_NODE_OFFLINE_TIMEOUT_MS;
-constexpr unsigned long BATTERY_NODE_OFFLINE_TIMEOUT_MS = MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS;
 constexpr unsigned int MQTT_BUFFER_BYTES = MASTER_MQTT_BUFFER_BYTES;
 
 // Takt der Hauptschleife.

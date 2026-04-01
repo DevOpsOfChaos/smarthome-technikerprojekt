@@ -76,17 +76,9 @@ constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "MASTER";
 constexpr char DATEI_VERSION[] = "0.3.0";
 constexpr char MQTT_TOPIC_COMMAND_SUB[] = "smarthome/device/+/command";
-constexpr uint8_t WINDOW_STATE_UNKNOWN = 0xFFU;
-constexpr uint32_t PRESSURE_UNKNOWN = 0xFFFFFFFFUL;
-constexpr uint32_t GAS_OHM_UNKNOWN = 0xFFFFFFFFUL;
-constexpr uint16_t SENSOR_EXTRA_UNKNOWN = 0xFFFFU;
 constexpr size_t REQUEST_ID_LEN = 96U;
 constexpr long CFG_REPORT_INTERVAL_MIN = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MIN_S;
 constexpr long CFG_REPORT_INTERVAL_MAX = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MAX_S;
-constexpr long CFG_AUTO_OFF_DELAY_MIN = (long)SmartHome::ShStorage::SH_STORED_AUTO_OFF_DELAY_MIN_S;
-constexpr long CFG_AUTO_OFF_DELAY_MAX = (long)SmartHome::ShStorage::SH_STORED_AUTO_OFF_DELAY_MAX_S;
-constexpr long CFG_LIGHT_THRESHOLD_MIN = (long)SmartHome::ShStorage::SH_STORED_LIGHT_THRESHOLD_ON_MIN;
-constexpr long CFG_LIGHT_THRESHOLD_MAX = (long)SmartHome::ShStorage::SH_STORED_LIGHT_THRESHOLD_ON_MAX;
 
 struct NodeDefinition {
     const char* node_id;
@@ -101,7 +93,6 @@ struct NodeRuntime {
     bool state_bekannt;
     bool mac_bekannt;
     bool fault;
-    bool relay_comfort_state_bekannt;
     bool relay_1;
     bool relay_2;
     bool cover_mode;
@@ -110,18 +101,7 @@ struct NodeRuntime {
     int16_t temp_01c;
     uint16_t hum_01pct;
     uint16_t lux;
-    uint32_t pressure_pa;
-    uint32_t gas_ohm;
-    uint16_t aqi;
-    uint16_t tvoc_ppb;
-    uint16_t eco2_ppm;
     bool motion;
-    uint8_t battery_pct;
-    uint16_t battery_mv;
-    uint8_t window_open;
-    uint16_t rain_raw;
-    uint8_t button_flags;
-    uint8_t relay_auto_flags;
     uint32_t uptime_s;
     uint16_t caps;
     uint16_t fw_version;
@@ -151,7 +131,6 @@ struct PendingRelayCommand {
     uint8_t seq;
     uint8_t relay_index;
     bool relay_state;
-    uint8_t versuche;
     unsigned long letztes_senden_ms;
     char request_id[REQUEST_ID_LEN];
     char command_channel[24];
@@ -163,7 +142,6 @@ struct PendingConfigCommand {
     uint8_t seq;
     uint8_t param_id;
     uint16_t value;
-    uint8_t versuche;
     unsigned long letztes_senden_ms;
     char request_id[REQUEST_ID_LEN];
     char command_channel[24];
@@ -171,12 +149,8 @@ struct PendingConfigCommand {
 
 constexpr NodeDefinition NODE_DEFINITIONS[] = {
     {"net_erl_01",      SH_CLASS_NET_ERL, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
-    {"net_erl_flr_01",  SH_CLASS_NET_ERL, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
-    {"net_erl_kit_01",  SH_CLASS_NET_ERL, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
     {"net_zrl_01",      SH_CLASS_NET_ZRL, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
     {"net_sen_01",      SH_CLASS_NET_SEN, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
-    {"net_sen_env_01",  SH_CLASS_NET_SEN, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
-    {"bat_sen_01",      SH_CLASS_BAT_SEN, SH_POWER_BATTERY, BATTERY_NODE_OFFLINE_TIMEOUT_MS},
 };
 
 constexpr size_t NODE_COUNT = sizeof(NODE_DEFINITIONS) / sizeof(NODE_DEFINITIONS[0]);
@@ -280,17 +254,9 @@ bool nodeHasCap(size_t nodeIndex, uint16_t cap) {
     return (nodeStates[nodeIndex].caps & cap) != 0U;
 }
 
-bool nodeHasAnyCap(size_t nodeIndex, uint16_t capMask) {
-    return (nodeStates[nodeIndex].caps & capMask) != 0U;
-}
-
 bool istRelayNode(size_t nodeIndex) {
     return NODE_DEFINITIONS[nodeIndex].device_class == SH_CLASS_NET_ERL ||
            NODE_DEFINITIONS[nodeIndex].device_class == SH_CLASS_NET_ZRL;
-}
-
-bool istNetNode(size_t nodeIndex) {
-    return NODE_DEFINITIONS[nodeIndex].power_type == SH_POWER_MAINS;
 }
 
 int findeNodeIndex(const char* nodeId) {
@@ -325,21 +291,10 @@ void initialisiereNodeStates() {
         nodeStates[i].temp_01c = INT16_MIN;
         nodeStates[i].hum_01pct = 0xFFFFU;
         nodeStates[i].lux = 0xFFFFU;
-        nodeStates[i].pressure_pa = PRESSURE_UNKNOWN;
-        nodeStates[i].gas_ohm = GAS_OHM_UNKNOWN;
-        nodeStates[i].aqi = SENSOR_EXTRA_UNKNOWN;
-        nodeStates[i].tvoc_ppb = SENSOR_EXTRA_UNKNOWN;
-        nodeStates[i].eco2_ppm = SENSOR_EXTRA_UNKNOWN;
-        nodeStates[i].battery_pct = 0xFFU;
-        nodeStates[i].battery_mv = 0U;
-        nodeStates[i].window_open = WINDOW_STATE_UNKNOWN;
-        nodeStates[i].rain_raw = 0xFFFFU;
         nodeStates[i].meta_schema_version = SH_META_SCHEMA_VERSION_CURRENT;
         nodeStates[i].control_mode = SH_CONTROL_MODE_NONE;
         nodeStates[i].config_profile = SH_PROFILE_NONE;
-        nodeStates[i].reporting_mode = NODE_DEFINITIONS[i].power_type == SH_POWER_BATTERY
-            ? SH_REPORTING_SLEEP_EVENT
-            : SH_REPORTING_HYBRID;
+        nodeStates[i].reporting_mode = SH_REPORTING_HYBRID;
         copyText(nodeStates[i].sensor_mask, sizeof(nodeStates[i].sensor_mask), "XXXXXXXXXX");
         copyText(nodeStates[i].input_mask, sizeof(nodeStates[i].input_mask), "XXXXX");
         copyText(nodeStates[i].device_name, sizeof(nodeStates[i].device_name), deviceClassText(NODE_DEFINITIONS[i].device_class));
@@ -350,19 +305,7 @@ void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
     if (!nodeHasCap(nodeIndex, SH_CAP_TEMP)) nodeStates[nodeIndex].temp_01c = INT16_MIN;
     if (!nodeHasCap(nodeIndex, SH_CAP_HUM)) nodeStates[nodeIndex].hum_01pct = 0xFFFFU;
     if (!nodeHasCap(nodeIndex, SH_CAP_LUX)) nodeStates[nodeIndex].lux = 0xFFFFU;
-    if (!nodeHasCap(nodeIndex, SH_CAP_PRESSURE)) {
-        nodeStates[nodeIndex].pressure_pa = PRESSURE_UNKNOWN;
-        nodeStates[nodeIndex].gas_ohm = GAS_OHM_UNKNOWN;
-    }
-    if (!nodeHasCap(nodeIndex, SH_CAP_AQI)) {
-        nodeStates[nodeIndex].aqi = SENSOR_EXTRA_UNKNOWN;
-        nodeStates[nodeIndex].tvoc_ppb = SENSOR_EXTRA_UNKNOWN;
-        nodeStates[nodeIndex].eco2_ppm = SENSOR_EXTRA_UNKNOWN;
-    }
     if (!nodeHasCap(nodeIndex, SH_CAP_MOTION)) nodeStates[nodeIndex].motion = false;
-    if (!nodeHasCap(nodeIndex, SH_CAP_WINDOW)) nodeStates[nodeIndex].window_open = WINDOW_STATE_UNKNOWN;
-    if (!nodeHasCap(nodeIndex, SH_CAP_RAIN)) nodeStates[nodeIndex].rain_raw = 0xFFFFU;
-    if (!nodeHasAnyCap(nodeIndex, SH_CAP_BUTTON | SH_CAP_MULTIBUTTON)) nodeStates[nodeIndex].button_flags = 0U;
     if (!nodeHasCap(nodeIndex, SH_CAP_COVER)) {
         nodeStates[nodeIndex].cover_mode = false;
         nodeStates[nodeIndex].cover_state = SH_COVER_STATE_STOPPED;
@@ -381,14 +324,7 @@ const char* availabilityStateText(size_t nodeIndex) {
     }
 
     const unsigned long delta = millis() - letzterKontakt;
-    if (istNetNode(nodeIndex)) {
-        return delta <= NODE_DEFINITIONS[nodeIndex].offline_timeout_ms ? "late" : "offline";
-    }
-
-    const unsigned long timeout = NODE_DEFINITIONS[nodeIndex].offline_timeout_ms;
-    if (delta <= timeout) return "asleep";
-    if (delta <= (timeout * 2UL)) return "late";
-    return "offline";
+    return delta <= NODE_DEFINITIONS[nodeIndex].offline_timeout_ms ? "late" : "offline";
 }
 
 bool stellePeerSicher(const uint8_t* mac) {
@@ -562,15 +498,6 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
     char tempText[16] = {0};
     char humText[16] = {0};
     char luxText[16] = {0};
-    char pressureText[16] = {0};
-    char gasText[16] = {0};
-    char aqiText[16] = {0};
-    char tvocText[16] = {0};
-    char eco2Text[16] = {0};
-    char batteryPctText[16] = {0};
-    char batteryMvText[16] = {0};
-    char windowText[16] = {0};
-    char rainText[16] = {0};
     char coverPositionText[16] = {0};
 
     switch (NODE_DEFINITIONS[nodeIndex].device_class) {
@@ -578,25 +505,15 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             schreibeIntOrNull(tempText, sizeof(tempText), nodeStates[nodeIndex].temp_01c, INT16_MIN);
             schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, 0xFFFFU);
             schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, 0xFFFFU);
-            schreibeUIntOrNull(pressureText, sizeof(pressureText), nodeStates[nodeIndex].pressure_pa, PRESSURE_UNKNOWN);
-            schreibeUIntOrNull(gasText, sizeof(gasText), nodeStates[nodeIndex].gas_ohm, GAS_OHM_UNKNOWN);
-            schreibeUIntOrNull(aqiText, sizeof(aqiText), nodeStates[nodeIndex].aqi, SENSOR_EXTRA_UNKNOWN);
-            schreibeUIntOrNull(tvocText, sizeof(tvocText), nodeStates[nodeIndex].tvoc_ppb, SENSOR_EXTRA_UNKNOWN);
-            schreibeUIntOrNull(eco2Text, sizeof(eco2Text), nodeStates[nodeIndex].eco2_ppm, SENSOR_EXTRA_UNKNOWN);
             snprintf(
                 buffer,
                 bufferSize,
-                "{\"device_id\":\"%s\",\"relay_1\":%s,\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
+                "{\"device_id\":\"%s\",\"relay_1\":%s,\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"motion\":%s,\"fault\":%s}",
                 NODE_DEFINITIONS[nodeIndex].node_id,
                 nodeStates[nodeIndex].relay_1 ? "true" : "false",
                 tempText,
                 humText,
                 luxText,
-                pressureText,
-                gasText,
-                aqiText,
-                tvocText,
-                eco2Text,
                 nodeStates[nodeIndex].motion ? "true" : "false",
                 nodeStates[nodeIndex].fault ? "true" : "false");
             return;
@@ -620,43 +537,15 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             schreibeIntOrNull(tempText, sizeof(tempText), nodeStates[nodeIndex].temp_01c, INT16_MIN);
             schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, 0xFFFFU);
             schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, 0xFFFFU);
-            schreibeUIntOrNull(pressureText, sizeof(pressureText), nodeStates[nodeIndex].pressure_pa, PRESSURE_UNKNOWN);
-            schreibeUIntOrNull(gasText, sizeof(gasText), nodeStates[nodeIndex].gas_ohm, GAS_OHM_UNKNOWN);
-            schreibeUIntOrNull(aqiText, sizeof(aqiText), nodeStates[nodeIndex].aqi, SENSOR_EXTRA_UNKNOWN);
-            schreibeUIntOrNull(tvocText, sizeof(tvocText), nodeStates[nodeIndex].tvoc_ppb, SENSOR_EXTRA_UNKNOWN);
-            schreibeUIntOrNull(eco2Text, sizeof(eco2Text), nodeStates[nodeIndex].eco2_ppm, SENSOR_EXTRA_UNKNOWN);
             snprintf(
                 buffer,
                 bufferSize,
-                "{\"device_id\":\"%s\",\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
+                "{\"device_id\":\"%s\",\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"motion\":%s,\"fault\":%s}",
                 NODE_DEFINITIONS[nodeIndex].node_id,
                 tempText,
                 humText,
                 luxText,
-                pressureText,
-                gasText,
-                aqiText,
-                tvocText,
-                eco2Text,
                 nodeStates[nodeIndex].motion ? "true" : "false",
-                nodeStates[nodeIndex].fault ? "true" : "false");
-            return;
-
-        case SH_CLASS_BAT_SEN:
-            schreibeUIntOrNull(batteryPctText, sizeof(batteryPctText), nodeStates[nodeIndex].battery_pct, 0xFFU);
-            schreibeUIntOrNull(batteryMvText, sizeof(batteryMvText), nodeStates[nodeIndex].battery_mv, 0U);
-            schreibeUIntOrNull(windowText, sizeof(windowText), nodeStates[nodeIndex].window_open, WINDOW_STATE_UNKNOWN);
-            schreibeUIntOrNull(rainText, sizeof(rainText), nodeStates[nodeIndex].rain_raw, 0xFFFFU);
-            snprintf(
-                buffer,
-                bufferSize,
-                "{\"device_id\":\"%s\",\"battery_pct\":%s,\"battery_mv\":%s,\"window_open\":%s,\"rain_raw\":%s,\"button_flags\":%u,\"fault\":%s}",
-                NODE_DEFINITIONS[nodeIndex].node_id,
-                batteryPctText,
-                batteryMvText,
-                windowText,
-                rainText,
-                (unsigned)nodeStates[nodeIndex].button_flags,
                 nodeStates[nodeIndex].fault ? "true" : "false");
             return;
 
@@ -672,12 +561,7 @@ const char* eventTypeText(uint8_t eventType) {
         case SH_EVENT_BUTTON_RELEASE: return "button_release";
         case SH_EVENT_BUTTON_LONG_PRESS: return "button_long_press";
         case SH_EVENT_MOTION_DETECTED: return "motion_detected";
-        case SH_EVENT_WINDOW_OPENED: return "window_opened";
-        case SH_EVENT_WINDOW_CLOSED: return "window_closed";
-        case SH_EVENT_RAIN_DETECTED: return "rain_detected";
         case SH_EVENT_RELAY_CHANGED: return "relay_changed";
-        case SH_EVENT_LIGHT_AUTO_ON: return "light_auto_on";
-        case SH_EVENT_LIGHT_AUTO_OFF: return "light_auto_off";
         case SH_EVENT_COVER_UP: return "cover_up";
         case SH_EVENT_COVER_DOWN: return "cover_down";
         case SH_EVENT_COVER_STOP: return "cover_stop";
@@ -876,213 +760,45 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
     aktualisiereNodeKontakt((size_t)nodeIndex, senderMac);
 
     switch (NODE_DEFINITIONS[nodeIndex].device_class) {
-        case SH_CLASS_NET_ERL:
-            if (payloadLen == sizeof(SmartHome::StateReportPayload)) {
-                const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = false;
-            } else if (payloadLen == sizeof(SmartHome::StateConfigReportPayload)) {
-                const SmartHome::StateConfigReportPayload& state = *reinterpret_cast<const SmartHome::StateConfigReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = false;
-            } else if (payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload)) {
-                const SmartHome::RelayComfortStateReportPayload& state = *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].relay_auto_flags = state.auto_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = true;
-            } else if (payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)) {
-                const SmartHome::RelayComfortConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::RelayComfortConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].relay_auto_flags = state.auto_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = true;
-            } else if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortStateReportPayload)) {
-                const SmartHome::ExtendedRelayComfortStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedRelayComfortStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].relay_auto_flags = state.auto_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = true;
-            } else if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload)) {
-                const SmartHome::ExtendedRelayComfortConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedRelayComfortConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].relay_auto_flags = state.auto_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = true;
-            } else if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasStateReportPayload)) {
-                const SmartHome::ExtendedRelayComfortGasStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].relay_auto_flags = state.auto_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = true;
-            } else if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasConfigStateReportPayload)) {
-                const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].relay_auto_flags = state.auto_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                nodeStates[nodeIndex].relay_comfort_state_bekannt = true;
-            } else {
+        case SH_CLASS_NET_ERL: {
+            if (payloadLen != sizeof(SmartHome::StateReportPayload)) {
                 logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
                 return;
             }
+            const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
+            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+            nodeStates[nodeIndex].fault = (state.fault != 0U);
             break;
+        }
 
-        case SH_CLASS_NET_ZRL:
-            if (payloadLen == sizeof(SmartHome::ZrlStateReportPayload)) {
-                const SmartHome::ZrlStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
-                nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
-                nodeStates[nodeIndex].cover_state = state.cover_state;
-                nodeStates[nodeIndex].cover_position = state.cover_position;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else if (payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
-                const SmartHome::ZrlConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
-                nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
-                nodeStates[nodeIndex].cover_state = state.cover_state;
-                nodeStates[nodeIndex].cover_position = state.cover_position;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else {
+        case SH_CLASS_NET_ZRL: {
+            if (payloadLen != sizeof(SmartHome::ZrlStateReportPayload)) {
                 logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
                 return;
             }
+            const SmartHome::ZrlStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload);
+            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+            nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
+            nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
+            nodeStates[nodeIndex].cover_state = state.cover_state;
+            nodeStates[nodeIndex].cover_position = state.cover_position;
+            nodeStates[nodeIndex].fault = (state.fault != 0U);
             break;
+        }
 
-        case SH_CLASS_NET_SEN:
-            if (payloadLen == sizeof(SmartHome::SensorStateReportPayload)) {
-                const SmartHome::SensorStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else if (payloadLen == sizeof(SmartHome::SensorConfigStateReportPayload)) {
-                const SmartHome::SensorConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else if (payloadLen == sizeof(SmartHome::ExtendedSensorStateReportPayload)) {
-                const SmartHome::ExtendedSensorStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else if (payloadLen == sizeof(SmartHome::ExtendedSensorConfigStateReportPayload)) {
-                const SmartHome::ExtendedSensorConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else if (payloadLen == sizeof(SmartHome::ExtendedSensorGasStateReportPayload)) {
-                const SmartHome::ExtendedSensorGasStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorGasStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else if (payloadLen == sizeof(SmartHome::ExtendedSensorGasConfigStateReportPayload)) {
-                const SmartHome::ExtendedSensorGasConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorGasConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else {
+        case SH_CLASS_NET_SEN: {
+            if (payloadLen != sizeof(SmartHome::SensorStateReportPayload)) {
                 logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
                 return;
             }
+            const SmartHome::SensorStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorStateReportPayload*>(payload);
+            nodeStates[nodeIndex].temp_01c = state.temp_01c;
+            nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+            nodeStates[nodeIndex].lux = state.lux;
+            nodeStates[nodeIndex].motion = (state.motion != 0U);
+            nodeStates[nodeIndex].fault = (state.fault != 0U);
             break;
-
-        case SH_CLASS_BAT_SEN:
-            if (payloadLen == sizeof(SmartHome::BatteryStateReportPayload)) {
-                const SmartHome::BatteryStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryStateReportPayload*>(payload);
-                nodeStates[nodeIndex].battery_pct = state.battery_pct;
-                nodeStates[nodeIndex].battery_mv = state.battery_mv;
-                nodeStates[nodeIndex].window_open = state.window_open;
-                nodeStates[nodeIndex].rain_raw = state.rain_raw;
-                nodeStates[nodeIndex].button_flags = state.button_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else if (payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
-                const SmartHome::BatteryConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].battery_pct = state.battery_pct;
-                nodeStates[nodeIndex].battery_mv = state.battery_mv;
-                nodeStates[nodeIndex].window_open = state.window_open;
-                nodeStates[nodeIndex].rain_raw = state.rain_raw;
-                nodeStates[nodeIndex].button_flags = state.button_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-            } else {
-                logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-                return;
-            }
-            break;
+        }
 
         default:
             logf("WARN", "STATE_REPORT ohne Handler fuer %s", nodeId);
@@ -1248,7 +964,6 @@ bool sendeRelayCommand(size_t nodeIndex, uint8_t relayIndex, bool relayState, co
     pendingRelayCommand.seq = seq;
     pendingRelayCommand.relay_index = relayIndex;
     pendingRelayCommand.relay_state = relayState;
-    pendingRelayCommand.versuche = 1U;
     pendingRelayCommand.letztes_senden_ms = millis();
     copyText(pendingRelayCommand.request_id, sizeof(pendingRelayCommand.request_id), requestId);
     copyText(pendingRelayCommand.command_channel, sizeof(pendingRelayCommand.command_channel), channel ? channel : "command");
@@ -1287,7 +1002,6 @@ bool sendeConfigCommand(size_t nodeIndex, uint8_t paramId, uint16_t value, const
     pendingConfigCommand.seq = seq;
     pendingConfigCommand.param_id = paramId;
     pendingConfigCommand.value = value;
-    pendingConfigCommand.versuche = 1U;
     pendingConfigCommand.letztes_senden_ms = millis();
     copyText(pendingConfigCommand.request_id, sizeof(pendingConfigCommand.request_id), requestId);
     copyText(pendingConfigCommand.command_channel, sizeof(pendingConfigCommand.command_channel), channel ? channel : "command");
@@ -1420,13 +1134,18 @@ bool parseSetConfigMinimal(size_t nodeIndex, const char* json, uint8_t* paramId,
     }
 
     const char* deviceType = deviceClassText(NODE_DEFINITIONS[nodeIndex].device_class);
-    const bool isNetErl = NODE_DEFINITIONS[nodeIndex].device_class == SH_CLASS_NET_ERL;
+    bool legacyBool = false;
+    long legacyNumber = 0L;
+    if (jsonHoleBool(valuesJson, "automation_enabled", &legacyBool) ||
+        jsonHoleZahl(valuesJson, "auto_on_lux_threshold", &legacyNumber) ||
+        jsonHoleZahl(valuesJson, "auto_off_delay_s", &legacyNumber)) {
+        copyText(errorText, errorSize, "Alte set_config-Felder sind im Master deaktiviert");
+        return false;
+    }
+
     long numberValue = 0L;
-    bool boolValue = false;
-    uint8_t foundCount = 0U;
 
     if (jsonHoleZahl(valuesJson, "report_interval_s", &numberValue)) {
-        foundCount++;
         if (numberValue < CFG_REPORT_INTERVAL_MIN || numberValue > CFG_REPORT_INTERVAL_MAX) {
             snprintf(
                 errorText,
@@ -1438,56 +1157,11 @@ bool parseSetConfigMinimal(size_t nodeIndex, const char* json, uint8_t* paramId,
         }
         *paramId = SH_CFG_REPORT_INTERVAL_S;
         *value = (uint16_t)numberValue;
+        return true;
     }
 
-    if (isNetErl && jsonHoleBool(valuesJson, "automation_enabled", &boolValue)) {
-        foundCount++;
-        *paramId = SH_CFG_AUTOMATION_ENABLED;
-        *value = boolValue ? 1U : 0U;
-    }
-
-    const bool hasLightThreshold = isNetErl && jsonHoleZahl(valuesJson, "auto_on_lux_threshold", &numberValue);
-
-    if (isNetErl && hasLightThreshold) {
-        foundCount++;
-        if (numberValue < CFG_LIGHT_THRESHOLD_MIN || numberValue > CFG_LIGHT_THRESHOLD_MAX) {
-            snprintf(
-                errorText,
-                errorSize,
-                "auto_on_lux_threshold ausserhalb %ld..%ld",
-                CFG_LIGHT_THRESHOLD_MIN,
-                CFG_LIGHT_THRESHOLD_MAX);
-            return false;
-        }
-        *paramId = SH_CFG_LIGHT_THRESHOLD_ON;
-        *value = (uint16_t)numberValue;
-    }
-
-    if (isNetErl && jsonHoleZahl(valuesJson, "auto_off_delay_s", &numberValue)) {
-        foundCount++;
-        if (numberValue < CFG_AUTO_OFF_DELAY_MIN || numberValue > CFG_AUTO_OFF_DELAY_MAX) {
-            snprintf(
-                errorText,
-                errorSize,
-                "auto_off_delay_s ausserhalb %ld..%ld",
-                CFG_AUTO_OFF_DELAY_MIN,
-                CFG_AUTO_OFF_DELAY_MAX);
-            return false;
-        }
-        *paramId = SH_CFG_AUTO_OFF_DELAY_S;
-        *value = (uint16_t)numberValue;
-    }
-
-    if (foundCount == 0U) {
-        snprintf(errorText, errorSize, "Kein unterstuetztes CFG-Feld fuer %s gefunden", deviceType);
-        return false;
-    }
-    if (foundCount > 1U) {
-        copyText(errorText, errorSize, "Master-MVP erlaubt pro set_config nur genau ein Feld");
-        return false;
-    }
-
-    return true;
+    snprintf(errorText, errorSize, "Kein unterstuetztes CFG-Feld fuer %s gefunden", deviceType);
+    return false;
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -1717,27 +1391,6 @@ void pruefePendingRelayTimeout() {
     if (!pendingRelayCommand.aktiv) return;
     if ((millis() - pendingRelayCommand.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) return;
 
-    if (pendingRelayCommand.versuche <= COMMAND_MAX_RETRIES) {
-        SmartHome::CmdPayload payload = {};
-        payload.cmd_type = SH_CMD_SET_RELAY;
-        payload.param1 = pendingRelayCommand.relay_index;
-        payload.param2 = pendingRelayCommand.relay_state ? 1U : 0U;
-        if (sendePaketMitOptionen(
-                nodeStates[pendingRelayCommand.node_index].mac,
-                SH_MSG_CMD,
-                &payload,
-                sizeof(payload),
-                "COMMAND_SET_RELAY retry",
-                (uint8_t)(SH_FLAG_ACK_REQUEST | SH_FLAG_RETRANSMIT),
-                true,
-                pendingRelayCommand.seq,
-                nullptr)) {
-            pendingRelayCommand.versuche++;
-            pendingRelayCommand.letztes_senden_ms = millis();
-            return;
-        }
-    }
-
     publishNodeAck(
         pendingRelayCommand.node_index,
         pendingRelayCommand.request_id,
@@ -1746,7 +1399,7 @@ void pruefePendingRelayTimeout() {
         (int)SH_ERROR_ACK_TIMEOUT,
         SH_MSG_CMD,
         pendingRelayCommand.seq,
-        "master_retry_timeout");
+        "master_timeout");
 
     pendingRelayCommand = {};
 }
@@ -1754,26 +1407,6 @@ void pruefePendingRelayTimeout() {
 void pruefePendingConfigTimeout() {
     if (!pendingConfigCommand.aktiv) return;
     if ((millis() - pendingConfigCommand.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) return;
-
-    if (pendingConfigCommand.versuche <= COMMAND_MAX_RETRIES) {
-        SmartHome::CfgPayload payload = {};
-        payload.param_id = pendingConfigCommand.param_id;
-        payload.value = pendingConfigCommand.value;
-        if (sendePaketMitOptionen(
-                nodeStates[pendingConfigCommand.node_index].mac,
-                SH_MSG_CFG,
-                &payload,
-                sizeof(payload),
-                "CONFIG_SET retry",
-                (uint8_t)(SH_FLAG_ACK_REQUEST | SH_FLAG_RETRANSMIT),
-                true,
-                pendingConfigCommand.seq,
-                nullptr)) {
-            pendingConfigCommand.versuche++;
-            pendingConfigCommand.letztes_senden_ms = millis();
-            return;
-        }
-    }
 
     publishNodeAck(
         pendingConfigCommand.node_index,
@@ -1783,7 +1416,7 @@ void pruefePendingConfigTimeout() {
         (int)SH_ERROR_ACK_TIMEOUT,
         SH_MSG_CFG,
         pendingConfigCommand.seq,
-        "master_retry_timeout");
+        "master_timeout");
 
     pendingConfigCommand = {};
 }
