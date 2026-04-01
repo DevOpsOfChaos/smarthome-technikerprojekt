@@ -1,0 +1,43 @@
+PROTOKOLL - bat_sen battery logic (2026-04-01)
+
+Ziel
+- Die Batterie-Messlogik im neutralen bat_sen-Basistyp auf eine einfache, stabile Minimalregel festziehen.
+- Keine Batterie-Chemie- oder Profil-Engine, nur min/max-Spannung mit linearer Prozentabbildung.
+
+Geaenderte Dateien
+- firmware/src/basetypes/bat_sen/AppConfig.h
+- firmware/src/basetypes/bat_sen/main.cpp
+- firmware/src/basetypes/bat_sen/README.md
+- PROTOKOLL/PROTOKOLL_2026-04-01_bat_sen_battery_logic.txt
+
+Aktive Min/Max-Regel
+- Leergrenze: BATTERY_EMPTY_MV (Default aus BAT_SEN_BATTERY_EMPTY_MV = 3000 mV)
+- Vollgrenze: BATTERY_FULL_MV (Default aus BAT_SEN_BATTERY_FULL_MV = 4200 mV)
+- Prozentbildung: linear zwischen leer/voll, Clamping auf 0..100
+  - <= leer -> 0%
+  - >= voll -> 100%
+
+Wie battery_mv jetzt gebildet wird
+- ADC-Eingang wird ueber PIN_BATTERY_ADC gelesen (BAT-Standardpfad: GPIO4 via HardwarePinStandard).
+- ADC wird mehrfach gelesen und gemittelt (BATTERY_ADC_SAMPLE_COUNT, Default 4).
+- Danach wird der gemittelte ADC-mV-Wert mit dem festen Spannungsteiler skaliert:
+  - BATTERY_DIVIDER_NUM / BATTERY_DIVIDER_DEN (Default 2/1).
+- Skalierter Wert wird auf uint16 begrenzt und als battery_mv genutzt.
+
+DeviceConfig-Overrides
+- Ja, moeglich ueber bestehende Compile-Defines im Device:
+  - BAT_SEN_BATTERY_EMPTY_MV
+  - BAT_SEN_BATTERY_FULL_MV
+  - BAT_SEN_BATTERY_DIVIDER_NUM
+  - BAT_SEN_BATTERY_DIVIDER_DEN
+  - BAT_SEN_BATTERY_ADC_SAMPLE_COUNT
+- Keine neue Provisionierungslogik hinzugefuegt.
+
+Build/Test
+- pio run -e bat_sen -> SUCCESS
+- pio run -e bat_sen_window_contact -> SUCCESS
+- pio run -e bat_sen_rain -> SUCCESS
+
+Grenzen/Risiken
+- Die Prozentanzeige bleibt bewusst grob-linear und bildet keine reale Entladekurve einer Zellchemie nach.
+- Ein ADC-Rohwert von 0 mV wird als Messfehler behandelt (battery_fault), nicht als gueltiger Batteriezustand.

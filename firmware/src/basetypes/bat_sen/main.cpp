@@ -213,8 +213,17 @@ bool leseBatterie(uint16_t* batteryMv, uint8_t* batteryPct) {
     if (batteryMv == nullptr || batteryPct == nullptr) return false;
     if (!BATTERY_ADC_AKTIV || PIN_BATTERY_ADC < 0) return false;
 
-    const uint16_t adcMv = (uint16_t)analogReadMilliVolts(PIN_BATTERY_ADC);
-    uint32_t scaledMv = ((uint32_t)adcMv * (uint32_t)BATTERY_DIVIDER_NUM) / (uint32_t)BATTERY_DIVIDER_DEN;
+    uint32_t adcSumMv = 0UL;
+    for (uint8_t i = 0U; i < BATTERY_ADC_SAMPLE_COUNT; ++i) {
+        adcSumMv += (uint32_t)analogReadMilliVolts(PIN_BATTERY_ADC);
+    }
+
+    const uint32_t adcMv = (adcSumMv + ((uint32_t)BATTERY_ADC_SAMPLE_COUNT / 2UL)) /
+                           (uint32_t)BATTERY_ADC_SAMPLE_COUNT;
+    if (adcMv == 0UL) return false;
+
+    uint32_t scaledMv = ((adcMv * (uint32_t)BATTERY_DIVIDER_NUM) + ((uint32_t)BATTERY_DIVIDER_DEN / 2UL)) /
+                        (uint32_t)BATTERY_DIVIDER_DEN;
     if (scaledMv > 65535UL) scaledMv = 65535UL;
 
     *batteryMv = (uint16_t)scaledMv;
