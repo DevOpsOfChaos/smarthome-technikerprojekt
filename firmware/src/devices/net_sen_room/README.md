@@ -2,12 +2,12 @@
 
 Konkrete Geraeteauspraegung auf Basis `net_sen`.
 
-Aktueller MVP-Umfang:
+Umfang dieses Geraets:
 - BME280 fuer Temperatur + Feuchtigkeit
 - VEML7700 fuer Helligkeit
-- Protokollpfad: HELLO, HEARTBEAT, STATE
+- eigene Sensorinitialisierung und Sensorauslesung
+- eigene Delta-/Intervall-Defaults fuer STATE-Meldungen
 
-Bewusst nicht enthalten:
-- Events ohne klaren Bedarf
-- lokale Regel-/Automationslogik
-- erweiterte Luftqualitaets- oder Spezialsensorik
+Kommunikation:
+- HELLO, HEARTBEAT, STATE ueber den Basistyp `net_sen`
+- `report_interval` via CFG

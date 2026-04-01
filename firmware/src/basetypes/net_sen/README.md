@@ -1,13 +1,14 @@
 # net_sen
 
-Schlanker Basistyp fuer netzbetriebene Sensor-Knoten ohne Aktorik.
+Neutraler Basistyp fuer netzbetriebene Sensor-Knoten ohne Aktorik.
 
 Enthalten:
 - HELLO, HEARTBEAT, STATE im gemeinsamen Protokoll
-- fester Grundablauf fuer BME280 (Temperatur/Feuchte) und VEML7700 (Lux)
-- einfache Konfiguration nur fuer `report_interval`
+- ESP-NOW-Grundkommunikation inkl. HELLO/ACK/CFG
+- generische State-/Heartbeat-/CFG-Grundstruktur
+- optionale I2C-Basis und Device-Hooks fuer konkrete Sensorik
 
 Nicht enthalten:
-- lokale Automationslogik
-- Sonderbehandlungen fuer andere Geraete
-- serverseitige Konfigurationspfade
+- konkrete Sensorinitialisierung
+- konkrete Sensorauslesung
+- geraetespezifische Defaults

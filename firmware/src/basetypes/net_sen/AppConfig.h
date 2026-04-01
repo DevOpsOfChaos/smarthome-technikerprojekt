@@ -5,15 +5,19 @@
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
 #ifndef NET_SEN_DEVICE_ID
-#define NET_SEN_DEVICE_ID "net_sen_01"
+#define NET_SEN_DEVICE_ID "net_sen_base_01"
 #endif
 
 #ifndef NET_SEN_DEVICE_NAME
-#define NET_SEN_DEVICE_NAME "NET-SEN Room"
+#define NET_SEN_DEVICE_NAME "NET-SEN Base"
 #endif
 
 #ifndef NET_SEN_FW_VARIANT
-#define NET_SEN_FW_VARIANT "net_sen_room"
+#define NET_SEN_FW_VARIANT "net_sen_base"
+#endif
+
+#ifndef NET_SEN_DEVICE_CAPS
+#define NET_SEN_DEVICE_CAPS 0U
 #endif
 
 #ifndef NET_SEN_DEBUG_ENABLED
@@ -36,8 +40,8 @@
 #define NET_SEN_STATE_INTERVAL_MS 60000UL
 #endif
 
-#ifndef NET_SEN_SENSOR_READ_INTERVAL_MS
-#define NET_SEN_SENSOR_READ_INTERVAL_MS 2500UL
+#ifndef NET_SEN_ENABLE_I2C_BASE
+#define NET_SEN_ENABLE_I2C_BASE 0
 #endif
 
 #ifndef NET_SEN_LOOP_INTERVAL_MS
@@ -52,34 +56,12 @@
 #define NET_SEN_MAX_REPORT_INTERVAL_S 3600U
 #endif
 
-#ifndef NET_SEN_TEMP_DELTA_01C
-#define NET_SEN_TEMP_DELTA_01C 10
-#endif
-
-#ifndef NET_SEN_HUM_DELTA_01PCT
-#define NET_SEN_HUM_DELTA_01PCT 50U
-#endif
-
-#ifndef NET_SEN_LUX_DELTA
-#define NET_SEN_LUX_DELTA 25U
-#endif
-
-#ifndef NET_SEN_USE_BME280
-#define NET_SEN_USE_BME280 1
-#endif
-
-#ifndef NET_SEN_BME280_ADDRESS
-#define NET_SEN_BME280_ADDRESS 0x76
-#endif
-
-#ifndef NET_SEN_USE_VEML7700
-#define NET_SEN_USE_VEML7700 1
-#endif
-
 constexpr char DEVICE_ID[] = NET_SEN_DEVICE_ID;
 constexpr char DEVICE_NAME[] = NET_SEN_DEVICE_NAME;
 constexpr char FW_VARIANT[] = NET_SEN_FW_VARIANT;
 constexpr bool DEVICE_DEBUG_AKTIV = NET_SEN_DEBUG_ENABLED != 0;
+constexpr uint16_t DEVICE_CAPS = (uint16_t)NET_SEN_DEVICE_CAPS;
+constexpr bool I2C_BASIS_AKTIV = NET_SEN_ENABLE_I2C_BASE != 0;
 
 constexpr uint8_t DEVICE_META_SCHEMA_VERSION = SH_META_SCHEMA_VERSION_CURRENT;
 constexpr uint8_t DEVICE_CONTROL_MODE = SH_CONTROL_MODE_NONE;
@@ -89,18 +71,7 @@ constexpr uint8_t DEVICE_REPORTING_MODE = SH_REPORTING_PERIODIC;
 constexpr unsigned long HELLO_RETRY_INTERVAL_MS = NET_SEN_HELLO_RETRY_INTERVAL_MS;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = NET_SEN_HEARTBEAT_INTERVAL_MS;
 constexpr unsigned long STATE_INTERVAL_MS = NET_SEN_STATE_INTERVAL_MS;
-constexpr unsigned long SENSOR_READ_INTERVAL_MS = NET_SEN_SENSOR_READ_INTERVAL_MS;
 constexpr unsigned long LOOP_INTERVAL_MS = NET_SEN_LOOP_INTERVAL_MS;
 constexpr uint16_t MIN_REPORT_INTERVAL_S = NET_SEN_MIN_REPORT_INTERVAL_S;
 constexpr uint16_t MAX_REPORT_INTERVAL_S = NET_SEN_MAX_REPORT_INTERVAL_S;
-constexpr int16_t TEMP_DELTA_01C = NET_SEN_TEMP_DELTA_01C;
-constexpr uint16_t HUM_DELTA_01PCT = NET_SEN_HUM_DELTA_01PCT;
-constexpr uint16_t LUX_DELTA = NET_SEN_LUX_DELTA;
 constexpr int WLAN_KANAL = NET_SEN_WLAN_CHANNEL;
-
-constexpr bool SENSOR_BME280_ENABLED = NET_SEN_USE_BME280 != 0;
-constexpr uint8_t SENSOR_BME280_ADDRESS = NET_SEN_BME280_ADDRESS;
-constexpr bool SENSOR_VEML7700_ENABLED = NET_SEN_USE_VEML7700 != 0;
-
-static_assert(SENSOR_BME280_ENABLED || SENSOR_VEML7700_ENABLED,
-    "NET-SEN braucht mindestens einen aktiven Sensorpfad.");

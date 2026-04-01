@@ -3,7 +3,6 @@
 #include <Wire.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
-#include <math.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -22,27 +21,20 @@
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 #include "../../../lib/sh_protocol/src/Protocol.h"
 
-#if NET_SEN_USE_BME280
-  #include <Adafruit_BME280.h>
-#endif
-
-#if NET_SEN_USE_VEML7700
-  #include <Adafruit_VEML7700.h>
-#endif
-
 constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "NET-SEN";
-constexpr char DATEI_VERSION[] = "0.1.0";
+constexpr char DATEI_VERSION[] = "0.2.0";
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-constexpr uint16_t DEVICE_CAPS =
-    (SENSOR_BME280_ENABLED ? (SH_CAP_TEMP | SH_CAP_HUM) : 0U) |
-    (SENSOR_VEML7700_ENABLED ? SH_CAP_LUX : 0U);
+#ifndef NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS
+#define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 0
+#endif
 
 struct SensorState {
     int16_t temp_01c;
     uint16_t hum_01pct;
     uint16_t lux;
+    uint8_t motion;
     bool fault;
 };
 
@@ -50,12 +42,9 @@ struct NodeState {
     bool master_bekannt;
     bool master_mac_gueltig;
     bool state_report_offen;
-    bool bme280_bereit;
-    bool veml7700_bereit;
     unsigned long letztes_hello_ms;
     unsigned long letzter_heartbeat_ms;
     unsigned long letzter_state_ms;
-    unsigned long letzter_sensor_poll_ms;
     unsigned long state_interval_ms;
     uint8_t master_mac[6];
     uint8_t naechste_seq;
@@ -64,12 +53,26 @@ struct NodeState {
 
 NodeState nodeStatus = {};
 
-#if NET_SEN_USE_BME280
-Adafruit_BME280 sensorBme280;
-#endif
+#if NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS
+void netSenDeviceSensorInit();
+bool netSenDeviceSensorPoll(
+    int16_t* temp_01c,
+    uint16_t* hum_01pct,
+    uint16_t* lux,
+    uint8_t* motion,
+    bool* fault);
+#else
+void netSenDeviceSensorInit() {}
 
-#if NET_SEN_USE_VEML7700
-Adafruit_VEML7700 sensorVeml7700 = Adafruit_VEML7700();
+bool netSenDeviceSensorPoll(
+    int16_t* /*temp_01c*/,
+    uint16_t* /*hum_01pct*/,
+    uint16_t* /*lux*/,
+    uint8_t* /*motion*/,
+    bool* /*fault*/)
+{
+    return false;
+}
 #endif
 
 void logf(const char* level, const char* format, ...) {
@@ -98,20 +101,6 @@ void copyText(char* target, size_t targetSize, const char* source) {
     target[targetSize - 1U] = '\0';
 }
 
-uint16_t absDiffU16(uint16_t a, uint16_t b) {
-    return a > b ? (uint16_t)(a - b) : (uint16_t)(b - a);
-}
-
-int16_t absDiffI16(int16_t a, int16_t b) {
-    return a > b ? (int16_t)(a - b) : (int16_t)(b - a);
-}
-
-uint16_t clampToU16(long value) {
-    if (value < 0L) return 0U;
-    if (value > 65535L) return 65535U;
-    return (uint16_t)value;
-}
-
 bool istBroadcastMac(const uint8_t* mac) {
     return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
 }
@@ -128,6 +117,7 @@ void buildSensorMask(char* target, size_t targetSize) {
     target[0] = (DEVICE_CAPS & SH_CAP_TEMP) ? 'T' : 'X';
     target[1] = (DEVICE_CAPS & SH_CAP_HUM) ? 'H' : 'X';
     target[2] = (DEVICE_CAPS & SH_CAP_LUX) ? 'L' : 'X';
+    target[3] = (DEVICE_CAPS & SH_CAP_MOTION) ? 'M' : 'X';
 }
 
 void buildInputMask(char* target, size_t targetSize) {
@@ -237,7 +227,7 @@ bool sendeState() {
     payload.temp_01c = nodeStatus.sensor.temp_01c;
     payload.hum_01pct = nodeStatus.sensor.hum_01pct;
     payload.lux = nodeStatus.sensor.lux;
-    payload.motion = 0U;
+    payload.motion = nodeStatus.sensor.motion;
     payload.fault = nodeStatus.sensor.fault ? 1U : 0U;
     payload.report_interval_s = (uint16_t)(nodeStatus.state_interval_ms / 1000UL);
 
@@ -355,74 +345,24 @@ void initialisiereFunk() {
 }
 
 void initialisiereSensorik() {
-    nodeStatus.bme280_bereit = false;
-    nodeStatus.veml7700_bereit = false;
-
-    Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
-
-#if NET_SEN_USE_BME280
-    nodeStatus.bme280_bereit = sensorBme280.begin((uint8_t)SENSOR_BME280_ADDRESS, &Wire);
-    if (!nodeStatus.bme280_bereit) {
-        logf("WARN", "BME280 nicht gefunden (addr=0x%02X)", SENSOR_BME280_ADDRESS);
+    if (I2C_BASIS_AKTIV) {
+        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
     }
-#endif
 
-#if NET_SEN_USE_VEML7700
-    nodeStatus.veml7700_bereit = sensorVeml7700.begin();
-    if (!nodeStatus.veml7700_bereit) {
-        logf("WARN", "VEML7700 nicht gefunden");
-    }
-#endif
-
-    nodeStatus.sensor.fault = !nodeStatus.bme280_bereit || !nodeStatus.veml7700_bereit;
+    netSenDeviceSensorInit();
 }
 
 void pollSensorik() {
-    const unsigned long jetzt = millis();
-    if ((jetzt - nodeStatus.letzter_sensor_poll_ms) < SENSOR_READ_INTERVAL_MS) return;
-    nodeStatus.letzter_sensor_poll_ms = jetzt;
-
     SensorState neuerState = nodeStatus.sensor;
-    bool fault = false;
-
-#if NET_SEN_USE_BME280
-    if (!nodeStatus.bme280_bereit) {
-        fault = true;
-    } else {
-        const float temp = sensorBme280.readTemperature();
-        const float hum = sensorBme280.readHumidity();
-        if (!isfinite(temp) || !isfinite(hum)) {
-            fault = true;
-        } else {
-            neuerState.temp_01c = (int16_t)lroundf(temp * 10.0f);
-            neuerState.hum_01pct = clampToU16((long)lroundf(hum * 10.0f));
-        }
-    }
-#endif
-
-#if NET_SEN_USE_VEML7700
-    if (!nodeStatus.veml7700_bereit) {
-        fault = true;
-    } else {
-        const float lux = sensorVeml7700.readLux();
-        if (!isfinite(lux) || lux < 0.0f) {
-            fault = true;
-        } else {
-            neuerState.lux = clampToU16((long)lroundf(lux));
-        }
-    }
-#endif
-
-    neuerState.fault = fault;
-
-    const bool wesentlichGeaendert =
-        absDiffI16(neuerState.temp_01c, nodeStatus.sensor.temp_01c) >= TEMP_DELTA_01C ||
-        absDiffU16(neuerState.hum_01pct, nodeStatus.sensor.hum_01pct) >= HUM_DELTA_01PCT ||
-        absDiffU16(neuerState.lux, nodeStatus.sensor.lux) >= LUX_DELTA ||
-        neuerState.fault != nodeStatus.sensor.fault;
+    const bool geaendert = netSenDeviceSensorPoll(
+        &neuerState.temp_01c,
+        &neuerState.hum_01pct,
+        &neuerState.lux,
+        &neuerState.motion,
+        &neuerState.fault);
 
     nodeStatus.sensor = neuerState;
-    if (wesentlichGeaendert) {
+    if (geaendert) {
         nodeStatus.state_report_offen = true;
     }
 }
