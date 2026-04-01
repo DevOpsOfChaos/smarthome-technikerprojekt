@@ -14,7 +14,7 @@ bool netSenDeviceSensorPoll(
     uint8_t* motion,
     bool* fault);
 
-#include "../../basetypes/net_sen/main.cpp"
+#include "../../basetypes/net_sen/NetSenRuntime.h"
 
 namespace {
 constexpr uint8_t DHT_SENSOR_TYPE = DHT22;
@@ -121,3 +121,4 @@ bool netSenDeviceSensorPoll(
            neueMotion != vorherMotion ||
            neuerFault != vorherFault;
 }
+

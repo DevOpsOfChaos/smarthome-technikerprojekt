@@ -1,0 +1,53 @@
+Grosses Ziel
+- Den unsauberen net_sen-Binding-Stil bereinigen und die offiziellen net_sen-Pfade gegen den Legacy-Pfad net_sen_room klar einordnen.
+
+Ausgangslage
+- Drei net_sen-Devices banden die Basistyp-Logik direkt ueber `#include "../../basetypes/net_sen/main.cpp"` ein.
+- Der Ansatz war buildbar, aber als Konstruktionsmuster unklar und wartungsarm.
+- `net_sen_room` stand weiterhin ohne klare Priorisierung neben den offiziellen Pfaden.
+
+Ziel dieses Schritts
+- Direkten include von `basetypes/net_sen/main.cpp` aus Devices entfernen.
+- Einen kleinen, nachvollziehbaren Runtime-/Binding-Pfad fuer net_sen herstellen.
+- Die offiziellen Linien (`net_sen_dht22_reference`, `net_sen_env_bme680_veml`) klar gegen `net_sen_room` abgrenzen.
+- Bestehendes Fachverhalten der offiziellen Pfade unveraendert lassen.
+
+Umsetzung
+- Neue Runtime-Datei angelegt:
+  - `firmware/src/basetypes/net_sen/NetSenRuntime.h`
+- Basistyp-Einstieg verschlankt:
+  - `firmware/src/basetypes/net_sen/main.cpp` enthaelt jetzt nur noch den duennen Einstieg auf `NetSenRuntime.h`.
+- Device-Bindings bereinigt (kein direkter main.cpp-Include mehr):
+  - `firmware/src/devices/net_sen_dht22_reference/main.cpp`
+  - `firmware/src/devices/net_sen_env_bme680_veml/main.cpp`
+  - `firmware/src/devices/net_sen_room/main.cpp`
+  - jeweils umgestellt auf `#include "../../basetypes/net_sen/NetSenRuntime.h"`.
+- Pfadkonsolidierung und Statusklarstellung fuer legacy-Pfad:
+  - `firmware/src/devices/net_sen_room/README.md` auf Legacy-/Provisorium-Status umgestellt.
+  - `firmware/src/devices/net_sen_room/DeviceConfig.h` mit klarer Legacy-Einordnung kommentiert.
+  - `firmware/platformio.ini` bei `env:net_sen_room` mit Legacy-Hinweis versehen.
+
+Begruendung der gewaehlten Loesung
+- Der neue Einstieg entfernt den offensichtlichen Strukturmangel (direktes Device-Include von `main.cpp`), ohne die bestehende Hook-Architektur aufzubrechen.
+- Die Runtime bleibt inhaltlich gleich und damit fachlich risikoarm.
+- `net_sen_room` wird nicht blind geloescht, aber eindeutig als nicht-offizieller Legacy-Pfad markiert.
+
+Pruefung / Validierung
+- Erfolgreiche Builds:
+  - `pio run -e net_sen_dht22_reference`
+  - `pio run -e net_sen_env_bme680_veml`
+  - `pio run -e master`
+  - `pio run -e net_sen_room`
+- Beim `master`-Build erschien der bekannte Secrets-Hinweis als Warning, Build war trotzdem erfolgreich.
+
+Ergebnis / Nutzen
+- net_sen-Devices binden die Runtime jetzt sauber ueber einen klaren Runtime-Pfad.
+- Direkte Includes auf `basetypes/net_sen/main.cpp` sind entfernt.
+- Die offizielle net_sen-Linie ist dokumentarisch klarer: Referenz- und Umweltpfad aktiv, `net_sen_room` legacy.
+
+Grenzen / offene Punkte
+- Kein neuer Sensorpfad und keine Verhaltensaenderung in den offiziellen net_sen-Devices in diesem Schritt.
+- Legacy-Pfad `net_sen_room` bleibt absichtlich buildbar fuer Rueckvergleich und wurde nicht funktional umgebaut.
+
+Naechster sinnvoller Schritt
+- Nur bei Bedarf den Legacy-Pfad `net_sen_room` spaeter kontrolliert aus der aktiven Build-Routine weiter zurueckstufen (z. B. ueber Team-Konventionen), ohne die offizielle Linie zu vermischen.

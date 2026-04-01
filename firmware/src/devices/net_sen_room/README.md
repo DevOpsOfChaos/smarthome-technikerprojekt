@@ -1,13 +1,15 @@
-# NET-SEN Raumsensor
+# net_sen_room (Legacy-Provisorium)
 
-Konkrete Geraeteauspraegung auf Basis `net_sen`.
+Dieser Device-Pfad ist ein aelterer Zwischenstand und gehoert nicht zur offiziellen aktiven `net_sen`-Linie.
 
-Umfang dieses Geraets:
-- BME280 fuer Temperatur + Feuchtigkeit
-- VEML7700 fuer Helligkeit
-- eigene Sensorinitialisierung und Sensorauslesung
-- eigene Delta-/Intervall-Defaults fuer STATE-Meldungen
+Offizielle aktive Linie:
+- `net_sen_dht22_reference` = kleiner Referenzpfad
+- `net_sen_env_bme680_veml` = offizieller Umweltpfad
 
-Kommunikation:
-- HELLO, HEARTBEAT, STATE ueber den Basistyp `net_sen`
-- `report_interval` via CFG
+Was `net_sen_room` weiterhin ist:
+- buildbarer Legacy-Pfad fuer Rueckvergleich und Altstand-Einordnung
+- BME280 (Temperatur/Feuchte) plus VEML7700 (Lux)
+
+Was `net_sen_room` nicht ist:
+- kein priorisierter Ausbaupfad fuer neue `net_sen`-Arbeit
+- keine Referenz fuer neue Strukturentscheidungen

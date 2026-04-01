@@ -14,7 +14,7 @@ bool netSenDeviceSensorPoll(
     uint8_t* motion,
     bool* fault);
 
-#include "../../basetypes/net_sen/main.cpp"
+#include "../../basetypes/net_sen/NetSenRuntime.h"
 
 #if NET_SEN_ROOM_USE_BME280
   #include <Adafruit_BME280.h>
@@ -143,3 +143,4 @@ bool netSenDeviceSensorPoll(
            neueMotion != vorherMotion ||
            neuerFault != vorherFault;
 }
+

@@ -2,8 +2,9 @@
 
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
-// Konkretes Geraet: netzbetriebener Raum-Sensor.
-// Diese Datei setzt nur feste Defaultwerte fuer den Basistyp net_sen.
+// Legacy-Provisorium: aelterer net_sen_room-Pfad.
+// Diese Datei bleibt fuer Rueckvergleich buildbar, ist aber nicht Teil der
+// offiziellen aktiven net_sen-Linie.
 
 #define NET_SEN_DEVICE_ID "net_sen_01"
 #define NET_SEN_DEVICE_NAME "NET-SEN Room"

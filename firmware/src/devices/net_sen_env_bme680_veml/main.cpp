@@ -30,7 +30,7 @@ bool netSenDeviceExtendedStatePoll(
     uint16_t* tvoc_ppb,
     uint16_t* eco2_ppm);
 
-#include "../../basetypes/net_sen/main.cpp"
+#include "../../basetypes/net_sen/NetSenRuntime.h"
 
 namespace {
 constexpr uint32_t I2C_CLOCK_HZ = 100000UL;
@@ -535,3 +535,4 @@ bool netSenDeviceSensorPoll(
            neueMotion != vorherMotion ||
            neuerFault != vorherFault;
 }
+
