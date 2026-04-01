@@ -1,0 +1,41 @@
+PROTOKOLL - bat_sen_rain (2026-04-01)
+
+Ziel
+- Zweites konkretes BAT-SEN-Device (`bat_sen_rain`) auf neutralem Basistyp buildbar anlegen.
+
+Geaenderte Dateien
+- firmware/src/devices/bat_sen_rain/DeviceConfig.h
+- firmware/src/devices/bat_sen_rain/PinConfig.h
+- firmware/src/devices/bat_sen_rain/main.cpp
+- firmware/src/devices/bat_sen_rain/README.md
+- firmware/platformio.ini
+- PROTOKOLL/PROTOKOLL_2026-04-01_bat_sen_rain.txt
+
+Was im Basistyp blieb
+- Wake/Sleep-Mechanik
+- HELLO/STATE/EVENT/ACK/CFG-Transportlogik
+- neutrale Batteriemetrik
+- Hook-Vertrag fuer Device-Logik
+
+Was im Geraet liegt
+- Device-ID, Name, Variant und Caps fuer Regensensor
+- ADC-Pin und Regen-Readout
+- lokale Regen-Interpretation mit einfacher Schwellwertlogik
+- Event-Mapping bei Zustandswechsel
+
+Genutzte Regen-Semantik
+- Rohwert + einfache Schwellwertstrategie (HIGH=wet).
+- `wet` bei `raw >= BAT_SEN_RAIN_WET_THRESHOLD_RAW`.
+- Rueckwechsel nach `dry` bei `raw < BAT_SEN_RAIN_CLEAR_THRESHOLD_RAW`.
+- Eventtyp ist immer `SH_EVENT_RAIN_DETECTED`, Zielzustand liegt in `param1`:
+  - `param1=1` => wet
+  - `param1=0` => dry
+- `param2` traegt den ADC-Rohwert.
+
+Build/Test
+- Befehl: pio run -e bat_sen_rain
+- Ergebnis: SUCCESS
+
+Grenzen/Risiken
+- Schwellenwerte sind v1-Default und nicht hardwarevalidiert.
+- Kein GPIO-Wake im V1 aktiv; Wake bleibt timerbasiert.
