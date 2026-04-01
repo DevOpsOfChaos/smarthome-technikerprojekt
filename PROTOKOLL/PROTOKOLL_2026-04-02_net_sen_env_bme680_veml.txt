@@ -1,0 +1,52 @@
+Grosses Ziel
+- Ersten real validierten net_sen-Umweltpfad als eigenes Geraet im neuen Repo sauber anlegen: BME680 plus VEML7700.
+
+Ausgangslage
+- net_sen liegt als neutraler Basistyp mit Device-Hooks vor.
+- net_sen_dht22_reference ist der einfache Referenzpfad und blieb unveraendert.
+- Alt-Repo und private Planungsbasis dokumentieren BME680 und VEML7700 als real validiertes Umweltpaket fuer net_sen.
+
+Ziel dieses Schritts
+- Neuen Device-Pfad `net_sen_env_bme680_veml` im oeffentlichen Repo anlegen.
+- BME680 und VEML7700 gemeinsam in einem klaren Umweltpfad nutzen.
+- `temp_01c`, `hum_01pct`, `lux` liefern, `motion` fest auf 0 halten.
+- `fault` so abbilden, dass ein ungueltiger Pflichtsensor den Pfad als fehlerhaft markiert.
+- Relevantes Build-Environment ergaenzen und erfolgreich bauen.
+
+Umsetzung
+- Neuer Ordner angelegt: `firmware/src/devices/net_sen_env_bme680_veml/`
+- Neue Dateien:
+  - `DeviceConfig.h`
+  - `PinConfig.h`
+  - `main.cpp`
+  - `README.md`
+- `platformio.ini` um Environment `net_sen_env_bme680_veml` erweitert.
+- Build-Libraries fuer das neue Environment:
+  - `adafruit/Adafruit BME680 Library @ ^2.0.4`
+  - `adafruit/Adafruit VEML7700 Library @ ^2.1.6`
+
+Begruendung der gewaehlten Loesung
+- Der neue Pfad ist bewusst separat umgesetzt, statt bestehende DHT22- oder room-Pfade umzubauen.
+- Das folgt der Schichtungsregel: Basistyp bleibt neutral, konkrete Sensorik liegt in der Device-Schicht.
+- Der Sensorpfad bildet die validierten Alt-Parameter direkt ab:
+  - BME680 mit Oversampling 8x/2x/4x, Filter 3, Heater 320C/150ms
+  - VEML7700 mit gain=1x und integration time=400ms
+- ENS160 bleibt bewusst draussen, damit der Scope eng und nachvollziehbar bleibt.
+
+Pruefung / Validierung
+- Relevanter Build im oeffentlichen Repo:
+  - `pio run -e net_sen_env_bme680_veml`
+- Ergebnis: erfolgreich.
+
+Ergebnis / Nutzen
+- net_sen hat jetzt einen klaren Umwelt-Devicepfad fuer BME680 plus VEML7700.
+- Der Pfad liefert die geforderten Kernwerte (`temp_01c`, `hum_01pct`, `lux`) ohne Nebenbaustellen.
+- Fehlerzustand ist transparent: wenn BME680 oder VEML7700 keine gueltige Messung liefern, bleibt `fault=true`.
+
+Grenzen / offene Punkte
+- In diesem Schritt keine ENS160-Integration.
+- `gas_ohm` wird intern mit Warm-up-Regel behandelt, aber nicht als neue Aussenmetrik herausgefuehrt.
+- Reale Hardwarevalidierung (Flash + serielle Messbeobachtung) fuer den neuen Devicepfad ist als naechster Praxischeck getrennt durchzufuehren.
+
+Naechster sinnvoller Schritt
+- Hardwarelauf fuer `net_sen_env_bme680_veml` auf Zielboard fahren und die Messqualitaet im realen Einbaukontext verifizieren.

@@ -1,0 +1,35 @@
+#pragma once
+
+#include "../../../lib/sh_protocol/src/DeviceTypes.h"
+
+// Konkretes Geraet: net_sen-Umweltpfad mit BME680 + VEML7700.
+// Scope dieses Pfads:
+// - BME680 fuer Temperatur und Feuchte
+// - VEML7700 fuer Lux
+// - keine Bewegungssensorik
+// - kein ENS160 in diesem Schritt
+
+#define NET_SEN_DEVICE_ID "net_sen_env_bme680_veml_01"
+#define NET_SEN_DEVICE_NAME "NET-SEN Env BME680+VEML"
+#define NET_SEN_FW_VARIANT "net_sen_env_bme680_veml"
+#define NET_SEN_DEVICE_CAPS (SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX)
+
+#define NET_SEN_ENABLE_I2C_BASE 1
+
+#define NET_SEN_HELLO_RETRY_INTERVAL_MS 5000UL
+#define NET_SEN_HEARTBEAT_INTERVAL_MS 60000UL
+#define NET_SEN_STATE_INTERVAL_MS 60000UL
+
+#define NET_SEN_ENV_BME680_VEML_SENSOR_READ_INTERVAL_MS 2500UL
+#define NET_SEN_ENV_BME680_VEML_ERROR_LOG_INTERVAL_MS 15000UL
+
+#define NET_SEN_ENV_BME680_VEML_TEMP_DELTA_01C 10
+#define NET_SEN_ENV_BME680_VEML_HUM_DELTA_01PCT 50U
+#define NET_SEN_ENV_BME680_VEML_LUX_DELTA 25U
+
+#define NET_SEN_ENV_BME680_PRIMARY_ADDRESS 0x76
+#define NET_SEN_ENV_BME680_FALLBACK_ADDRESS 0x77
+#define NET_SEN_ENV_BME680_GAS_WARMUP_MS 180000UL
+#define NET_SEN_ENV_BME680_GAS_WARMUP_MIN_READS 5U
+
+#define NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS 1050UL
