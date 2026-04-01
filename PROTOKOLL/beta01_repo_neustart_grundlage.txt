@@ -1,0 +1,20 @@
+beta01 - Repo-Neustart Grundlage
+
+Grund:
+- Neues öffentliches Hauptrepo als saubere Projektlinie erstellt
+- Altes Repo wird nur noch als Quelle für geeignete Bausteine genutzt
+
+Verbesserungseffekt:
+- Klare Trennung zwischen offizieller Projektlinie und früheren Experimentierpfaden
+- Bessere Nachvollziehbarkeit für Dokumentation und Lehrerbewertung
+
+Trade-offs:
+- Historie des alten Repos wird nicht übernommen
+- Geeignete Inhalte müssen gezielt übernommen werden
+
+Test:
+- Ordnerstruktur erstellt
+- Grunddateien angelegt
+
+Lehrerblick:
+- Stärker auf nachvollziehbare Eigenleistung und saubere Struktur ausgerichtet

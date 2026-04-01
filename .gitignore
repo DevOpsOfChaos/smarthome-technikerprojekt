@@ -1,0 +1,24 @@
+# Secrets
+firmware/include/Secrets.h
+server/.env
+.env
+*.env.local
+
+# Build / IDE
+firmware/.pio/
+firmware/.vscode/
+.vscode/
+.idea/
+
+# OS / temp
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# Python / caches
+__pycache__/
+*.pyc
+
+# Local archives
+*.zip

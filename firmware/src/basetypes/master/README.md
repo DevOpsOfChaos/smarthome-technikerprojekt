@@ -1,0 +1,3 @@
+# master
+
+Schlanker Basistyp.
