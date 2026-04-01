@@ -9,7 +9,7 @@
 // - keine Bewegungssensorik
 // - kein ENS160 in diesem Schritt
 
-#define NET_SEN_DEVICE_ID "net_sen_env_bme680_veml_01"
+#define NET_SEN_DEVICE_ID "net_sen_01"
 #define NET_SEN_DEVICE_NAME "NET-SEN Env BME680+VEML"
 #define NET_SEN_FW_VARIANT "net_sen_env_bme680_veml"
 #define NET_SEN_DEVICE_CAPS (SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX)

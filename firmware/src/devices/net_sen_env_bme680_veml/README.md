@@ -2,6 +2,10 @@
 
 Konkreter Umweltpfad fuer den Basistyp `net_sen`.
 
+Offizielle Linienzuordnung in diesem Repo:
+- `device_id = net_sen_01`
+- `fw_variant = net_sen_env_bme680_veml`
+
 Ziel dieses Pfads:
 - real validiertes Sensorpaket `BME680 + VEML7700` aus dem Alt-Repo sauber im neuen Repo abbilden
 - klare Trennung zum DHT22-Referenzpfad behalten

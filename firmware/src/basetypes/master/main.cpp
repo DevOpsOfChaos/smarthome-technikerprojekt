@@ -79,6 +79,9 @@ constexpr char MQTT_TOPIC_COMMAND_SUB[] = "smarthome/device/+/command";
 constexpr size_t REQUEST_ID_LEN = 96U;
 constexpr long CFG_REPORT_INTERVAL_MIN = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MIN_S;
 constexpr long CFG_REPORT_INTERVAL_MAX = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MAX_S;
+constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
+constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
+constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
 
 struct NodeDefinition {
     const char* node_id;
@@ -101,6 +104,11 @@ struct NodeRuntime {
     int16_t temp_01c;
     uint16_t hum_01pct;
     uint16_t lux;
+    uint32_t pressure_pa;
+    uint32_t gas_ohm;
+    uint16_t aqi;
+    uint16_t tvoc_ppb;
+    uint16_t eco2_ppm;
     bool motion;
     uint32_t uptime_s;
     uint16_t caps;
@@ -287,6 +295,11 @@ void initialisiereNodeStates() {
         nodeStates[i].temp_01c = INT16_MIN;
         nodeStates[i].hum_01pct = 0xFFFFU;
         nodeStates[i].lux = 0xFFFFU;
+        nodeStates[i].pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
+        nodeStates[i].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+        nodeStates[i].aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
+        nodeStates[i].tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
+        nodeStates[i].eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
         nodeStates[i].meta_schema_version = SH_META_SCHEMA_VERSION_CURRENT;
         nodeStates[i].control_mode = SH_CONTROL_MODE_NONE;
         nodeStates[i].config_profile = SH_PROFILE_NONE;
@@ -297,10 +310,24 @@ void initialisiereNodeStates() {
     }
 }
 
+void setzeNetSenZusatzwerteUnbekannt(size_t nodeIndex) {
+    nodeStates[nodeIndex].pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
+    nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+    nodeStates[nodeIndex].aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
+    nodeStates[nodeIndex].tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
+    nodeStates[nodeIndex].eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
+}
+
 void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
     if (!nodeHasCap(nodeIndex, SH_CAP_TEMP)) nodeStates[nodeIndex].temp_01c = INT16_MIN;
     if (!nodeHasCap(nodeIndex, SH_CAP_HUM)) nodeStates[nodeIndex].hum_01pct = 0xFFFFU;
     if (!nodeHasCap(nodeIndex, SH_CAP_LUX)) nodeStates[nodeIndex].lux = 0xFFFFU;
+    if (!nodeHasCap(nodeIndex, SH_CAP_PRESSURE)) nodeStates[nodeIndex].pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
+    if (!nodeHasCap(nodeIndex, SH_CAP_AQI)) {
+        nodeStates[nodeIndex].aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
+        nodeStates[nodeIndex].tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
+        nodeStates[nodeIndex].eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
+    }
     if (!nodeHasCap(nodeIndex, SH_CAP_MOTION)) nodeStates[nodeIndex].motion = false;
     if (!nodeHasCap(nodeIndex, SH_CAP_COVER)) {
         nodeStates[nodeIndex].cover_mode = false;
@@ -494,6 +521,11 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
     char tempText[16] = {0};
     char humText[16] = {0};
     char luxText[16] = {0};
+    char pressureText[16] = {0};
+    char gasText[16] = {0};
+    char aqiText[16] = {0};
+    char tvocText[16] = {0};
+    char eco2Text[16] = {0};
     char coverPositionText[16] = {0};
 
     switch (NODE_DEFINITIONS[nodeIndex].device_class) {
@@ -533,14 +565,24 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             schreibeIntOrNull(tempText, sizeof(tempText), nodeStates[nodeIndex].temp_01c, INT16_MIN);
             schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, 0xFFFFU);
             schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, 0xFFFFU);
+            schreibeUIntOrNull(pressureText, sizeof(pressureText), nodeStates[nodeIndex].pressure_pa, NET_SEN_PRESSURE_UNGUELTIG);
+            schreibeUIntOrNull(gasText, sizeof(gasText), nodeStates[nodeIndex].gas_ohm, NET_SEN_GAS_OHM_UNGUELTIG);
+            schreibeUIntOrNull(aqiText, sizeof(aqiText), nodeStates[nodeIndex].aqi, NET_SEN_AIR_METRIC_UNGUELTIG);
+            schreibeUIntOrNull(tvocText, sizeof(tvocText), nodeStates[nodeIndex].tvoc_ppb, NET_SEN_AIR_METRIC_UNGUELTIG);
+            schreibeUIntOrNull(eco2Text, sizeof(eco2Text), nodeStates[nodeIndex].eco2_ppm, NET_SEN_AIR_METRIC_UNGUELTIG);
             snprintf(
                 buffer,
                 bufferSize,
-                "{\"device_id\":\"%s\",\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"motion\":%s,\"fault\":%s}",
+                "{\"device_id\":\"%s\",\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
                 NODE_DEFINITIONS[nodeIndex].node_id,
                 tempText,
                 humText,
                 luxText,
+                pressureText,
+                gasText,
+                aqiText,
+                tvocText,
+                eco2Text,
                 nodeStates[nodeIndex].motion ? "true" : "false",
                 nodeStates[nodeIndex].fault ? "true" : "false");
             return;
@@ -783,17 +825,62 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
         }
 
         case SH_CLASS_NET_SEN: {
-            if (payloadLen != sizeof(SmartHome::SensorStateReportPayload)) {
-                logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-                return;
+            if (payloadLen == sizeof(SmartHome::SensorStateReportPayload)) {
+                const SmartHome::SensorStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorStateReportPayload*>(payload);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                setzeNetSenZusatzwerteUnbekannt((size_t)nodeIndex);
+                break;
             }
-            const SmartHome::SensorStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorStateReportPayload*>(payload);
-            nodeStates[nodeIndex].temp_01c = state.temp_01c;
-            nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-            nodeStates[nodeIndex].lux = state.lux;
-            nodeStates[nodeIndex].motion = (state.motion != 0U);
-            nodeStates[nodeIndex].fault = (state.fault != 0U);
-            break;
+
+            if (payloadLen == sizeof(SmartHome::SensorConfigStateReportPayload)) {
+                const SmartHome::SensorConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorConfigStateReportPayload*>(payload);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                setzeNetSenZusatzwerteUnbekannt((size_t)nodeIndex);
+                break;
+            }
+
+            if (payloadLen == sizeof(SmartHome::ExtendedSensorStateReportPayload) ||
+                payloadLen == sizeof(SmartHome::ExtendedSensorConfigStateReportPayload)) {
+                const SmartHome::ExtendedSensorStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorStateReportPayload*>(payload);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+                nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+                nodeStates[nodeIndex].aqi = state.aqi;
+                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
+
+            if (payloadLen == sizeof(SmartHome::ExtendedSensorGasStateReportPayload) ||
+                payloadLen == sizeof(SmartHome::ExtendedSensorGasConfigStateReportPayload)) {
+                const SmartHome::ExtendedSensorGasStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorGasStateReportPayload*>(payload);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
+                nodeStates[nodeIndex].aqi = state.aqi;
+                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
+
+            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
+            return;
         }
 
         default:

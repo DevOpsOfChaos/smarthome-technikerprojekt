@@ -1,0 +1,70 @@
+Grosses Ziel
+- Den net_sen-Vertrag so vorbereiten, dass der reale Umweltpfad auf der offiziellen net_sen_01-Linie lauffaehig bleibt und der spaetere ENS160-Folgeschritt nicht am Master-STATE-Vertrag scheitert.
+
+Ausgangslage
+- Der Master akzeptierte fuer SH_CLASS_NET_SEN zuvor nur exakt SensorStateReportPayload.
+- Im Protokoll waren erweiterte net_sen-Payloads bereits definiert, aber im Master nicht verarbeitet.
+- Der neue Umweltpfad net_sen_env_bme680_veml lief mit eigener device_id und war damit nicht auf der offiziellen net_sen_01-Linie.
+
+Ziel dieses Schritts
+- Master fuer net_sen auf mehrere bekannte STATE-Payloads erweitern.
+- Zusatzzustaende fuer pressure, gas und Air-Metriken intern und im MQTT-State vertraglich vorbereiten.
+- Offizielle net_sen_01-Linienzuordnung fuer den realen Umweltpfad sauber herstellen.
+- Kein ENS160-Sensorcode und kein neuer Device-Pfad.
+
+Umsetzung
+- Datei geaendert: firmware/src/basetypes/master/main.cpp
+  - NodeRuntime fuer net_sen um folgende Felder erweitert:
+    - pressure_pa
+    - gas_ohm
+    - aqi
+    - tvoc_ppb
+    - eco2_ppm
+  - Sentinels fuer unbekannte Zusatzwerte eingefuehrt.
+  - Sanitizing nach HELLO-Capabilities erweitert:
+    - pressure nur mit SH_CAP_PRESSURE
+    - aqi/tvoc/eco2 nur mit SH_CAP_AQI
+  - net_sen-STATE-Parsing erweitert auf diese Payloads:
+    - SensorStateReportPayload
+    - SensorConfigStateReportPayload
+    - ExtendedSensorStateReportPayload
+    - ExtendedSensorConfigStateReportPayload
+    - ExtendedSensorGasStateReportPayload
+    - ExtendedSensorGasConfigStateReportPayload
+  - MQTT-State fuer net_sen um Zusatzfelder erweitert:
+    - pressure_pa
+    - gas_ohm
+    - aqi
+    - tvoc_ppb
+    - eco2_ppm
+    - Unbekannte Werte werden als null ausgegeben.
+
+- Datei geaendert: firmware/src/devices/net_sen_env_bme680_veml/DeviceConfig.h
+  - device_id auf net_sen_01 gesetzt.
+
+- Datei geaendert: firmware/src/devices/net_sen_env_bme680_veml/README.md
+  - Offizielle Linienzuordnung dokumentiert (device_id net_sen_01, fw_variant net_sen_env_bme680_veml).
+
+Begruendung der gewaehlten Loesung
+- Der Master bekommt genau die vertragliche Erweiterung, die fuer kommende net_sen-Extended-State-Pfade noetig ist, ohne Seitentracks.
+- Bestehende einfache net_sen-Pfade bleiben kompatibel, weil die alten Payload-Varianten weiterhin akzeptiert werden.
+- Die Zusatzfelder werden nur dann fachlich sichtbar, wenn Payload und/oder Capability den Wert wirklich decken; sonst bleiben sie null.
+- Die Zuordnung des Umweltpfads auf net_sen_01 vermeidet kuenstliche neue net_sen-ID-Linien im Master.
+
+Pruefung / Validierung
+- Erfolgreiche Builds:
+  - pio run -e master
+  - pio run -e net_sen_env_bme680_veml
+  - pio run -e net_sen_dht22_reference
+
+Ergebnis / Nutzen
+- Der Master kann net_sen-STATEs jetzt robust in einfacher und erweiterter Form annehmen.
+- Der Vertragsboden fuer einen spaeteren ENS160-Folgeschritt ist vorhanden, ohne in diesem Schritt ENS160-Code einzubauen.
+- Der reale Umweltpfad ist auf der offiziellen net_sen_01-Linie eingehaengt und damit systemseitig einfacher testbar.
+
+Grenzen / offene Punkte
+- In diesem Schritt wurde bewusst kein ENS160-Sensorpfad implementiert.
+- Der konkrete ENS160-Geraetepfad inklusive valider Capabilities und Readout folgt erst im naechsten engen Folgeschritt.
+
+Naechster sinnvoller Schritt
+- ENS160 als enger Folgepfad fuer net_sen aufbauen, dabei die jetzt vorbereiteten Extended-STATE-Vertraege nutzen und die Metriken nur capability-gedeckt freigeben.
