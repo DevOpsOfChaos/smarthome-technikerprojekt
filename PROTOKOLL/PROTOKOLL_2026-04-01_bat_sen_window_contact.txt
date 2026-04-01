@@ -1,0 +1,32 @@
+PROTOKOLL - bat_sen_window_contact (2026-04-01)
+
+Ziel
+- Erstes konkretes BAT-SEN-Device (Fensterkontakt) auf neutralem bat_sen-Basistyp buildbar machen.
+
+Geaenderte Dateien
+- firmware/src/devices/bat_sen_window_contact/DeviceConfig.h
+- firmware/src/devices/bat_sen_window_contact/PinConfig.h
+- firmware/src/devices/bat_sen_window_contact/main.cpp
+- firmware/src/devices/bat_sen_window_contact/README.md
+- firmware/platformio.ini
+
+Was im Basistyp blieb
+- Wake/Sleep-Grundmechanik
+- HELLO/STATE/EVENT/ACK/CFG-Transportlogik
+- neutrale Batteriemetrik und State-Versandstruktur
+- Hook-Vertrag fuer Device-Logik
+
+Was im Geraet liegt
+- konkrete Device-IDs und Variantenkennung
+- konkrete PIN-Zuordnung fuer Fensterkontakt
+- Kontaktinterpretation (open/closed)
+- Event-Mapping auf SH_EVENT_WINDOW_OPENED / SH_EVENT_WINDOW_CLOSED
+- Debounce fuer Eingangssignal
+
+Build/Test
+- Befehl: pio run -e bat_sen_window_contact
+- Ergebnis: SUCCESS
+
+Grenzen/Risiken
+- GPIO-Wake ist fuer diesen v1-Pfad deaktiviert, da der aktuelle Basistyp-Call esp_sleep_enable_ext1_wakeup auf ESP32-C3 nicht buildbar ist.
+- Wake erfolgt in v1 ueber Timerfenster; echte sofortige Wake-on-change-Strategie fuer beide Flanken ist ein separater Folgepunkt.
