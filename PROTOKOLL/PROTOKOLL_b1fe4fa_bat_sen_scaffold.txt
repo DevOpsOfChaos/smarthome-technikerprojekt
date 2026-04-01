@@ -1,0 +1,78 @@
+PROTOKOLL – bat_sen neutraler Scaffold
+Stand: 2026-04-01
+
+Bezug
+- Repo: smarthome-technikerprojekt
+- Commit: b1fe4fa18ac21693c768e7c8140d5028672058bb
+- Commit-Message: firmware: scaffold neutral bat_sen base type
+
+Ziel der Änderung
+- Den Basistyp bat_sen im neuen öffentlichen Repo als neutrale Grundlage anlegen.
+- Noch keine konkrete Gerätesemantik übernehmen.
+- Eine saubere Basis für spätere konkrete Geräte wie bat_sen_window_contact schaffen.
+
+Ausgangslage
+- Master wurde bereits auf die neue Minimal-Basislinie bereinigt.
+- Für bat_sen lag bereits eine fachliche Zieldefinition im privaten Repo vor.
+- Das alte bat_sen aus dem Alt-Repo war als Profil-Multiplex bewertet und durfte nicht blind übernommen werden.
+
+Geänderte Dateien
+- firmware/src/basetypes/bat_sen/main.cpp
+- firmware/src/basetypes/bat_sen/AppConfig.h
+- firmware/src/basetypes/bat_sen/PinConfig.h
+- firmware/src/basetypes/bat_sen/README.md
+- firmware/platformio.ini
+
+Technischer Inhalt der Änderung
+1. Neuer neutraler Basistyp bat_sen
+- Wake-/Sleep-Grundstruktur angelegt
+- HELLO-/STATE-/EVENT-/CFG-/ACK-Basisfluss vorbereitet
+- neutrale Device-Hooks vorgesehen
+- keine konkrete Fensterkontakt- oder Regensensorlogik eingebaut
+
+2. Neutrale Batteriebasis
+- Batteriewerte als mV und Prozent vorgesehen
+- einfacher Fault-Pfad enthalten
+- ADC-Batteriepfad vorbereitet
+
+3. Konfigurierbare Basiskonstanten
+- Gerätekennung / Name / Variant
+- Reporting-/Wake-/RX-Zeitfenster
+- Batteriegrenzen / Delta-Schwellen
+- Deep-Sleep-/ADC-/GPIO-Wake-Schalter
+
+4. PlatformIO-Umgebung
+- env:bat_sen ergänzt
+- Build des Basistyps separat möglich gemacht
+
+Bewusst nicht enthalten
+- window_contact-Semantik
+- rain-Semantik
+- gerätespezifische Pins
+- gerätespezifische Defaults
+- Profil-Multiplex
+- Geräteschicht-Dateien unter firmware/src/devices/*
+- Änderungen an anderen Basistypen
+
+Nutzen / Verbesserungseffekt
+- bat_sen existiert jetzt als echte öffentliche Basislinie statt nur als Platzhalter
+- die neue Schichtung bleibt vorerst sauber: Basistyp-Mechanik getrennt von Gerätesemantik
+- der nächste Schritt kann auf einem buildbaren Grundgerüst aufsetzen
+
+Grenzen / Risiken
+- Im Basistyp werden historische Protokollfelder noch als neutrale Kanäle verwendet; darauf muss bei späteren Gerätepfaden diszipliniert geachtet werden, damit keine Gerätesemantik nach oben rutscht
+- Dies ist nur ein Scaffold, kein fertiges Nutzgerät
+- Reale Gerätevalidierung ist damit noch nicht erbracht
+
+Validierung
+- Laut Jobrückmeldung wurde folgender Build ausgeführt:
+  - pio run -e bat_sen
+- Gemeldetes Ergebnis:
+  - SUCCESS
+
+Einordnung
+- Die Änderung ist sinnvoll und passend zur festgelegten Zielarchitektur.
+- Sie ist kein fertiger Gerätepfad, sondern der neutrale Unterbau für spätere konkrete bat_sen-Ableger.
+
+Nächster sinnvoller Schritt
+- Erstes konkretes Gerät auf bat_sen-Basis mit engem Scope aufbauen, bevorzugt bat_sen_window_contact.
