@@ -28,5 +28,26 @@ Build/Test
 - Ergebnis: SUCCESS
 
 Grenzen/Risiken
-- GPIO-Wake ist fuer diesen v1-Pfad deaktiviert, da der aktuelle Basistyp-Call esp_sleep_enable_ext1_wakeup auf ESP32-C3 nicht buildbar ist.
-- Wake erfolgt in v1 ueber Timerfenster; echte sofortige Wake-on-change-Strategie fuer beide Flanken ist ein separater Folgepunkt.
+- Im ersten V1-Stand war GPIO-Wake deaktiviert und Wake lief nur ueber Timerfenster.
+- Echte sofortige Wake-on-change-Strategie fuer beide Flanken bleibt auch nach dem Wake-Fix ein separater Folgepunkt.
+
+Nachschnitt Wake-Strategie (C3) - 2026-04-01
+
+Warum der erste V1-Pinpfad fachlich nicht gut genug war
+- Der Kontakt hing auf `PIN_BOOT_BUTTON` (GPIO9).
+- GPIO9 ist auf ESP32-C3 kein gueltiger Deep-Sleep-Wake-Pin, damit war der "Wake-Pin" nur formal vorhanden.
+
+Was geaendert wurde
+- `bat_sen_window_contact` nutzt jetzt einen device-spezifischen Kontakt-/Wake-Pin: `GPIO3`.
+- GPIO-Wake ist im Device aktiviert (`BAT_SEN_ENABLE_GPIO_WAKE=1`).
+- Der Basistyp validiert Wake-Pin-Masken gegen gueltige Deep-Sleep-Wake-GPIOs.
+- Fuer ESP32-C3 wird GPIO-Deep-Sleep-Wakeup ueber `esp_deep_sleep_enable_gpio_wakeup(...)` genutzt.
+
+Was die neue Wake-Strategie kann
+- Echten Deep-Sleep-Wakeup ueber den Fensterkontakt auf C3.
+- Wake-Reason unterscheidet Timer-Wake und GPIO-Wake.
+- Fehlkonfigurationen (ungueltige Wake-Pins) werden als Warnung geloggt.
+
+Welche Grenzen bleiben
+- Wake bleibt level-basiert (hier: HIGH), nicht "beide Flanken sofort".
+- Die Gegenflanke ohne Wake-Level verursacht keinen unmittelbaren Wake und wird spaetestens im Timer-Wake-Fenster erkannt.

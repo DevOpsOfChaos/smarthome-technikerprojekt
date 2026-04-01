@@ -15,8 +15,11 @@
 #define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U
 #define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U
 
-// C3-Basis nutzt hier v1 ohne GPIO-Wake; Wake erfolgt ueber Timerfenster.
-#define BAT_SEN_ENABLE_GPIO_WAKE 0
+// C3-Device nutzt GPIO-Wake fuer echten Deep-Sleep-Wakeup am Kontaktpin.
+#define BAT_SEN_ENABLE_GPIO_WAKE 1
+
+// Wake-Bedingung folgt dem als "open" gewerteten Pegel.
+#define BAT_SEN_GPIO_WAKE_LEVEL_HIGH BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH
 
 // Device-spezifische Kontaktparameter.
 #define BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS 35UL

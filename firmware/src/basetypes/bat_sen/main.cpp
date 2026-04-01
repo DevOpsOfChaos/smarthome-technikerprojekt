@@ -32,6 +32,10 @@ RTC_DATA_ATTR uint32_t RTC_BOOT_COUNTER = 0U;
 #define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 0
 #endif
 
+#ifndef BAT_SEN_GPIO_WAKE_LEVEL_HIGH
+#define BAT_SEN_GPIO_WAKE_LEVEL_HIGH 1
+#endif
+
 struct GenericStateChannels {
     uint8_t channel_bool_1;
     uint16_t channel_u16_1;
@@ -168,7 +172,29 @@ bool istZeitErreicht(unsigned long jetzt, unsigned long ziel) {
 uint8_t wakeReasonCode() {
     const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_TIMER) return 1U;
+#if CONFIG_IDF_TARGET_ESP32C3
+    if (cause == ESP_SLEEP_WAKEUP_GPIO) return 2U;
+#else
+    if (cause == ESP_SLEEP_WAKEUP_EXT1) return 2U;
+#endif
     return 0U;
+}
+
+uint64_t validiereWakeMask(uint64_t kandidatMask) {
+    if (kandidatMask == 0ULL) return 0ULL;
+
+    uint64_t gueltigMask = 0ULL;
+    for (uint8_t pin = 0U; pin < 64U; ++pin) {
+        const uint64_t bit = (1ULL << pin);
+        if ((kandidatMask & bit) == 0ULL) continue;
+
+        if (esp_sleep_is_valid_wakeup_gpio((gpio_num_t)pin)) {
+            gueltigMask |= bit;
+        } else {
+            logf("WARN", "GPIO %u ist kein gueltiger Deep-Sleep-Wake-Pin", pin);
+        }
+    }
+    return gueltigMask;
 }
 
 uint8_t berechneBatterieProzent(uint16_t batteryMv) {
@@ -580,8 +606,23 @@ void aktiviereWakeQuellen() {
     if (PIN_WAKE_INPUT >= 0 && PIN_WAKE_INPUT < 64) {
         wakeMask |= (1ULL << (uint8_t)PIN_WAKE_INPUT);
     }
-    if (wakeMask != 0ULL) {
-        esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_HIGH);
+    wakeMask = validiereWakeMask(wakeMask);
+
+    if (wakeMask == 0ULL) {
+        logf("WARN", "GPIO-Wake aktiv, aber kein gueltiger Wake-Pin konfiguriert");
+        return;
+    }
+
+#if CONFIG_IDF_TARGET_ESP32C3
+    const esp_deepsleep_gpio_wake_up_mode_t wakeMode =
+        BAT_SEN_GPIO_WAKE_LEVEL_HIGH ? ESP_GPIO_WAKEUP_GPIO_HIGH : ESP_GPIO_WAKEUP_GPIO_LOW;
+    const esp_err_t wakeErr = esp_deep_sleep_enable_gpio_wakeup(wakeMask, wakeMode);
+#else
+    const esp_err_t wakeErr = esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_HIGH);
+#endif
+
+    if (wakeErr != ESP_OK) {
+        logf("WARN", "GPIO-Wake konnte nicht aktiviert werden (err=%d)", (int)wakeErr);
     }
 #endif
 }
