@@ -129,8 +129,6 @@ struct PendingRelayCommand {
     bool aktiv;
     size_t node_index;
     uint8_t seq;
-    uint8_t relay_index;
-    bool relay_state;
     unsigned long letztes_senden_ms;
     char request_id[REQUEST_ID_LEN];
     char command_channel[24];
@@ -140,8 +138,6 @@ struct PendingConfigCommand {
     bool aktiv;
     size_t node_index;
     uint8_t seq;
-    uint8_t param_id;
-    uint16_t value;
     unsigned long letztes_senden_ms;
     char request_id[REQUEST_ID_LEN];
     char command_channel[24];
@@ -962,8 +958,6 @@ bool sendeRelayCommand(size_t nodeIndex, uint8_t relayIndex, bool relayState, co
     pendingRelayCommand.aktiv = true;
     pendingRelayCommand.node_index = nodeIndex;
     pendingRelayCommand.seq = seq;
-    pendingRelayCommand.relay_index = relayIndex;
-    pendingRelayCommand.relay_state = relayState;
     pendingRelayCommand.letztes_senden_ms = millis();
     copyText(pendingRelayCommand.request_id, sizeof(pendingRelayCommand.request_id), requestId);
     copyText(pendingRelayCommand.command_channel, sizeof(pendingRelayCommand.command_channel), channel ? channel : "command");
@@ -1000,8 +994,6 @@ bool sendeConfigCommand(size_t nodeIndex, uint8_t paramId, uint16_t value, const
     pendingConfigCommand.aktiv = true;
     pendingConfigCommand.node_index = nodeIndex;
     pendingConfigCommand.seq = seq;
-    pendingConfigCommand.param_id = paramId;
-    pendingConfigCommand.value = value;
     pendingConfigCommand.letztes_senden_ms = millis();
     copyText(pendingConfigCommand.request_id, sizeof(pendingConfigCommand.request_id), requestId);
     copyText(pendingConfigCommand.command_channel, sizeof(pendingConfigCommand.command_channel), channel ? channel : "command");
