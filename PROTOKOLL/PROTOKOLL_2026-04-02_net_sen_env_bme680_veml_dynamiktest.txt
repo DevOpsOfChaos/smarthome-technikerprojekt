@@ -1,0 +1,91 @@
+Titel: Dynamiktest net_sen_env_bme680_veml (BME680 + VEML7700 + ENS160)
+Datum: 2026-04-02
+Thema: Reaktion auf Licht- und Luftänderung mit realer Hardware
+
+1) Ziel des Dynamiktests
+Ziel war der reale Nachweis, dass der Pfad net_sen_env_bme680_veml nicht nur statisch läuft, sondern auf gezielte Umweltänderungen nachvollziehbar reagiert (Licht und Ausatemluft) und danach wieder in stabile Werte zurückläuft.
+
+2) Ausgangslage
+- Öffentliches Repo: Branch main, Arbeitsstand b44dc5c.
+- Privates Repo: Branch main.
+- Hardware war aufgebaut (ESP32-C3-DevKitM-1, BME680, VEML7700, ENS160 auf gemeinsamem I2C).
+- Test wurde vollständig seriell geloggt.
+
+3) Unveränderter Aufbau
+- ESP32-C3-DevKitM-1
+- SDA -> GPIO0
+- SCL -> GPIO1
+- 3.3V Versorgung, gemeinsamer GND
+- BME680, VEML7700, ENS160 am gemeinsamen I2C-Bus
+- Kein Master im Testpfad
+
+4) Verwendete Firmware / Repo-Stand
+- Environment: net_sen_env_bme680_veml
+- Build/Upload:
+  pio run -e net_sen_env_bme680_veml -t upload --upload-port COM4
+- COM-Port: COM4 (USB VID_303A/PID_1001)
+- Keine neue Firmwareanpassung für diesen Dynamiktest erforderlich.
+
+5) Testablauf mit realen Benutzeraktionen
+A) Baseline
+- Initiale Baselinephase ohne absichtliche Eingriffe.
+
+B) Lichtänderung
+- Benutzer hat den Lichtsensor gezielt stark beeinflusst (deutlich heller/dunkler), danach Rückkehr zum Ausgangszustand.
+
+C) Luftänderung
+- Benutzer hat 2-3 mal aus kurzer Distanz in Richtung BME680/ENS160 ausgeatmet, danach Abstand gehalten.
+
+D) Rücklauf
+- Danach ohne weitere Eingriffe beobachtet.
+
+6) Beobachtungen im seriellen Monitor
+- Sauberer Boot und stabile Laufzeit ohne Reboot-Schleife.
+- Init-Status im validen Lauf:
+  - BME680 init OK (0x76)
+  - VEML7700 init OK (0x10)
+  - ENS160 init OK (0x52)
+- ENS160-Warmup korrekt, danach status=brauchbar.
+- BME680 Gas-Warmup-Marker vorhanden:
+  "BME680 Rohgas warmup abgeschlossen (gas_ohm intern belastbar)"
+- fault blieb im validen Lauf false.
+
+7) Bewertung Lichtreaktion
+Nachweis klar vorhanden:
+- Snapshot mit hoher Beleuchtung: lux=601
+- Danach deutlich reduziert: lux=30 und lux=18
+- Im durchgehenden Lauf ebenfalls starke Änderung bis lux=3/4 und später Rückkehr auf ~59/60
+=> Lux reagiert deutlich und reproduzierbar auf reale Lichtänderung.
+
+8) Bewertung Luftreaktion
+Nach Ausatem-Aktion klarer Peak in Luftwerten:
+- Vor Aktion (typisch):
+  - hum_01pct ~380-386
+  - tvoc_ppb ~34-54
+  - eco2_ppm ~422-465
+  - aqi=100
+- Peakphase:
+  - aqi=200
+  - tvoc_ppb=109
+  - eco2_ppm=564
+  - hum_01pct=517
+  - gleichzeitig gas_ohm deutlicher Abfall (z. B. 69084)
+- Danach Rücklauf auf normale Bandbreite (aqi wieder 100, TVOC/eCO2/Feuchte sinken).
+=> Luftreaktion nachvollziehbar und erwartungskonform.
+
+9) Probleme / Besonderheiten
+- Zu Testbeginn war der I2C-Aufbau zwischenzeitlich instabil (BME680/VEML/ENS160 zunächst nicht initialisiert).
+- Nach realer Neuprüfung/Neustecken der Hardware war die Initialisierung wieder stabil und der Dynamiktest auswertbar.
+
+10) Ggf. Minimalanpassungen
+- Keine zusätzliche Firmwareänderung in diesem Dynamiktestlauf.
+
+11) Gesamtfazit
+Testurteil: BESTANDEN.
+Der Pfad net_sen_env_bme680_veml reagiert im realen Aufbau plausibel auf Licht- und Luftänderungen und zeigt danach einen sauberen Rücklauf ohne fault-Eskalation.
+
+12) Nächster sinnvoller Schritt
+Kurzer Wiederholungslauf mit expliziter Zeitmarkierung der Benutzeraktionen direkt im Log (z. B. Marker über separates Steuerfenster), um die Phasen noch schärfer korrelieren zu können.
+
+13) Logpfad
+C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt-private\logs\hardwaretests\2026-04-03_realvalidierung\C_net_sen_env_bme680_veml_dynamiktest.log
