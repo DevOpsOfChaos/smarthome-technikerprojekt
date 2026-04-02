@@ -1,0 +1,53 @@
+Titel: Realtest net_sen_dht22_reference (Einzeltest ohne Master)
+Datum: 02.04.2026
+Thema: Reale Verifikation des DHT22-Referenzpfads auf ESP32-C3
+
+1) Ziel des Tests
+Ziel war die reale Verifikation des Firmwarepfads net_sen_dht22_reference mit angeschlossenem DHT22 am GPIO6. Geprueft werden sollten Bootverhalten, Initialisierung, serielle Diagnoseausgaben, Messwertplausibilitaet (Temperatur/Feuchte) und Stabilitaet ohne Master-Anbindung.
+
+2) Ausgangslage
+Der aktive Stand im oeffentlichen Repository lag auf Commit 1e267a2. Der Environment-Eintrag net_sen_dht22_reference war vorhanden und buildbar. Der Hardwareaufbau war als vorbereitet gemeldet (DHT22 DATA auf GPIO6, Versorgung 3.3V/GND).
+
+3) Realer Aufbau
+Verwendet wurde ein ESP32-C3-DevKitM-1 mit DHT22 im Einzeltestbetrieb ohne Master. Der reale serielle Port des Boards war COM4 (USB VID_303A/PID_1001). Der Test lief mit 115200 Baud.
+
+4) Verwendete Firmware / relevanter Repo-Stand
+Getestet wurde das Environment net_sen_dht22_reference aus dem Commit-Stand 1e267a2 mit enger, testbezogener Minimalanpassung im Geraetepfad:
+- firmware/src/devices/net_sen_dht22_reference/DeviceConfig.h
+- firmware/src/devices/net_sen_dht22_reference/main.cpp
+
+5) Durchgefuehrte Schritte
+Zuerst wurden die vorgesehenen Kontext- und Testunterlagen gelesen und der reale Repo-Stand geprueft. Danach erfolgte die Portpruefung und der Upload auf COM4. Anschliessend wurde wiederholt seriell beobachtet und geloggt. Nach einem auffaelligen Zwischenlauf wurden nur die fuer den Test noetigen Minimalanpassungen eingebracht, erneut geflasht und der Lauf wiederholt.
+
+6) Beobachtungen beim Flashen und Starten
+Der Build/Upload war reproduzierbar erfolgreich. Das Board startete sauber, ohne Reboot-Schleifen oder Crashmarker. Die Startsequenz war konsistent:
+- NET-SEN Startmeldung
+- Node-/Variantmeldung
+- Initialisierung des DHT22-Referenzpfads mit data_pin=6
+
+7) Beobachtungen im seriellen Monitor
+Im finalen sauberen Versuch wurden folgende verwertbare Messzeilen erfasst:
+- DHT22 Messwert temp_01c=224 hum_01pct=514
+- DHT22 Messwert temp_01c=222 hum_01pct=427
+- DHT22 Messwert temp_01c=222 hum_01pct=426
+- DHT22 Messwert temp_01c=220 hum_01pct=423
+- DHT22 Messwert temp_01c=220 hum_01pct=426
+Zusammen mit der Meldung "DHT22 liefert gueltige Messwerte" ist der Sensorpfad im Realbetrieb nachvollziehbar aktiv.
+
+8) Bewertung der Messwerte
+Die Temperaturwerte lagen im Bereich 22.0 bis 22.4 Grad C und sind fuer Innenraum plausibel. Die Feuchtewerte lagen im Bereich etwa 42.2 bis 51.4 Prozent rF und sind ebenfalls plausibel. Die Werte bewegten sich stabil mit kleinen, realistischen Schwankungen.
+
+9) Aufgetretene Probleme
+Im Testverlauf gab es zunaechst ein instabiles Hardwarebild (voruebergehend unplausible Nullwerte bzw. ausbleibende Folgelogs). Zudem trat einmal ein belegter COM-Port durch einen haengenden Monitorprozess auf. Nach Bereinigung der Hardware-/Portsituation war der finale Lauf stabil und plausibel.
+
+10) Gemachte Minimalanpassungen
+Es wurden nur testrelevante, enge Aenderungen am DHT22-Referenzpfad vorgenommen:
+- Gedrosseltes Messwert-Logging fuer den Realtestnachweis (ohne Dauer-Spam)
+- Engere Plausibilitaetspruefung fuer Temperatur/Feuchte, damit offensichtliche Ausreisser nicht als gueltig behandelt werden
+Es wurden keine anderen Geraetelinien oder Basistypen angepasst.
+
+11) Gesamtfazit
+Der Realtest net_sen_dht22_reference ist nach finalem Wiederholungslauf bestanden. Boot und Initialisierung sind stabil, der Upload ist reproduzierbar erfolgreich, und die im Monitor beobachteten Temperatur-/Feuchtewerte sind plausibel.
+
+12) Naechster sinnvoller Schritt
+Als naechster Schritt sollte der geplante Block net_sen_env_bme680_veml (Basispfad) unter denselben Testregeln gefahren werden, anschliessend der ENS160-Folgecheck im selben Environment.

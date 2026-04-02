@@ -25,6 +25,7 @@ DHT sensorDht22(NET_SEN_DHT22_REF_PIN_DATA, DHT_SENSOR_TYPE);
 unsigned long bootMs = 0UL;
 unsigned long letzterSensorPollMs = 0UL;
 unsigned long letzterFehlerLogMs = 0UL;
+unsigned long letzterWerteLogMs = 0UL;
 bool letzterFaultState = true;
 
 uint16_t clampToHum01pct(long value) {
@@ -46,6 +47,7 @@ void netSenDeviceSensorInit() {
     bootMs = millis();
     letzterSensorPollMs = 0UL;
     letzterFehlerLogMs = 0UL;
+    letzterWerteLogMs = 0UL;
     letzterFaultState = true;
 
     sensorDht22.begin();
@@ -88,18 +90,37 @@ bool netSenDeviceSensorPoll(
         const float tempC = sensorDht22.readTemperature();
         const float humPct = sensorDht22.readHumidity();
 
+        const bool rohwerteGueltig = isfinite(tempC) && isfinite(humPct);
+        const int16_t temp01c = (int16_t)lroundf(tempC * 10.0f);
+        const uint16_t hum01pct = clampToHum01pct((long)lroundf(humPct * 10.0f));
         const bool messungGueltig =
-            isfinite(tempC) &&
-            isfinite(humPct) &&
-            humPct >= 0.0f &&
-            humPct <= 100.0f;
+            rohwerteGueltig &&
+            temp01c >= NET_SEN_DHT22_REF_TEMP_MIN_01C &&
+            temp01c <= NET_SEN_DHT22_REF_TEMP_MAX_01C &&
+            hum01pct >= NET_SEN_DHT22_REF_HUM_MIN_01PCT &&
+            hum01pct <= NET_SEN_DHT22_REF_HUM_MAX_01PCT;
 
         if (messungGueltig) {
-            neuerTemp = (int16_t)lroundf(tempC * 10.0f);
-            neuerHum = clampToHum01pct((long)lroundf(humPct * 10.0f));
+            neuerTemp = temp01c;
+            neuerHum = hum01pct;
             neuerFault = false;
+
+            if ((jetzt - letzterWerteLogMs) >= NET_SEN_DHT22_REF_VALUE_LOG_INTERVAL_MS || vorherFault) {
+                logf(
+                    "INFO",
+                    "DHT22 Messwert temp_01c=%d hum_01pct=%u",
+                    (int)neuerTemp,
+                    (unsigned int)neuerHum);
+                letzterWerteLogMs = jetzt;
+            }
         } else if ((jetzt - letzterFehlerLogMs) >= NET_SEN_DHT22_REF_ERROR_LOG_INTERVAL_MS || !vorherFault) {
-            logf("WARN", "DHT22 Messung ungueltig (temp/hum nicht plausibel)");
+            logf(
+                "WARN",
+                "DHT22 Messung ungueltig (tempC=%.2f humPct=%.2f temp_01c=%d hum_01pct=%u)",
+                tempC,
+                humPct,
+                (int)temp01c,
+                (unsigned int)hum01pct);
             letzterFehlerLogMs = jetzt;
         }
     }
