@@ -1,0 +1,99 @@
+Titel: E2E-Realtest Master + net_sen_env_bme680_veml
+Datum: 2026-04-02
+Thema: Erster realer Integrationsnachweis Node -> ESP-NOW -> Master -> MQTT-Projektion
+
+1) Ziel des E2E-Tests
+Ziel war der reale Nachweis der vollständigen Integrationskette zwischen Master und net_sen_env_bme680_veml-Node inklusive serieller Nachweise und MQTT-Aktivität.
+
+2) Ausgangslage
+- Öffentlicher Repo-Stand: Branch main, letzter Commit vor diesem Lauf: 08d56b1.
+- Privater Repo-Stand: Branch main, letzter Commit vor diesem Lauf: 2313831.
+- Hardware vorhanden: Master-Board und net_sen_env_bme680_veml-Aufbau.
+
+3) Realer Aufbau
+- Master: ESP32-C3, Environment `master`.
+- Node: ESP32-C3, Environment `net_sen_env_bme680_veml`.
+- Node-Sensorik: BME680 + VEML7700 aktiv, ENS160 im Testaufbau nicht erkannt.
+- Verbindungspfad: Node sendet per ESP-NOW, Master projiziert nach MQTT.
+
+4) Portzuordnung
+- Real geprüft mit COM-Scan und Live-Serienlogs.
+- Master: COM3
+- Node: COM4
+
+5) Verwendeter Repo-Stand
+Öffentlich (`smarthome-technikerprojekt`):
+- 08d56b1 docs: add master erstinbetriebnahme realtest protocol
+
+Privat (`smarthome-technikerprojekt-private`):
+- 2313831 docs(private): add master realtest output and log
+
+6) Build-/Flash-Schritte
+Master:
+- pio run -e master
+- pio run -e master -t upload --upload-port COM3
+
+Node:
+- pio run -e net_sen_env_bme680_veml
+- pio run -e net_sen_env_bme680_veml -t upload --upload-port COM4
+
+Ergebnis:
+- Build erfolgreich auf beiden Environments.
+- Upload erfolgreich auf beiden Boards.
+
+7) Dual-Capture-Ablauf
+- Mehrere reale Capture-Laeufe durchgefuehrt.
+- Finaler stabiler No-Reset-Dual-Capture im Zielordner:
+  logs/hardwaretests/2026-04-03_realvalidierung/e2e_master_net_sen_env_bme680_veml/
+  - master.log
+  - node.log
+  - combined.log
+- Zusaetzlicher MQTT-Capture (mqtt_capture.log) zur Verifikation der Broker-Seite.
+
+8) Beobachtungen Node
+- Boot und Sensor-Init stabil:
+  - BME680 init OK
+  - VEML7700 init OK
+  - ENS160 nicht gefunden
+- HELLO_ACK empfangen nach Start.
+- Regelmaessige ENV-Snapshots vorhanden (temp/hum/lux/pressure, fault-Status).
+- Keine Reboot-Schleife sichtbar.
+
+9) Beobachtungen Master
+- Verarbeitung von HEARTBEAT und STATE_REPORT fuer net_sen_01 nachweisbar.
+- Node-Online/Offline-Uebergaenge und Availability-Projektion vorhanden.
+- MQTT-Retained-Publishes fuer net_sen_01/state und net_sen_01/availability vorhanden.
+
+10) Tatsaechlicher Integrationsnachweis
+Die Kette ist real belegt:
+- Node-Seite: HELLO_ACK und periodische State-Snapshots.
+- Master-Seite: HEARTBEAT + STATE_REPORT verarbeitet.
+- MQTT-Seite: `smarthome/device/net_sen_01/state` und `.../availability` mit laufenden Updates.
+
+Damit ist die Integrationskette Node -> ESP-NOW -> Master -> MQTT/Projection technisch nachgewiesen.
+
+11) Probleme / Loesungen
+Problem A:
+- Urspruenglicher Ziel-Broker 192.168.1.172:1883 war in der aktuellen Testumgebung nicht erreichbar.
+Loesung A:
+- Erreichbaren lokalen Broker fuer den Testnachweis verwendet, MQTT-Aktivitaet zusaetzlich per mqtt_capture.log verifiziert.
+
+Problem B:
+- Wiederholtes Standard-Serial-Opening fuehrte zeitweise zu ROM-Only-Starts ohne verwertbare App-Logs.
+Loesung B:
+- Finalen Seriennachweis mit No-Reset-Dual-Capture gefahren.
+
+12) Ggf. Minimalanpassungen
+- Keine Firmware-Quellcodeaenderung im oeffentlichen Repo.
+- Nur Testartefakte und Protokoll erweitert.
+
+13) Gesamtfazit
+Testurteil: BESTANDEN.
+Der erste reale E2E-Nachweis fuer Master + net_sen_env_bme680_veml ist erbracht. Die Integrationskette arbeitet technisch, inkl. Master-Projektion auf MQTT.
+
+14) Einschraenkungen
+- ENS160 war im aktuellen Aufbau nicht erreichbar; AQI/TVOC/eCO2 blieben entsprechend null/ungueltig.
+- Das betrifft den Zusatzsensorpfad, nicht den Kernnachweis der E2E-Kette.
+
+15) Naechster sinnvoller Schritt
+- ENS160-Hardwarepfad gezielt stabilisieren (Adresse/Verkabelung/Bus), danach kurzer Folge-E2E-Lauf mit gueltigen AQI/TVOC/eCO2-Werten und erneutem Kombi-Log.
