@@ -76,7 +76,7 @@ Damit ist die Integrationskette Node -> ESP-NOW -> Master -> MQTT/Projection tec
 Problem A:
 - Urspruenglicher Ziel-Broker 192.168.1.172:1883 war in der aktuellen Testumgebung nicht erreichbar.
 Loesung A:
-- Erreichbaren lokalen Broker fuer den Testnachweis verwendet, MQTT-Aktivitaet zusaetzlich per mqtt_capture.log verifiziert.
+- Broker-Erreichbarkeit erneut geprueft und MQTT-Aktivitaet zusaetzlich mit separatem mqtt_capture.log verifiziert.
 
 Problem B:
 - Wiederholtes Standard-Serial-Opening fuehrte zeitweise zu ROM-Only-Starts ohne verwertbare App-Logs.
@@ -97,3 +97,4 @@ Der erste reale E2E-Nachweis fuer Master + net_sen_env_bme680_veml ist erbracht.
 
 15) Naechster sinnvoller Schritt
 - ENS160-Hardwarepfad gezielt stabilisieren (Adresse/Verkabelung/Bus), danach kurzer Folge-E2E-Lauf mit gueltigen AQI/TVOC/eCO2-Werten und erneutem Kombi-Log.
+
