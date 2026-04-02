@@ -1,0 +1,78 @@
+Titel: Master Erstinbetriebnahme auf realer Hardware
+Datum: 2026-04-02
+Thema: Realer Funktionsnachweis Build, Flash, WLAN, ESP-NOW, MQTT und serielle Laufzeit (Master)
+
+1) Ziel des Tests
+Ziel war der reale Nachweis, dass die Master-Firmware im aktuellen Hauptstand buildbar und flashbar ist, sich im Zielnetz stabil verhält und im Laufzeitbetrieb die Kernkommunikation (WLAN, ESP-NOW, MQTT) technisch funktionsfähig zeigt.
+
+2) Ausgangslage
+- Getestet wurde das öffentliche Repository im Stand `775cd2c` (Branch `main`).
+- Der Master wird als `env:master` auf ESP32-C3 betrieben.
+- Der zuvor identifizierte Zielport war `COM3` (USB-Gerät mit VID 303A / PID 1001).
+
+3) Realer Aufbau
+- Hardware: ESP32-C3 Masterboard per USB am Testrechner.
+- Portprüfung: COM-Port-Scan mit Skript aus dem privaten Repository.
+- Upload-Port: `COM3`.
+- Serielle Laufzeitbeobachtung: 115200 Baud.
+
+4) Secrets-Vorgehen ohne Offenlegung
+- Die lokale Datei `Secrets.h` wurde aus dem Alt-Repository in das neue öffentliche Repository übernommen.
+- Es wurden keine Zugangsdaten im Repository committed.
+- `firmware/include/Secrets.h` ist weiterhin über `.gitignore` ausgeschlossen und wurde nicht gestaged.
+
+5) Verwendeter Repo-Stand
+Öffentliches Repository (`smarthome-technikerprojekt`):
+- Branch: `main`
+- Commitbasis für den Test: `775cd2c`
+
+Privates Repository (`smarthome-technikerprojekt-private`):
+- Branch: `main`
+- Commitbasis für Testdokumentation: `efe478d`
+
+6) Build- und Upload-Schritte
+Durchgeführt wurde:
+1. `pio run -e master`
+2. `pio run -e master -t upload --upload-port COM3`
+
+Ergebnis:
+- Build: erfolgreich.
+- Upload auf reale Hardware (COM3): erfolgreich.
+
+7) Beobachtungen im seriellen Monitor
+Im relevanten Laufzeitfenster wurde u. a. beobachtet:
+- MQTT-Verbindung wurde aufgebaut (`MQTT verbunden`).
+- Master-Status wurde retained publiziert mit `wifi=true`, `mqtt=true`, `espnow=true`.
+- Availability-Meldungen der erwarteten Nodes wurden publiziert.
+
+Zusätzlich trat bei erneuten Monitoring-Neustarts ein ROM/Download-Mode-Muster auf (`boot:0x7 (DOWNLOAD...)`), was auf ein Handshake-/Resetverhalten beim seriellen Zugriff hinweist und den Startlog künstlich verfälschen kann.
+
+8) WLAN / MQTT / ESP-NOW Bewertung
+- WLAN: als funktionsfähig bewertet (im Master-Status als `wifi=true` publiziert).
+- MQTT: als funktionsfähig bewertet (Verbindung, Event-Publish und retained Status/Availability nachgewiesen).
+- ESP-NOW: als funktionsfähig bewertet (Master-Status `espnow=true` publiziert).
+
+9) Gemachte Minimalanpassungen
+- Keine Firmwareänderung erforderlich.
+- Keine Master-Quellcodekorrektur erforderlich.
+- Nur Testartefakte und Protokolldokumentation erstellt.
+
+10) Probleme und Lösungen
+Problem:
+- Serielle Monitor-Neustarts können den C3 zeitweise in einen Download-Startzustand bringen, wodurch Boot-/Laufzeitlog teilweise unvollständig bzw. nicht repräsentativ beginnt.
+
+Lösung:
+- Relevante Laufzeitbelege aus erfolgreichem Capture-Fenster gesichert.
+- Anomalie im Prüfbericht und Testlog transparent dokumentiert.
+
+11) Gesamtfazit
+Der reale Erstinbetriebnahme-Test des Masters war in den Kernzielen erfolgreich:
+- Build erfolgreich
+- Flash erfolgreich
+- WLAN/MQTT/ESP-NOW im Laufzeitnachweis technisch funktionsfähig
+
+Einschränkung:
+- Die serielle Bootphase ist bei erneuten Monitor-Neustarts aufgrund des beobachteten Reset-/Handshake-Verhaltens nicht durchgängig sauber reproduzierbar.
+
+12) Nächster sinnvoller Schritt
+Ein kurzer Anschlusslauf mit stabilisiertem Monitor-Handling (ohne Download-Mode-Einstieg) soll gezielt den vollständigen Boottext in einem Stück erfassen. Danach kann der Master-Test als vollständig reproduzierbarer Referenzlauf abgelegt werden.
