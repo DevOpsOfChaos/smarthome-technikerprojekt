@@ -1,0 +1,103 @@
+Titel: Realtest net_sen_env_bme680_veml (BME680 + VEML7700 + ENS160)
+Datum: 2026-04-02
+Thema: Vollvalidierung des net_sen-Umweltpfads auf realer ESP32-C3-Hardware ohne Master
+
+1) Ziel des Tests
+Ziel war die reale, vollständige Prüfung des Environment-Pfads net_sen_env_bme680_veml mit den Sensoren BME680, VEML7700 und ENS160 am gemeinsamen I2C-Bus. Der Test sollte Build, Upload, seriellen Langzeitmonitor (inkl. Warmup-Zeit), Sensorinitialisierung, Messwertplausibilität und Fault-Verhalten belastbar nachweisen.
+
+2) Ausgangslage
+- Öffentliches Repo geprüft auf Branch main, letzter Commit vor Test: d0fa862.
+- Privates Repo geprüft auf Branch main.
+- Testvorgabe: kein Master, keine künstliche Basistest-Abkürzung, voller Umweltpfad mit ENS160.
+
+3) Realer Aufbau
+- Controller: ESP32-C3-DevKitM-1
+- I2C-Pins: SDA=GPIO0, SCL=GPIO1
+- Sensoren am gemeinsamen Bus: BME680, VEML7700, ENS160
+- Versorgung: 3.3V und gemeinsamer GND
+- Tatsächlicher serieller Port: COM4 (USB VID_303A/PID_1001)
+
+4) Verwendete Firmware / relevanter Repo-Stand
+- Environment: net_sen_env_bme680_veml
+- Build-/Upload-Basis: firmware/platformio.ini, Gerätepfad firmware/src/devices/net_sen_env_bme680_veml/
+- Testrelevante Minimalanpassung während dieses Tests:
+  firmware/src/devices/net_sen_env_bme680_veml/main.cpp
+  Ergänzung eines gedrosselten ENV-Snapshot-Logs alle 30 s (Messwerte + Fault), damit Messwertplausibilität ohne Master direkt am Node nachvollziehbar ist.
+
+5) Durchgeführte Schritte
+1. Kontext- und Tooldateien vollständig gelesen.
+2. Repo-Stand im öffentlichen und privaten Repo geprüft.
+3. COM-Port mit ai/tools/list_serial_ports.ps1 -Detailed geprüft.
+4. Build und Upload ausgeführt:
+   pio run -e net_sen_env_bme680_veml -t upload --upload-port COM4
+5. Ersten 5-Minuten-Capture gefahren (Warmup/Init bestätigt, Messwerttiefe noch unzureichend).
+6. Minimalanpassung für Snapshot-Logs implementiert.
+7. Erneut Build + Upload auf COM4.
+8. Finalen 5-Minuten-Log mit Zeitstempeln aufgenommen:
+   ai/tools/serial_log_capture.ps1 -Port COM4 -Baudrate 115200 -Timestamp -DurationSeconds 300
+
+6) Beobachtungen beim Flashen und Starten
+- Build erfolgreich, keine Compiler- oder Linkfehler.
+- Upload erfolgreich auf COM4, Chip korrekt erkannt (ESP32-C3), Hash-Prüfungen ohne Fehler.
+- Boot sauber, keine Reboot-Schleifen.
+- Startmeldungen konsistent:
+  - NET-SEN Startmeldung
+  - BME680 init OK auf 0x76
+  - VEML7700 init OK auf 0x10
+  - ENS160 init OK auf 0x52
+
+7) Beobachtungen im seriellen Monitor
+- ENS160 meldet im Warmup konsistent status=warmup.
+- BME680-Warmup-Marker erscheint nach ca. 177 s Laufzeit:
+  "BME680 Rohgas warmup abgeschlossen (gas_ohm intern belastbar)"
+- ENS160 wechselt danach konsistent auf status=brauchbar.
+- Kompensationspfad bleibt aktiv und erfolgreich:
+  kompensation=aktiv, bme_valid=true, ens_comp_call=ja, ens_comp_result=0
+- Snapshot-Logs alle 30 s liefern auswertbare Messwerte ohne Spam.
+
+8) Bewertung je Sensorblock
+BME680:
+- Init: bestanden (Adresse 0x76).
+- Temperatur: 21.9-22.2 C (temp_01c 219-222), plausibel.
+- Feuchte: 39.0-41.7 % (hum_01pct 390-417), plausibel.
+- Druck: 99806-99816 Pa, plausibel.
+- Gas: vor Warmup absichtlich ungültig; nach Warmup 75841-80122 Ohm, technisch plausibel.
+
+VEML7700:
+- Init: bestanden (Adresse 0x10).
+- Lux: 42-46 lx (stabiler Innenraumwert), plausibel.
+- Keine Aussetzer oder Fehlermeldungen.
+
+ENS160:
+- Init: bestanden (Adresse 0x52).
+- Warmup: korrekt über ~180 s berücksichtigt.
+- Nach Warmup status=brauchbar, Kompensation aktiv und erfolgreich (Result=0).
+- AQI/TVOC/eCO2 technisch vorhanden und nicht ungültig:
+  AQI=100, TVOC ca. 34-52 ppb, eCO2 ca. 422-460 ppm.
+
+9) Warmup- und Zeitverhalten
+- Gesamtlaufzeit finaler Nachweis: 300 s (5 Minuten).
+- BME680 Gas-Warmup und ENS160-Warmup wurden vollständig abgewartet.
+- Stale-Fehler trat nicht auf.
+- fault blieb durchgehend false.
+
+10) Aufgetretene Probleme
+- Problem: ursprünglicher Logpfad zeigte Init/Warmup, aber keine expliziten Messwerte für eine lehrerlesbare Plausibilitätsprüfung ohne Master.
+- Lösung: minimale, gedrosselte Snapshot-Logzeile in main.cpp ergänzt.
+- Keine weiteren Fehler bei Build, Upload oder Laufzeit.
+
+11) Gemachte Minimalanpassungen
+- Datei: firmware/src/devices/net_sen_env_bme680_veml/main.cpp
+- Inhalt: zusätzlicher, alle 30 s gedrosselter INFO-Snapshot mit temp_01c, hum_01pct, lux, pressure_pa, gas_ohm, aqi, tvoc_ppb, eco2_ppm, fault.
+- Umfang: eng auf Testnachweis begrenzt, keine Architekturänderung.
+
+12) Gesamtfazit
+Testurteil: BESTANDEN.
+Der Pfad net_sen_env_bme680_veml läuft auf realer Hardware stabil. Alle drei Sensoren wurden am I2C-Bus erkannt, Warmup-Regeln wurden eingehalten, Messwerte sind technisch plausibel, der ENS160-Kompensationspfad arbeitet nachweisbar, und es traten keine Fault- oder Reboot-Probleme auf.
+
+13) Nächster sinnvoller Schritt
+Als nächster Schritt sollte ein kurzer Wiederholungslauf mit bewusst veränderter Licht-/Luftsituation durchgeführt werden (Lux deutlich ändern, leichte VOC-Änderung), um Dynamik und Reaktionsverhalten der Snapshot-Werte zusätzlich zu dokumentieren.
+
+14) Lognachweis
+Finaler Log:
+C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt-private\logs\hardwaretests\2026-04-03_realvalidierung\C_net_sen_env_bme680_veml_fulltest.log

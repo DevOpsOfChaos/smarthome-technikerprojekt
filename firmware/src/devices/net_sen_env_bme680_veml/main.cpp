@@ -34,6 +34,7 @@ bool netSenDeviceExtendedStatePoll(
 
 namespace {
 constexpr uint32_t I2C_CLOCK_HZ = 100000UL;
+constexpr uint32_t SENSOR_SNAPSHOT_LOG_INTERVAL_MS = 30000UL;
 constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;
 
 struct ErweiterterState {
@@ -63,6 +64,7 @@ unsigned long letzterVemlFehlerLogMs = 0UL;
 unsigned long letzterEnsInfoLogMs = 0UL;
 unsigned long letzterEnsFehlerLogMs = 0UL;
 unsigned long letzterEnsGueltigMs = 0UL;
+unsigned long letzterSnapshotLogMs = 0UL;
 
 uint8_t bme680GueltigeMessungen = 0U;
 bool gasWarmupInfoGeloggt = false;
@@ -280,6 +282,7 @@ void netSenDeviceSensorInit() {
     letzterEnsInfoLogMs = 0UL;
     letzterEnsFehlerLogMs = 0UL;
     letzterEnsGueltigMs = 0UL;
+    letzterSnapshotLogMs = 0UL;
     bme680GueltigeMessungen = 0U;
     gasWarmupInfoGeloggt = false;
     ensWarteHinweisGeloggt = false;
@@ -527,6 +530,22 @@ bool netSenDeviceSensorPoll(
 
     if (extendedGeaendert) {
         erweiterterStateGeaendert = true;
+    }
+
+    if ((jetzt - letzterSnapshotLogMs) >= SENSOR_SNAPSHOT_LOG_INTERVAL_MS) {
+        logf(
+            "INFO",
+            "ENV snapshot temp_01c=%d hum_01pct=%u lux=%u pressure_pa=%lu gas_ohm=%lu aqi=%u tvoc_ppb=%u eco2_ppm=%u fault=%s",
+            neuerTemp,
+            neuerHum,
+            neuerLux,
+            (unsigned long)erweiterterState.pressure_pa,
+            (unsigned long)erweiterterState.gas_ohm,
+            erweiterterState.aqi,
+            erweiterterState.tvoc_ppb,
+            erweiterterState.eco2_ppm,
+            neuerFault ? "true" : "false");
+        letzterSnapshotLogMs = jetzt;
     }
 
     return absDiffI16(neuerTemp, vorherTemp) >= NET_SEN_ENV_BME680_VEML_TEMP_DELTA_01C ||
