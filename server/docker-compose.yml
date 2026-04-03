@@ -44,8 +44,8 @@ services:
       - /bin/sh
       - -lc
       - >
-        node -e "const fs=require('fs');const path=require('path');const dir='/data/flows/active';const files=fs.readdirSync(dir).filter((name)=>name.endsWith('.json')).sort();const merged=files.flatMap((name)=>JSON.parse(fs.readFileSync(path.join(dir,name),'utf8')));fs.writeFileSync('/data/flows.json', JSON.stringify(merged, null, 2));"
-        && exec npm start -- --userDir /data --settings /data/settings.js --flowFile /data/flows.json
+        node -e "const fs=require('fs');const path=require('path');const dir='/data/flows/active';const files=fs.readdirSync(dir).filter((name)=>name.endsWith('.json')).sort();const merged=files.flatMap((name)=>JSON.parse(fs.readFileSync(path.join(dir,name),'utf8')));fs.writeFileSync('/data/flows.json', JSON.stringify(merged, null, 2));const settingsContent=[\"const base = require('/data/settings.js');\",\"module.exports = {\",\"  ...base,\",\"  functionGlobalContext: {\",\"    ...(base.functionGlobalContext || {}),\",\"    topicRouter: require('/data/lib/topic_router'),\",\"    deviceStore: require('/data/lib/device_store'),\",\"    topicHandlers: require('/data/lib/topic_handlers'),\",\"    capabilityHelpers: require('/data/lib/capability_helpers'),\",\"    timeHelpers: require('/data/lib/time_helpers')\",\"  }\",\"};\",\"\"].join('\\n');fs.writeFileSync('/tmp/settings.generated.js', settingsContent);"
+        && exec npm start -- --userDir /data --settings /tmp/settings.generated.js --flowFile /data/flows.json
 
 volumes:
   influxdb-data: {}

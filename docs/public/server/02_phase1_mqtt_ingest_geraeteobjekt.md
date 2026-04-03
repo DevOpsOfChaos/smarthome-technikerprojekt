@@ -10,6 +10,13 @@ Der Server verarbeitet MQTT nicht frei nach Bauchgefuehl, sondern nach einer fes
 4. passenden Block aktualisieren
 5. den gemeinsamen Laufzeitzustand fortschreiben
 
+Die fachliche Wahrheit liegt dabei in den Lib-Dateien unter `server/nodered/lib/`.
+Die aktiven Flows enthalten nur noch die Node-RED-Bruecken fuer:
+
+- MQTT-Eingang und JSON-Lesen
+- Aufruf der zentralen Router- und Handler-Module
+- Schreiben des aktualisierten Runtime-Objekts in den globalen Node-RED-Kontext
+
 ## Topic auf Zielblock
 
 ### `meta`
@@ -70,6 +77,22 @@ Diese Struktur ist absichtlich simpel. Wer hier wieder Sondermodelle pro Geraete
 - `ack` darf keine Bedienerfolge vortaeuschen
 - `meta`, `availability` und `state` duerfen unbekannte Geraete robust anlegen
 - der Master bleibt separat
+- Topic-Erkennung steht nur in `server/nodered/lib/topic_router.js`
+- Block-Updates stehen nur in `server/nodered/lib/device_store.js`
+- die Zuordnung Topic -> Handler steht nur in `server/nodered/lib/topic_handlers.js`
+
+## Unvermeidbare Node-RED-Bruecke
+
+Node-RED-Function-Nodes koennen die lokalen Lib-Dateien nicht sinnvoll als zweiteilige Parallelwelt pflegen. Deshalb stellt der Startpfad die Module einmalig ueber `functionGlobalContext` bereit.
+
+Diese Bruecke ist keine zweite fachliche Wahrheit, weil sie nichts ueber:
+
+- Topic-Regeln
+- Capability-Normalisierung
+- Device- oder Master-Struktur
+- State-, Event-, ACK- oder Status-Updates
+
+neu definiert. Sie macht die zentrale Wahrheit nur im Flow ausfuehrbar.
 
 ## Phase-1-Grenze
 
