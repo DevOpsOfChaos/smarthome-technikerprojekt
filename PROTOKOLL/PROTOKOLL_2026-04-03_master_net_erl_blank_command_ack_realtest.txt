@@ -1,0 +1,95 @@
+Titel: Master-Net-ERL Blank Command-ACK Realtest
+Datum: 2026-04-03
+Thema: Echter Minimalpfad Master -> MQTT Command -> ESP-NOW -> net_erl -> ACK/State -> MQTT
+
+1) Ziel
+Dieser Schritt sollte den ersten echten aktiven Command-/ACK-Nachweis fuer einen blanken `net_erl`-Node liefern. Im Fokus stand bewusst kein Sensorpfad und keine Komfortlogik, sondern nur der enge Relais-Minimalpfad auf GPIO10.
+
+2) Ausgangslage
+Im oeffentlichen Repo lag bereits ein gezielter Austauschstand fuer `net_erl_hall_light` vor:
+- eigener `build_src_filter` fuer `env:net_erl_hall_light`
+- Device-Konfiguration fuer `net_erl_01`
+- GPIO10 als Relaispfad
+- minimaler ESP-NOW-Runtimepfad mit HELLO, HEARTBEAT, STATE, CMD und ACK
+
+Der reale Aufbau bestand aus:
+- Master-Board auf `COM3`
+- blankes `net_erl`-Board auf `COM12`
+- Relaispfad auf GPIO10
+- keine Sensoren
+
+3) Ziel dieses Schritts
+Nachgewiesen werden sollte:
+- MQTT-Command an `smarthome/device/net_erl_01/command`
+- Versand vom Master ueber ESP-NOW
+- Relaisumschaltung auf dem Node
+- ACK-Ruecklauf an den Master
+- MQTT-ACK und MQTT-State als Broker-Nachweis
+- Ruecklauf von HIGH nach LOW
+
+4) Umsetzung
+Zuerst wurden beide Repos und die realen COM-Ports geprueft. Danach wurden beide Firmware-Environments erfolgreich gebaut und real geflasht:
+- `pio run -e master`
+- `pio run -e master -t upload --upload-port COM3`
+- `pio run -e net_erl_hall_light`
+- `pio run -e net_erl_hall_light -t upload --upload-port COM12`
+
+Anschliessend wurde ein No-Reset-Dual-Capture fuer Master und Node gestartet und parallel ein MQTT-Capture auf dem Broker mitgeschnitten.
+
+Die reale Testaktion bestand aus drei MQTT-Nachrichten:
+- `{"command":"set_relay","request_id":"realtest-relay-on-20260403","relay_1":true}`
+- `{"command":"set_relay","request_id":"realtest-relay-off-20260403","relay_1":false}`
+- `{"command":"get_state"}`
+
+5) Reales Problem im ersten Versuch
+Der erste Command-Versuch scheiterte nicht an Funk oder Hardware, sondern an einem falschen MQTT-Feldnamen. Der Master erwartet im JSON das Feld `command`, nicht `cmd`. Der Fehler war im Master-Log direkt sichtbar:
+- `MQTT command ohne gueltiges command-Feld fuer net_erl_01`
+
+Der Lauf wurde deshalb nicht schoengeschrieben, sondern mit korrigiertem Payload komplett erneut gefahren.
+
+6) Validierung
+Der erfolgreiche zweite Lauf ist in den finalen Logs klar belegt.
+
+Node-Log:
+- `GPIO10 relay_1 -> HIGH`
+- `GPIO10 relay_1 -> LOW`
+
+Master-Log:
+- `MQTT empfangen smarthome/device/net_erl_01/command -> {"command":"set_relay","request_id":"realtest-relay-on-20260403","relay_1":true}`
+- `COMMAND_SET_RELAY gesendet an 20:6E:F1:6A:DF:5C`
+- `MQTT publish smarthome/device/net_erl_01/ack -> {"device_id":"net_erl_01","request_id":"realtest-relay-on-20260403","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":0,"source":"node_ack"}`
+- `MQTT retained smarthome/device/net_erl_01/state -> {"device_id":"net_erl_01","relay_1":true,...,"fault":false}`
+- entsprechender Ruecklauf fuer `realtest-relay-off-20260403` mit `ack_seq":1` und `relay_1":false`
+- zusaetzlich `STATE_REQUEST gesendet` und nachfolgender `STATE_REPORT`
+
+MQTT-Capture:
+- `smarthome/device/net_erl_01/ack` mit `status":"ok"` fuer EIN und AUS
+- `smarthome/device/net_erl_01/state` mit `relay_1":true`
+- spaeter `smarthome/device/net_erl_01/state` mit `relay_1":false`
+- `smarthome/device/net_erl_01/availability` durchgehend `online`
+
+7) Ergebnis
+Der enge Minimalpfad ist real bestanden:
+- Master nimmt MQTT-Commands an
+- Master sendet den Relaisbefehl ueber ESP-NOW an den blanken `net_erl`
+- der Node schaltet GPIO10 real auf HIGH und anschliessend wieder auf LOW
+- der Node liefert ACK und State sauber zurueck
+- der Master publiziert ACK, Event, State und Availability ueber MQTT
+
+8) Nutzen
+Damit ist die erste aktive Relaisstrecke fuer `net_erl` nicht mehr nur theoretisch oder compile-only vorhanden, sondern real auf echter Hardware nachgewiesen. Das ist die belastbare Basis fuer spaetere Hall-Light- oder weitere `net_erl`-Ausbauten.
+
+9) Grenzen und offene Punkte
+Der Pfad ist bewusst minimal:
+- keine Sensorik
+- keine Sonderlogik fuer Hall-Light
+- keine Komfortregeln
+- keine weitergehende Fehlerbehandlung fuer mehrere Relais oder Sonderfaelle
+
+Der erste Fehlversuch zeigt ausserdem klar, dass kuenftige MQTT-Tests direkt gegen den echten Master-Parser gefahren werden muessen. Wunschdenken ueber Payload-Felder kostet nur Zeit.
+
+10) Naechster sinnvoller Schritt
+Wenn der Minimalpfad stabil bleiben soll, ist als naechstes nur noch eine enge Nacharbeit sinnvoll:
+- dokumentierten Minimalpfad beibehalten
+- keine unnoetige Aufblaehung im Device
+- spaeter erst gezielt weitere `net_erl`-Funktionen aufbauen
