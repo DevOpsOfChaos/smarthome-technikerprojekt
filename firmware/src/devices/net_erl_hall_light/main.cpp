@@ -26,7 +26,7 @@
 
 constexpr bool DEBUG_LOKAL_AKTIV = (NET_ERL_DEBUG_ENABLED != 0) && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "NET-ERL";
-constexpr char DATEI_VERSION[] = "0.3.0";
+constexpr char DATEI_VERSION[] = "0.4.0";
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 constexpr char DEVICE_ID[] = NET_ERL_DEVICE_ID;
@@ -64,6 +64,10 @@ struct HallRuntime {
     bool dht_ok;
     bool lux_ok;
     bool pir_raw;
+    bool relay_auto_owned;
+    bool blocked_by_lux;
+    bool pending_auto_on_decision;
+    uint8_t pending_motion_event_state;
     unsigned long letztes_hello_ms;
     unsigned long letzter_heartbeat_ms;
     unsigned long letzter_state_ms;
@@ -128,12 +132,7 @@ void setzeRelayAusgang(bool an, const char* grund) {
 #endif
 
     runtime.relay_1 = an;
-    const int pinState = digitalRead(PIN_RELAY_1);
-    logf("INFO", "GPIO%d relay_1 -> %s (%s, readback=%s)",
-         PIN_RELAY_1,
-         an ? "HIGH" : "LOW",
-         grund ? grund : "unbekannt",
-         pinState == HIGH ? "HIGH" : "LOW");
+    logf("INFO", "GPIO%d relay_1 -> %s (%s)", PIN_RELAY_1, an ? "HIGH" : "LOW", grund ? grund : "unbekannt");
 }
 
 bool stellePeerSicher(const uint8_t* mac) {
@@ -151,7 +150,6 @@ bool stellePeerSicher(const uint8_t* mac) {
         logf("WARN", "Peer konnte nicht angelegt werden (err=%d)", (int)err);
         return false;
     }
-
     return true;
 }
 
@@ -209,6 +207,8 @@ uint8_t holeAutoFlags() {
     if (runtime.motion_aktiv) flags |= SH_RELAY_COMFORT_FLAG_PRESENCE_SOURCE_AVAILABLE;
     if (runtime.lux_ok) flags |= SH_RELAY_COMFORT_FLAG_LIGHT_VALUE_AVAILABLE;
     flags |= SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED;
+    if (runtime.relay_auto_owned) flags |= SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED;
+    if (runtime.blocked_by_lux) flags |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_LUX;
     return flags;
 }
 
@@ -263,18 +263,6 @@ bool sendeState() {
     payload.report_interval_s = runtime.report_interval_s;
     payload.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
 
-    logf("INFO",
-         "STATE tx payload=%u relay_1=%u temp_01c=%d hum_01pct=%u lux=%u motion=%u fault=%u report_interval_s=%u lux_threshold=%u",
-         (unsigned)sizeof(payload),
-         (unsigned)payload.relay_1,
-         (int)payload.temp_01c,
-         (unsigned)payload.hum_01pct,
-         (unsigned)payload.lux,
-         (unsigned)payload.motion,
-         (unsigned)payload.fault,
-         (unsigned)payload.report_interval_s,
-         (unsigned)payload.auto_on_lux_threshold);
-
     if (!sendePaket(runtime.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
         return false;
     }
@@ -295,6 +283,15 @@ bool sendeMotionEvent(bool motionState) {
     payload.param2 = 0U;
 
     return sendePaket(runtime.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), motionState ? "EVENT_MOTION_TRUE" : "EVENT_MOTION_FALSE");
+}
+
+void sendeAusstehendesMotionEvent() {
+    if (!runtime.master_mac_gueltig || runtime.pending_motion_event_state == 0U) return;
+
+    const bool motionState = (runtime.pending_motion_event_state == 1U);
+    if (sendeMotionEvent(motionState)) {
+        runtime.pending_motion_event_state = 0U;
+    }
 }
 
 bool sendeRelayEvent(uint8_t trigger) {
@@ -321,6 +318,7 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     runtime.master_bekannt = true;
     runtime.state_report_offen = true;
     stellePeerSicher(runtime.master_mac);
+    sendeAusstehendesMotionEvent();
     logf("INFO", "HELLO_ACK empfangen");
 }
 
@@ -376,6 +374,8 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
             return;
         }
 
+        runtime.relay_auto_owned = false;
+        runtime.pending_auto_on_decision = false;
         setzeRelayAusgang(neuerZustand, "master_cmd");
         runtime.state_report_offen = true;
         sendeRelayEvent(SH_TRIGGER_MASTER_CMD);
@@ -462,8 +462,8 @@ void initialisiereFunk() {
 void initialisiereSensorik() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
     dht.begin();
-    runtime.dht_ok = true;
 
+    runtime.dht_ok = true;
     if (!veml.begin()) {
         runtime.lux_ok = false;
         logf("WARN", "VEML7700 Init fehlgeschlagen");
@@ -512,6 +512,25 @@ void leseUmweltsensoren(unsigned long jetzt) {
 
     runtime.fault = !(runtime.dht_ok && runtime.lux_ok);
     runtime.sensor.fault = runtime.fault;
+
+    if (runtime.motion_aktiv &&
+        runtime.pending_auto_on_decision &&
+        !runtime.relay_1 &&
+        runtime.sensor.lux != 0xFFFFU) {
+        runtime.pending_auto_on_decision = false;
+        if (runtime.sensor.lux <= runtime.auto_on_lux_threshold) {
+            runtime.relay_auto_owned = true;
+            runtime.blocked_by_lux = false;
+            setzeRelayAusgang(true, "auto_on_motion_late_lux");
+            sendeRelayEvent(SH_TRIGGER_AUTO);
+            runtime.state_report_offen = true;
+            logf("INFO", "motion weiter aktiv, auto_on nach erstem lux=%u <= schwelle=%u", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
+        } else {
+            runtime.blocked_by_lux = true;
+            runtime.state_report_offen = true;
+            logf("INFO", "motion weiter aktiv, auto_on nach erstem lux blockiert (lux=%u schwelle=%u)", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
+        }
+    }
 }
 
 void loggeSnapshot(unsigned long jetzt) {
@@ -519,12 +538,14 @@ void loggeSnapshot(unsigned long jetzt) {
     runtime.letztes_snapshot_log_ms = jetzt;
 
     logf("INFO",
-         "snapshot temp_01c=%d hum_01pct=%u lux=%u motion=%s relay_1=%s fault=%s pir_raw=%s",
+         "snapshot temp_01c=%d hum_01pct=%u lux=%u motion=%s relay_1=%s auto_owned=%s pending_auto_on=%s fault=%s pir_raw=%s",
          (int)runtime.sensor.temp_01c,
          (unsigned)runtime.sensor.hum_01pct,
          (unsigned)runtime.sensor.lux,
          runtime.motion_aktiv ? "true" : "false",
          runtime.relay_1 ? "true" : "false",
+         runtime.relay_auto_owned ? "true" : "false",
+         runtime.pending_auto_on_decision ? "true" : "false",
          runtime.fault ? "true" : "false",
          runtime.pir_raw ? "true" : "false");
 }
@@ -534,8 +555,27 @@ void motionAktivWerden(unsigned long jetzt) {
     runtime.sensor.motion = true;
     runtime.motion_deadline_ms = jetzt + ((unsigned long)runtime.auto_off_delay_s * 1000UL);
     runtime.state_report_offen = true;
-    sendeMotionEvent(true);
-    logf("INFO", "motion true, timer gestartet");
+    runtime.pending_motion_event_state = 1U;
+    sendeAusstehendesMotionEvent();
+
+    runtime.blocked_by_lux = false;
+    runtime.pending_auto_on_decision = false;
+    if (!runtime.relay_1) {
+        if (runtime.sensor.lux == 0xFFFFU) {
+            runtime.pending_auto_on_decision = true;
+            logf("INFO", "motion erkannt, warte auf ersten gueltigen lux-wert vor auto_on");
+        } else if (runtime.sensor.lux <= runtime.auto_on_lux_threshold) {
+            runtime.relay_auto_owned = true;
+            setzeRelayAusgang(true, "auto_on_motion");
+            sendeRelayEvent(SH_TRIGGER_AUTO);
+            logf("INFO", "motion erkannt, lux=%u <= schwelle=%u, timer gestartet", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
+        } else {
+            runtime.blocked_by_lux = true;
+            logf("INFO", "motion erkannt, auto_on durch lux blockiert (lux=%u schwelle=%u)", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
+        }
+    } else {
+        logf("INFO", "motion erkannt, timer gestartet");
+    }
 }
 
 void motionTimerReset(unsigned long jetzt) {
@@ -546,9 +586,19 @@ void motionInaktivWerden() {
     runtime.motion_aktiv = false;
     runtime.sensor.motion = false;
     runtime.motion_deadline_ms = 0UL;
+    runtime.blocked_by_lux = false;
+    runtime.pending_auto_on_decision = false;
     runtime.state_report_offen = true;
-    sendeMotionEvent(false);
+    runtime.pending_motion_event_state = 2U;
+    sendeAusstehendesMotionEvent();
     logf("INFO", "motion false nach timerablauf");
+
+    if (runtime.relay_1 && runtime.relay_auto_owned) {
+        setzeRelayAusgang(false, "auto_off_timer");
+        sendeRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER);
+        runtime.relay_auto_owned = false;
+        logf("INFO", "lampe aus nach timerablauf");
+    }
 }
 
 void pollPIR(unsigned long jetzt) {
@@ -597,13 +647,10 @@ void setup() {
 
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
     logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
-    logf("INFO",
-         "config report_interval_s=%u auto_off_delay_s=%u lux_threshold=%u pir_relay_ignored=%u state_payload=%u",
+    logf("INFO", "config report_interval_s=%u auto_off_delay_s=%u lux_threshold=%u",
          (unsigned)runtime.report_interval_s,
          (unsigned)runtime.auto_off_delay_s,
-         (unsigned)runtime.auto_on_lux_threshold,
-         (unsigned)NET_ERL_DEBUG_IGNORE_PIR_FOR_RELAY,
-         (unsigned)sizeof(SmartHome::RelayComfortConfigStateReportPayload));
+         (unsigned)runtime.auto_on_lux_threshold);
 
     initialisiereSensorik();
     initialisiereFunk();
@@ -616,6 +663,7 @@ void loop() {
     leseUmweltsensoren(jetzt);
     pollPIR(jetzt);
     loggeSnapshot(jetzt);
+    sendeAusstehendesMotionEvent();
 
     if (!runtime.master_bekannt &&
         (jetzt - runtime.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) {

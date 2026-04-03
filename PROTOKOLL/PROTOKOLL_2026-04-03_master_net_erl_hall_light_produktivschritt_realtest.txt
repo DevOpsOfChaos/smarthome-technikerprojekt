@@ -1,0 +1,53 @@
+PROTOKOLL
+Datum: 2026-04-03
+Thema: Realtest Master + net_erl_hall_light im produktionsnahen Hall-Light-Schritt
+
+1. Grosses Ziel
+Der Hall-Light-Knoten sollte wieder auf einen produktionsnahen Nutzpfad gebracht werden, ohne den bestehenden Master-/MQTT-Pfad zu beschaedigen.
+
+2. Ausgangslage
+Im vorigen engen Debugstand war vor allem die State-Projektion verifiziert. Fuer diesen Schritt sollten wieder DHT22, VEML7700, PIR und Relais gemeinsam im Hall-Light-Pfad laufen. Gleichzeitig durfte der Master weder bei State, ACK noch MQTT-Projektion regressieren.
+
+3. Ziel dieses Schritts
+- produktionsnahe Hall-Light-Logik fuer Motion, Lux und Nachlauf wiederherstellen
+- Relais auf Boot immer AUS starten
+- Auto-On nur bei Motion und passender Lux-Schwelle ausloesen
+- manuelle Master-Kommandos ueber MQTT und ACK weiter funktionsfaehig halten
+- Realtest sauber dokumentieren
+
+4. Umsetzung
+Im Device `net_erl_hall_light` wurden die produktionsnahen Device-Einstellungen uebernommen und der Debug-Sonderpfad entfernt. Fuer die Laufzeitlogik wurden zwei enge Korrekturen umgesetzt:
+
+- Auto-On darf nicht verloren gehen, wenn der PIR schon beim Boot HIGH ist, aber der erste gueltige Lux-Wert erst kurz danach vorliegt.
+- Ein initialer Motion-Zustand darf nach dem HELLO_ACK nicht still verschwinden, sondern muss fuer den Master weiter als Motion-Zustand erhalten bleiben.
+
+Master und Knoten wurden anschliessend gebaut und real geflasht:
+- Master auf COM3
+- `net_erl_hall_light` auf COM12
+
+Danach wurde ein No-Reset-Dual-Capture mit MQTT-Begleitcapture gefahren.
+
+5. Pruefung / Validierung
+Im finalen Lauf war real sichtbar:
+
+- der Knoten startete mit produktionsnaher Hall-Light-Konfiguration
+- bei aktivem PIR und niedrigem Lux wurde das Relais nach dem ersten gueltigen Lux-Wert automatisch eingeschaltet
+- der Master verarbeitete weiterhin `STATE_REPORT` mit `temp_01c`, `hum_01pct`, `lux`, `motion` und `fault`
+- MQTT zeigte die projizierten State-Werte weiterhin korrekt
+- `set_relay` AUS, `get_state`, `set_relay` EIN und erneut `set_relay` AUS funktionierten mit ACK und State-Update
+- waehrend dauerhaftem PIR-HIGH trat kein Motion-Spam auf
+
+6. Ergebnis / Nutzen
+Der Hall-Light-Pfad ist wieder auf einem produktionsnahen Stand:
+- Auto-On arbeitet wieder mit realem Lux-Bezug
+- Master-/MQTT-State bleibt intakt
+- manuelle Relais-Kommandos bleiben intakt
+- der Knoten startet nicht mehr in einem reinen Debug-Sonderpfad
+
+7. Grenzen / offene Punkte
+Der aktuelle Schreibtischaufbau ist fuer einen sauberen `motion=false`-Nachweis ungeeignet, weil der PIR-Bereich praktisch dauerhaft aktiv bleibt. Im finalen Lauf blieb `pir_raw` entsprechend durchgehend HIGH. Dieser Punkt wurde deshalb nicht als Gesamtfehler gewertet.
+
+Ein weiterer Restpunkt ausserhalb dieses engen Schritts bleibt die generische Master-Projektion von `config_schema` und `config_state`. Die eigentlichen State-Werte und MQTT-Kommandos fuer den Hall-Light-Knoten blieben im getesteten Schritt jedoch funktionsfaehig.
+
+8. Naechster sinnvoller Schritt
+Ein spaeterer Realnachweis fuer `motion=false` sollte in einem geeigneteren Aufbau gefahren werden, in dem der PIR-Bereich nach einem Trigger wirklich verlassen werden kann.

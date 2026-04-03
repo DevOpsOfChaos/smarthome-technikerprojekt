@@ -2,13 +2,13 @@
 
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
-// Enger Debugpfad fuer die net_erl-Hall-Light-Projektion.
-// Sensorik aktiv, PIR aktiv, aber PIR schaltet in diesem Lauf nicht das Relais.
-// Ziel: Payload / Master-Projektion / GPIO10 sauber trennen.
+// Produktionsnaher Hall-Light-Pfad:
+// DHT22 + VEML7700 + PIR + Relais
+// Fokus: robuste Motion-/Lux-/Nachlauf-Logik ohne Debug-Sonderpfad.
 
 #define NET_ERL_DEVICE_ID "net_erl_01"
-#define NET_ERL_DEVICE_NAME "NET-ERL Hall Light Projection Debug"
-#define NET_ERL_FW_VARIANT "net_erl_hall_light_projection_debug"
+#define NET_ERL_DEVICE_NAME "NET-ERL Hall Light"
+#define NET_ERL_FW_VARIANT "net_erl_hall_light"
 
 #define NET_ERL_DEVICE_CAPS (SH_CAP_RELAY | SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_MOTION)
 
@@ -33,7 +33,4 @@
 
 #define NET_ERL_SENSOR_POLL_INTERVAL_MS 250UL
 #define NET_ERL_ENV_SAMPLE_INTERVAL_MS 2000UL
-#define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 15000UL
-
-// Wichtige Debug-Trennung:
-#define NET_ERL_DEBUG_IGNORE_PIR_FOR_RELAY 1
+#define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL
