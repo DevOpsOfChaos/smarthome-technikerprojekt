@@ -799,14 +799,28 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
 
     switch (NODE_DEFINITIONS[nodeIndex].device_class) {
         case SH_CLASS_NET_ERL: {
-            if (payloadLen != sizeof(SmartHome::StateReportPayload)) {
-                logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-                return;
+            if (payloadLen == sizeof(SmartHome::StateReportPayload)) {
+                const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
             }
-            const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
-            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-            nodeStates[nodeIndex].fault = (state.fault != 0U);
-            break;
+
+            if (payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload) ||
+                payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)) {
+                const SmartHome::RelayComfortStateReportPayload& state =
+                    *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
+
+            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
+            return;
         }
 
         case SH_CLASS_NET_ZRL: {

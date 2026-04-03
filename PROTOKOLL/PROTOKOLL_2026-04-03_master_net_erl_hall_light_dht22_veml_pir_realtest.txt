@@ -1,0 +1,108 @@
+Titel: Master-Net-ERL Hall-Light DHT22 VEML7700 PIR Realtest
+Datum: 2026-04-03
+Thema: Reale Validierung von net_erl_hall_light mit DHT22, VEML7700, PIR, Relais und Master-Kopplung
+
+1) Ziel
+Dieser Schritt sollte den realen Hall-Light-nahen Testpfad fuer `net_erl_01` pruefen:
+- DHT22
+- VEML7700
+- PIR
+- Relais
+- Motion-Hold-Logik
+- Kopplung ueber den Master mit MQTT-Nachweis
+
+2) Ausgangslage
+Im oeffentlichen Repo lagen bereits die gezielten Austausch-Aenderungen fuer:
+- `firmware/src/devices/net_erl_hall_light/DeviceConfig.h`
+- `firmware/src/devices/net_erl_hall_light/PinConfig.h`
+- `firmware/src/devices/net_erl_hall_light/main.cpp`
+- `firmware/platformio.ini`
+- `firmware/src/basetypes/master/main.cpp`
+
+Der reale Aufbau bestand aus:
+- Master auf `COM3`
+- `net_erl_01` auf `COM12`
+- DHT22, VEML7700 und PIR am Hall-Light-Aufbau
+- Manuel direkt im PIR-nahen Bereich
+
+3) Ziel dieses Schritts
+Nachgewiesen werden sollten:
+- Sensorik auf dem Node real lauffaehig
+- PIR fuer Motion im realen Aufbau nutzbar
+- Relais-Default AUS
+- `set_relay` und `get_state` weiter funktionsfaehig
+- erweiterter `net_erl`-State vom Master/MQTT sauber verarbeitet
+
+4) Umsetzung
+Zuerst wurden beide Repos, die solvedproblems und die realen COM-Ports geprueft. Danach wurden Master und `net_erl_hall_light` erfolgreich gebaut und geflasht:
+- `pio run -e master`
+- `pio run -e master -t upload --upload-port COM3`
+- `pio run -e net_erl_hall_light`
+- `pio run -e net_erl_hall_light -t upload --upload-port COM12`
+
+Anschliessend wurden No-Reset-Captures und MQTT-Captures gefahren. Dabei traten zwei echte Tooling-Probleme auf:
+- das vorhandene Dual-Capture-Skript enthielt eine PowerShell-7-Ternaer-Schreibweise, die in der vorhandenen Umgebung nicht lauffaehig war
+- das Capture-Skript brach spaeter an einer leeren Zeile ab
+
+Diese Fehler wurden eng im privaten Repo korrigiert, damit der reale Test ueberhaupt belastbar aufzeichnungsfaehig bleibt.
+
+Parallel wurden reale MQTT-Commands fuer:
+- `get_state`
+- `set_relay` EIN
+- `set_relay` AUS
+gefahren.
+
+5) Reale Beobachtungen
+Der Node zeigt lokal einen lauffaehigen Sensorpfad:
+- DHT22 lieferte stabile Temperaturwerte um `22.8` bis `23.0 C`
+- DHT22 lieferte stabile Feuchtewerte um `39.3` bis `40.5 %`
+- VEML7700 lieferte reale Lux-Werte grob zwischen `9` und `20 lux`
+- der PIR lag waehrend der meisten Beobachtung real auf `motion=true`, was im gegebenen Aufbau mit direkter Naehe plausibel ist
+
+Der Relaispfad ist real bestaetigt:
+- Boot-Default blieb AUS
+- im Node-Log ist `GPIO10 relay_1 -> HIGH (master_cmd)` sichtbar
+- im Node-Log ist anschliessend wieder `GPIO10 relay_1 -> LOW (master_cmd)` sichtbar
+- MQTT liefert fuer beide manuellen Relais-Commands `ack` mit `status":"ok"`
+- MQTT-`state` springt fuer den manuellen Test auf `relay_1:true` und danach wieder auf `relay_1:false`
+
+6) Bewertetes Ergebnis
+Belastbar bestanden sind:
+- Build und Flash fuer Master und `net_erl_hall_light`
+- lokaler Sensorpfad auf dem Node
+- realer PIR-Einfluss auf die Hall-Light-Logik im Sinne einer dauerhaft aktiven Motion-Lage im Nahbereich
+- Relais-Command-/ACK-Pfad ueber Master und MQTT
+- `set_relay` und `get_state` bleiben funktionsfaehig
+
+Nicht voll bestaetigt ist dagegen der erweiterte State-Pfad Master -> MQTT fuer Umwelt- und Motion-Daten:
+- lokal im Node sind Temperatur, Feuchte, Lux und `motion=true` klar sichtbar
+- im MQTT-`state` des Masters bleiben diese Felder in diesem Lauf dennoch `null` bzw. `false`
+- ebenso spiegelt `config_state` noch nicht die lokalen Hall-Light-Defaults wider
+
+7) Technische Einordnung
+Die Datenlage spricht dafuer:
+- der Hall-Light-Node arbeitet lokal mit echter Sensorik
+- der Relais- und ACK-Pfad ueber den Master ist real intakt
+- die offene Bruchstelle liegt weiterhin in der Verarbeitung oder Projektion des erweiterten `net_erl`-State im Master/MQTT-Pfad
+
+Der PIR-Bereich war im realen Aufbau zu nah am Arbeitsplatz. Deshalb blieb `motion` praktisch dauerhaft aktiv. Daraus folgt:
+- das Vorhandensein von Motion ist real plausibel bestaetigt
+- ein sauber auslaufender Motion-False-Nachlauf konnte in diesem Aufbau nicht hart isoliert nachgewiesen werden
+
+8) Nutzen
+Der Test liefert trotzdem echten Mehrwert:
+- Sensorik und Relais laufen real auf der Hall-Light-Hardware
+- der enge aktive Master-Command-Pfad bleibt funktional
+- die verbleibende Schwachstelle ist deutlich eingegrenzt: nicht die Sensorhardware, sondern die erweiterte State-Uebergabe an den Master
+
+9) Grenzen und offene Punkte
+- `motion=false` nach Timerablauf wurde in diesem Aufbau nicht sauber isoliert
+- MQTT zeigt weiterhin keine erweiterten Umweltdaten des Nodes
+- `config_state` des Masters spiegelt die Hall-Light-Defaults noch nicht passend
+- die Capture-Tooling-Fixes waren fuer diesen Test notwendig und gehoeren kuenftig zum stabilen Hardwaretest-Standard
+
+10) Naechster sinnvoller Schritt
+Der naechste sinnvolle Schritt ist kein weiterer breiter Umbau, sondern eine enge Analyse des erweiterten `net_erl`-State-Vertrags im Master:
+- echten empfangenen Payload fuer `net_erl` direkt gegen den Master-Parser pruefen
+- danach gezielt die Projektion nach MQTT bereinigen
+- erst anschliessend einen kurzen Wiederholungslauf fuer `motion`/`temp`/`hum`/`lux` ueber den Master fahren
