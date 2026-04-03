@@ -2,14 +2,13 @@
 
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
-// Hall-Light-naher net_erl-Testpfad:
-// Relais + DHT22 + VEML7700 + PIR
-// Fokus auf Motion-Hold-Timer, Lux-Entscheidung nur beim Einschalten
-// und kompakter Debug-/Testnachweis.
+// Enger Debugpfad fuer die net_erl-Hall-Light-Projektion.
+// Sensorik aktiv, PIR aktiv, aber PIR schaltet in diesem Lauf nicht das Relais.
+// Ziel: Payload / Master-Projektion / GPIO10 sauber trennen.
 
 #define NET_ERL_DEVICE_ID "net_erl_01"
-#define NET_ERL_DEVICE_NAME "NET-ERL Hall Light Test"
-#define NET_ERL_FW_VARIANT "net_erl_hall_light_test"
+#define NET_ERL_DEVICE_NAME "NET-ERL Hall Light Projection Debug"
+#define NET_ERL_FW_VARIANT "net_erl_hall_light_projection_debug"
 
 #define NET_ERL_DEVICE_CAPS (SH_CAP_RELAY | SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_MOTION)
 
@@ -22,19 +21,19 @@
 
 #define NET_ERL_HELLO_RETRY_INTERVAL_MS 5000UL
 #define NET_ERL_HEARTBEAT_INTERVAL_MS 20000UL
-#define NET_ERL_STATE_INTERVAL_MS 10000UL
 #define NET_ERL_LOOP_INTERVAL_MS 20UL
 
 #define NET_ERL_MIN_REPORT_INTERVAL_S 5U
 #define NET_ERL_MAX_REPORT_INTERVAL_S 600U
-
 #define NET_ERL_BOOT_COUNTER 1U
 
-// Test-Defaults
 #define NET_ERL_DEFAULT_REPORT_INTERVAL_S 10U
 #define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U
 
 #define NET_ERL_SENSOR_POLL_INTERVAL_MS 250UL
 #define NET_ERL_ENV_SAMPLE_INTERVAL_MS 2000UL
-#define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL
+#define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 15000UL
+
+// Wichtige Debug-Trennung:
+#define NET_ERL_DEBUG_IGNORE_PIR_FOR_RELAY 1

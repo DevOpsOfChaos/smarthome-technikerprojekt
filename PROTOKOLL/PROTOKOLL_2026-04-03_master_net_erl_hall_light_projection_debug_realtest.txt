@@ -1,0 +1,61 @@
+PROTOKOLL
+Datum: 2026-04-03
+Thema: Master + net_erl Hall-Light Projektion Debug Realtest
+
+Ziel dieses Schritts
+Der offene Punkt war ein enger Debuglauf fuer den `net_erl`-Hall-Light-Pfad. Geprueft werden sollte, ob der erweiterte State des Geraets mit Temperatur, Luftfeuchte, Lux, Motion und Fault korrekt vom Node an den Master gesendet und von dort sauber nach MQTT projiziert wird. Gleichzeitig sollte der Relaispfad isoliert vom PIR-Verhalten getestet werden.
+
+Ausgangslage
+In einem vorherigen Lauf war der Eindruck entstanden, dass der erweiterte `net_erl`-State im Master oder in MQTT nur als `null` beziehungsweise `false` ankommt. Fuer diesen Schritt wurde deshalb ein enger Debugstand mit aktivem PIR als Motion-Eingang, aber ohne PIR-Einfluss auf die Relaisentscheidung verwendet.
+
+Umsetzung
+Im Device-Pfad `net_erl_hall_light` wurden die vorbereiteten Debugaenderungen verwendet:
+- PIR bleibt fuer Motion aktiv, schaltet das Relais aber nicht automatisch
+- vor jedem STATE-Versand werden Payload-Laenge und State-Werte explizit geloggt
+- GPIO10-Relaisumschaltung wird mit HIGH/LOW und Pin-Readback geloggt
+
+Zusaetzlich wurde im Master die Verarbeitung von `net_erl`-STATE-Reports so ergaenzt, dass `payloadLen` sowie die uebersetzten Werte im seriellen Log sichtbar sind.
+
+Pruefung und Validierung
+Es wurden beide Targets gebaut und real geflasht:
+- Master auf COM3
+- `net_erl_hall_light` auf COM12
+
+Danach wurde ein echter Lauf mit serieller Dual-Aufzeichnung und MQTT-Aufzeichnung durchgefuehrt. Im Test wurden diese Befehle real ausgefuehrt:
+- `set_relay` EIN
+- `set_relay` AUS
+- `get_state`
+
+Belegte Beobachtungen aus dem finalen Lauf
+1. Node-Seite:
+- `STATE tx payload=31 ...` ist mehrfach im seriellen Log sichtbar
+- die Werte `relay_1`, `temp_01c`, `hum_01pct`, `lux`, `motion` und `fault` werden vor dem Senden konkret geloggt
+- `GPIO10 relay_1 -> HIGH (master_cmd, readback=HIGH)` ist belegt
+- `GPIO10 relay_1 -> LOW (master_cmd, readback=LOW)` ist belegt
+
+2. Master-Seite:
+- `STATE_REPORT net_erl_01 payloadLen=31 ... (relay_comfort_config)` ist mehrfach belegt
+- die Werte werden im Master korrekt uebernommen
+- `COMMAND_SET_RELAY` fuer EIN und AUS wurde erfolgreich an den Node gesendet
+
+3. MQTT-Seite:
+- `state` enthaelt reale Werte und nicht `null/false`
+- beim Einschalten springt `relay_1` auf `true`
+- beim Ausschalten springt `relay_1` wieder auf `false`
+- `temp_01c`, `hum_01pct`, `lux`, `motion` und `fault` sind mit echten Werten belegt
+- `ack` fuer beide Relaiskommandos ist mit `status:"ok"` vorhanden
+
+Ergebnis
+Der vermutete Projektionsfehler liess sich mit dem aktuellen Debugstand nicht bestaetigen. Der erweiterte `net_erl`-State wird mit `payloadLen=31` korrekt vom Node gesendet, vom Master akzeptiert und nach MQTT mit realen Werten projiziert.
+
+Wichtige Einordnung
+Der Relaispfad ist im Test logisch sauber belegt. GPIO10 wurde korrekt auf HIGH und LOW gesetzt und der gelesene Pinzustand stimmt mit dem Sollzustand ueberein. Falls ein reales Relaismodul in einem spaeteren Lauf trotzdem nicht sauber anziehen sollte, waere das eher als Hardware-, Treiber- oder Versorgungsfrage zu bewerten und nicht als Protokollfehler.
+
+Grenzen und offene Punkte
+Im finalen Lauf blieb `pir_raw` dauerhaft auf `true`. Deshalb wurde `motion=false` in diesem Durchgang nicht erreicht. Das ist kein Hinweis auf einen STATE-Vertragsfehler, sondern ein offener Beobachtungspunkt fuer den PIR-Pfad oder den Testaufbau.
+
+Naechster sinnvoller Schritt
+Ein kurzer Folgecheck sollte nur noch den Motion-Rueckfall sauber provozieren:
+- PIR-Bereich einmal bewusst ausloesen
+- danach den Bereich verlassen oder den Sensor so beobachten, dass `pir_raw` wirklich wieder LOW wird
+- pruefen, ob `motion=false` nach dem Timer ebenfalls korrekt im Master und in MQTT erscheint

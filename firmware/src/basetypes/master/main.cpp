@@ -803,6 +803,12 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
                 nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
+                logf("INFO",
+                    "STATE_REPORT %s payloadLen=%u relay_1=%u fault=%u (basic)",
+                    nodeId,
+                    (unsigned)payloadLen,
+                    (unsigned)state.relay_1,
+                    (unsigned)state.fault);
                 break;
             }
 
@@ -816,6 +822,17 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 nodeStates[nodeIndex].lux = state.lux;
                 nodeStates[nodeIndex].motion = (state.motion != 0U);
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
+                logf("INFO",
+                    "STATE_REPORT %s payloadLen=%u relay_1=%u temp_01c=%d hum_01pct=%u lux=%u motion=%u fault=%u (relay_comfort%s)",
+                    nodeId,
+                    (unsigned)payloadLen,
+                    (unsigned)state.relay_1,
+                    (int)state.temp_01c,
+                    (unsigned)state.hum_01pct,
+                    (unsigned)state.lux,
+                    (unsigned)state.motion,
+                    (unsigned)state.fault,
+                    payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload) ? "_config" : "");
                 break;
             }
 

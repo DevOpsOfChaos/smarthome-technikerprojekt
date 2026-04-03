@@ -1,7 +1,5 @@
 #pragma once
 
-// Device-spezifische Test-Pins für den Hall-Light-Pfad
-
 #define PIN_RELAY_1 10
 #define PIN_SENSOR_SDA 0
 #define PIN_SENSOR_SCL 1
@@ -9,5 +7,4 @@
 #define PIN_DHT22 7
 #define PIN_STATUS_LED -1
 
-// 1 = HIGH schaltet Relais ein
 #define RELAY_1_ACTIVE_HIGH 1
