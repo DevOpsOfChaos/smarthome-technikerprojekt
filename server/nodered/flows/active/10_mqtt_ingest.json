@@ -1,0 +1,342 @@
+[
+  {
+    "id": "tab_10_ingest",
+    "type": "tab",
+    "label": "10_mqtt_ingest",
+    "disabled": false,
+    "info": "Abonniert die relevanten MQTT-Themen und verteilt sie an kleine Handler."
+  },
+  {
+    "id": "comment_10_ingest",
+    "type": "comment",
+    "z": "tab_10_ingest",
+    "name": "MQTT Ingest",
+    "info": "Phase 1 verarbeitet nur meta, availability, state, event, ack sowie master status/event.",
+    "x": 150,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "cfg_mqtt_broker",
+    "type": "mqtt-broker",
+    "name": "local mqtt",
+    "broker": "mosquitto",
+    "port": "1883",
+    "clientid": "nodered-phase1",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "mqtt_10_device_in",
+    "type": "mqtt in",
+    "z": "tab_10_ingest",
+    "name": "Device topics",
+    "topic": "smarthome/device/+/+",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "cfg_mqtt_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 140,
+    "wires": [
+      [
+        "json_10_device"
+      ]
+    ]
+  },
+  {
+    "id": "json_10_device",
+    "type": "json",
+    "z": "tab_10_ingest",
+    "name": "Device JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 350,
+    "y": 140,
+    "wires": [
+      [
+        "func_10_device_route"
+      ]
+    ]
+  },
+  {
+    "id": "func_10_device_route",
+    "type": "function",
+    "z": "tab_10_ingest",
+    "name": "Route device topic",
+    "func": "const topic = msg.topic || \"\";\nconst parts = topic.split(\"/\");\nif (parts.length !== 4 || parts[0] !== \"smarthome\" || parts[1] !== \"device\") {\n    return null;\n}\nconst topicType = parts[3];\nif (![\"meta\", \"availability\", \"state\", \"event\", \"ack\"].includes(topicType)) {\n    return null;\n}\nmsg.payload = msg.payload && typeof msg.payload === \"object\" ? msg.payload : {};\nmsg.sh = {\n    scope: \"device\",\n    entity_id: parts[2],\n    topic_type: topicType,\n    target_block: topicType,\n    received_at: new Date().toISOString()\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 580,
+    "y": 140,
+    "wires": [
+      [
+        "switch_10_device"
+      ]
+    ]
+  },
+  {
+    "id": "switch_10_device",
+    "type": "switch",
+    "z": "tab_10_ingest",
+    "name": "Device topic type",
+    "property": "sh.topic_type",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "eq",
+        "v": "meta",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "availability",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "state",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "event",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "ack",
+        "vt": "str"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 5,
+    "x": 810,
+    "y": 140,
+    "wires": [
+      [
+        "linkout_10_meta"
+      ],
+      [
+        "linkout_10_availability"
+      ],
+      [
+        "linkout_10_state"
+      ],
+      [
+        "linkout_10_event"
+      ],
+      [
+        "linkout_10_ack"
+      ]
+    ]
+  },
+  {
+    "id": "linkout_10_meta",
+    "type": "link out",
+    "z": "tab_10_ingest",
+    "name": "to handleMeta",
+    "mode": "link",
+    "links": [
+      "linkin_20_meta"
+    ],
+    "x": 1065,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "linkout_10_availability",
+    "type": "link out",
+    "z": "tab_10_ingest",
+    "name": "to handleAvailability",
+    "mode": "link",
+    "links": [
+      "linkin_20_availability"
+    ],
+    "x": 1085,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "linkout_10_state",
+    "type": "link out",
+    "z": "tab_10_ingest",
+    "name": "to handleState",
+    "mode": "link",
+    "links": [
+      "linkin_20_state"
+    ],
+    "x": 1055,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "linkout_10_event",
+    "type": "link out",
+    "z": "tab_10_ingest",
+    "name": "to handleEvent",
+    "mode": "link",
+    "links": [
+      "linkin_20_event"
+    ],
+    "x": 1065,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "linkout_10_ack",
+    "type": "link out",
+    "z": "tab_10_ingest",
+    "name": "to handleAck",
+    "mode": "link",
+    "links": [
+      "linkin_20_ack"
+    ],
+    "x": 1055,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "mqtt_10_master_in",
+    "type": "mqtt in",
+    "z": "tab_10_ingest",
+    "name": "Master topics",
+    "topic": "smarthome/master/+/+",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "cfg_mqtt_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 280,
+    "wires": [
+      [
+        "json_10_master"
+      ]
+    ]
+  },
+  {
+    "id": "json_10_master",
+    "type": "json",
+    "z": "tab_10_ingest",
+    "name": "Master JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 350,
+    "y": 280,
+    "wires": [
+      [
+        "func_10_master_route"
+      ]
+    ]
+  },
+  {
+    "id": "func_10_master_route",
+    "type": "function",
+    "z": "tab_10_ingest",
+    "name": "Route master topic",
+    "func": "const topic = msg.topic || \"\";\nconst parts = topic.split(\"/\");\nif (parts.length !== 4 || parts[0] !== \"smarthome\" || parts[1] !== \"master\") {\n    return null;\n}\nconst topicType = parts[3];\nif (![\"status\", \"event\"].includes(topicType)) {\n    return null;\n}\nmsg.payload = msg.payload && typeof msg.payload === \"object\" ? msg.payload : {};\nmsg.sh = {\n    scope: \"master\",\n    entity_id: parts[2],\n    topic_type: topicType,\n    target_block: topicType === \"status\" ? \"master_status\" : \"master_event\",\n    received_at: new Date().toISOString()\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 580,
+    "y": 280,
+    "wires": [
+      [
+        "switch_10_master"
+      ]
+    ]
+  },
+  {
+    "id": "switch_10_master",
+    "type": "switch",
+    "z": "tab_10_ingest",
+    "name": "Master topic type",
+    "property": "sh.topic_type",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "eq",
+        "v": "status",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "event",
+        "vt": "str"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 810,
+    "y": 280,
+    "wires": [
+      [
+        "linkout_10_master_status"
+      ],
+      [
+        "linkout_10_master_event"
+      ]
+    ]
+  },
+  {
+    "id": "linkout_10_master_status",
+    "type": "link out",
+    "z": "tab_10_ingest",
+    "name": "to handleMasterStatus",
+    "mode": "link",
+    "links": [
+      "linkin_90_master_status"
+    ],
+    "x": 1095,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "linkout_10_master_event",
+    "type": "link out",
+    "z": "tab_10_ingest",
+    "name": "to handleMasterEvent",
+    "mode": "link",
+    "links": [
+      "linkin_90_master_event"
+    ],
+    "x": 1085,
+    "y": 300,
+    "wires": []
+  }
+]

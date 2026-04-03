@@ -1,0 +1,81 @@
+[
+  {
+    "id": "tab_90_master",
+    "type": "tab",
+    "label": "90_master_diag",
+    "disabled": false,
+    "info": "Haelt Master-Status und Master-Events getrennt vom normalen Geraetepfad."
+  },
+  {
+    "id": "comment_90_master",
+    "type": "comment",
+    "z": "tab_90_master",
+    "name": "Master getrennt halten",
+    "info": "Masterdiagnose bleibt ausserhalb des normalen device stores.",
+    "x": 180,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "linkin_90_master_status",
+    "type": "link in",
+    "z": "tab_90_master",
+    "name": "handleMasterStatus",
+    "links": [
+      "linkout_10_master_status"
+    ],
+    "x": 115,
+    "y": 140,
+    "wires": [
+      [
+        "func_90_master_status"
+      ]
+    ]
+  },
+  {
+    "id": "func_90_master_status",
+    "type": "function",
+    "z": "tab_90_master",
+    "name": "handleMasterStatus",
+    "func": "const now = new Date().toISOString();\nlet runtime = global.get(\"smarthome_runtime\");\nif (!runtime || typeof runtime !== \"object\") {\n    runtime = { schema_version: 1, initialized_at: now, devices: {}, master: {}, diag: {} };\n}\nruntime.master = runtime.master || {};\nconst payload = msg.payload && typeof msg.payload === \"object\" ? msg.payload : {};\nconst masterId = String(payload.master_id || (msg.sh && msg.sh.entity_id) || \"\").trim();\nif (!masterId) {\n    node.warn(\"master status without master_id\");\n    return null;\n}\nfunction coerceBoolean(value) {\n    if (typeof value === \"boolean\") {\n        return value;\n    }\n    if (typeof value === \"number\") {\n        return value !== 0;\n    }\n    return [\"1\", \"true\", \"yes\", \"on\", \"online\"].includes(String(value || \"\").trim().toLowerCase());\n}\nconst current = runtime.master[masterId] || {\n    status: {\n        master_id: masterId,\n        online: false,\n        wifi: false,\n        mqtt: false,\n        espnow: false,\n        fw: null,\n        last_seen_at: null,\n        updated_at: now\n    },\n    last_event: {},\n    diagnostics: {\n        last_update_source: \"status\"\n    }\n};\ncurrent.status.master_id = masterId;\nfor (const field of [\"online\", \"wifi\", \"mqtt\", \"espnow\"]) {\n    if (Object.prototype.hasOwnProperty.call(payload, field)) {\n        current.status[field] = coerceBoolean(payload[field]);\n    }\n}\nif (Object.prototype.hasOwnProperty.call(payload, \"fw\")) {\n    current.status.fw = payload.fw;\n}\ncurrent.status.last_seen_at = now;\ncurrent.status.updated_at = now;\ncurrent.diagnostics.last_update_source = \"status\";\nruntime.master[masterId] = current;\nglobal.set(\"smarthome_runtime\", runtime);\nmsg.payload = { master_id: masterId, block: \"status\", master: current };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 340,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "linkin_90_master_event",
+    "type": "link in",
+    "z": "tab_90_master",
+    "name": "handleMasterEvent",
+    "links": [
+      "linkout_10_master_event"
+    ],
+    "x": 110,
+    "y": 220,
+    "wires": [
+      [
+        "func_90_master_event"
+      ]
+    ]
+  },
+  {
+    "id": "func_90_master_event",
+    "type": "function",
+    "z": "tab_90_master",
+    "name": "handleMasterEvent",
+    "func": "const now = new Date().toISOString();\nlet runtime = global.get(\"smarthome_runtime\");\nif (!runtime || typeof runtime !== \"object\") {\n    runtime = { schema_version: 1, initialized_at: now, devices: {}, master: {}, diag: {} };\n}\nruntime.master = runtime.master || {};\nconst payload = msg.payload && typeof msg.payload === \"object\" ? msg.payload : {};\nconst masterId = String(payload.master_id || (msg.sh && msg.sh.entity_id) || \"\").trim();\nif (!masterId) {\n    node.warn(\"master event without master_id\");\n    return null;\n}\nconst current = runtime.master[masterId] || {\n    status: {\n        master_id: masterId,\n        online: false,\n        wifi: false,\n        mqtt: false,\n        espnow: false,\n        fw: null,\n        last_seen_at: null,\n        updated_at: now\n    },\n    last_event: {},\n    diagnostics: {\n        last_update_source: \"event\"\n    }\n};\ncurrent.last_event = {\n    event: payload.event || null,\n    message: payload.message || payload.event || null,\n    fw: payload.fw || null,\n    occurred_at: payload.occurred_at || now\n};\ncurrent.diagnostics.last_update_source = \"event\";\nruntime.master[masterId] = current;\nglobal.set(\"smarthome_runtime\", runtime);\nmsg.payload = { master_id: masterId, block: \"event\", master: current };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 335,
+    "y": 220,
+    "wires": []
+  }
+]

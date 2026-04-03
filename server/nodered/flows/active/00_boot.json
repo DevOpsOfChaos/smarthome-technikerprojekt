@@ -1,0 +1,80 @@
+[
+  {
+    "id": "tab_00_boot",
+    "type": "tab",
+    "label": "00_boot",
+    "disabled": false,
+    "info": "Initialisiert den minimalen Laufzeitzustand fuer Phase 1."
+  },
+  {
+    "id": "comment_00_boot",
+    "type": "comment",
+    "z": "tab_00_boot",
+    "name": "Phase-1-Boot",
+    "info": "Legt den gemeinsamen Runtime-State an. Die fachliche Zielstruktur liegt parallel in /data/lib/*.js.",
+    "x": 170,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "inject_00_boot",
+    "type": "inject",
+    "z": "tab_00_boot",
+    "name": "Init beim Start",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "0.5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 140,
+    "wires": [
+      [
+        "func_00_boot_init"
+      ]
+    ]
+  },
+  {
+    "id": "func_00_boot_init",
+    "type": "function",
+    "z": "tab_00_boot",
+    "name": "Runtime vorbereiten",
+    "func": "const now = new Date().toISOString();\nlet runtime = global.get(\"smarthome_runtime\");\nif (!runtime || typeof runtime !== \"object\") {\n    runtime = {\n        schema_version: 1,\n        initialized_at: now,\n        devices: {},\n        master: {},\n        diag: {\n            booted_at: now,\n            last_boot_reason: \"startup\"\n        }\n    };\n} else {\n    runtime.devices = runtime.devices || {};\n    runtime.master = runtime.master || {};\n    runtime.diag = runtime.diag || {};\n    runtime.diag.booted_at = now;\n    runtime.diag.last_boot_reason = \"restart\";\n}\nglobal.set(\"smarthome_runtime\", runtime);\nmsg.payload = {\n    status: \"bootstrapped\",\n    initialized_at: runtime.initialized_at,\n    device_count: Object.keys(runtime.devices).length,\n    master_count: Object.keys(runtime.master).length\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 390,
+    "y": 140,
+    "wires": [
+      [
+        "debug_00_boot"
+      ]
+    ]
+  },
+  {
+    "id": "debug_00_boot",
+    "type": "debug",
+    "z": "tab_00_boot",
+    "name": "Bootstatus",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 620,
+    "y": 140,
+    "wires": []
+  }
+]

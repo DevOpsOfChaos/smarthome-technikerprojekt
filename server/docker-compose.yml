@@ -1,1 +1,51 @@
-services: {}
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+
+  influxdb:
+    image: influxdb:2.7
+    restart: unless-stopped
+    ports:
+      - "${INFLUXDB_PORT:-8086}:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: "${INFLUXDB_ADMIN_USER:-admin}"
+      DOCKER_INFLUXDB_INIT_PASSWORD: "${INFLUXDB_ADMIN_PASSWORD:-change-me}"
+      DOCKER_INFLUXDB_INIT_ORG: "${INFLUXDB_ORG:-smarthome}"
+      DOCKER_INFLUXDB_INIT_BUCKET: "${INFLUXDB_BUCKET:-smarthome}"
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: "${INFLUXDB_ADMIN_TOKEN:-change-me-token}"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+
+  nodered:
+    image: nodered/node-red:3.1
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+      - influxdb
+    ports:
+      - "${NODE_RED_PORT:-1880}:1880"
+    environment:
+      TZ: "${TZ:-Europe/Berlin}"
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_ORG: "${INFLUXDB_ORG:-smarthome}"
+      INFLUXDB_BUCKET: "${INFLUXDB_BUCKET:-smarthome}"
+      INFLUXDB_TOKEN: "${INFLUXDB_ADMIN_TOKEN:-change-me-token}"
+      SQLITE_DB_PATH: "${SQLITE_DB_PATH:-/data/sqlite/smarthome_phase1.db}"
+    volumes:
+      - ./nodered:/data
+      - ./sqlite:/data/sqlite
+    command:
+      - /bin/sh
+      - -lc
+      - >
+        node -e "const fs=require('fs');const path=require('path');const dir='/data/flows/active';const files=fs.readdirSync(dir).filter((name)=>name.endsWith('.json')).sort();const merged=files.flatMap((name)=>JSON.parse(fs.readFileSync(path.join(dir,name),'utf8')));fs.writeFileSync('/data/flows.json', JSON.stringify(merged, null, 2));"
+        && exec npm start -- --userDir /data --settings /data/settings.js --flowFile /data/flows.json
+
+volumes:
+  influxdb-data: {}
