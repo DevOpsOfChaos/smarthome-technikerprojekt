@@ -1,0 +1,94 @@
+Titel: ENS160-E2E-Wiederholungslauf Master + net_sen_env_bme680_veml
+Datum: 2026-04-03
+Thema: Gezielt wiederholter Realtest zum sauberen ENS160-Nachweis in der Vollkette
+
+1) Ziel des Testschritts
+Ziel war kein neuer Grundsatztest, sondern ein kurzer Wiederholungslauf im bestehenden Aufbau, um den zuvor offenen ENS160-Restpunkt sauber zu schliessen.
+
+Gefordert war der Nachweis:
+- ENS160 wird real erkannt
+- ENS160 erreicht nach Warmup einen brauchbaren Zustand
+- AQI, TVOC und eCO2 werden nicht nur lokal am Node sichtbar, sondern ueber die Kette Node -> ESP-NOW -> Master -> MQTT projiziert
+
+2) Ausgangslage
+- Der vorherige E2E-Grundlauf war bereits bestanden.
+- Der damals offene Restpunkt war ein nicht erkannter ENS160.
+- Die reale Ursache dafuer war eine geloeste Verdrahtung.
+- Der bestehende Hardwareaufbau blieb erhalten.
+
+3) Verwendeter Aufbau
+- Master-Board auf COM3
+- net_sen_env_bme680_veml-Node auf COM4
+- Sensorik am Node: BME680, VEML7700, ENS160
+
+4) Repo- und Testvorbereitung
+- Repo-Staende beider Repositories wurden vor dem Lauf geprueft.
+- COM-Ports wurden real mit dem vorhandenen Port-Listing verifiziert.
+- Master und Node wurden real gebaut und geflasht.
+
+Verwendete Flash-Schritte:
+- `pio run -e master`
+- `pio run -e master -t upload --upload-port COM3`
+- `pio run -e net_sen_env_bme680_veml`
+- `pio run -e net_sen_env_bme680_veml -t upload --upload-port COM4`
+
+5) Wichtige Beobachtung waehrend des Laufs
+Der erste Wiederholungslauf zeigte schnell:
+- ENS160 arbeitet wieder
+- die MQTT-Vollkette war zunaechst trotzdem blockiert
+
+Die Ursache war diesmal nicht die Sensorik, sondern die Testumgebung:
+- Docker Desktop bzw. der Mosquitto-Broker war anfangs nicht aktiv
+- danach zeigte sich zusaetzlich eine veraltete Broker-IP in der Master-Konfiguration
+
+Deshalb wurde als enge Minimalanpassung nur der MQTT-Host fuer den laufenden Test auf die reale Host-IP des aktiven Testnetzes angepasst.
+
+6) Relevanter Seriennachweis
+Im finalen No-Reset-Dual-Capture ist die Sensorseite sauber belegt.
+
+Node-seitig sichtbar:
+- `ENS160 status=brauchbar`
+- `ENV snapshot ... aqi=100 ... tvoc_ppb=35 ... eco2_ppm=426 fault=false`
+- spaetere Snapshots mit stabilen, veraenderlichen ENS160-Werten
+
+Master-seitig sichtbar:
+- `STATE_REPORT von net_sen_01 verarbeitet`
+- `MQTT retained smarthome/device/net_sen_01/state -> {...}`
+- `MQTT retained smarthome/device/net_sen_01/availability -> {... online:true ...}`
+
+7) Relevanter MQTT-/Broker-Nachweis
+Die Broker-Seite wurde zusaetzlich direkt verifiziert.
+
+Im MQTT-Capture fuer `smarthome/device/net_sen_01/#` erschienen unter anderem:
+- `availability` online
+- `meta` fuer `net_sen_01`
+- mehrfach aktualisierte `state`-Nachrichten mit echten ENS160-Werten
+
+Beispielhaft nachgewiesen:
+- `aqi`: 100 bzw. zeitweise 200
+- `tvoc_ppb`: z. B. 37, 38, 44, 54, 56, 74
+- `eco2_ppm`: z. B. 429, 431, 444, 465, 469, 504
+- spaeter auch gueltiger `gas_ohm`-Wert durch BME680-Warmup, z. B. 79513, 80122, 80740
+
+Damit ist die ENS160-Information nicht nur lokal am Node sichtbar, sondern real durch die Projektionskette nachgewiesen.
+
+8) Ergebnis
+Testurteil: BESTANDEN.
+
+Der ENS160-Restpunkt ist geschlossen.
+Der Wiederholungslauf belegt:
+- ENS160 init und Warmup funktionieren im realen Aufbau
+- ENS160 erreicht einen brauchbaren Zustand
+- AQI, TVOC und eCO2 werden real ueber Node -> ESP-NOW -> Master -> MQTT projiziert
+
+9) Auffaelligkeiten
+- Im MQTT-Capture traten zwischendurch kurze Online/Offline-Umschaltungen der Availability auf.
+- Fuer die reine ENS160-Funktionsfrage war das nicht kritisch, sollte aber spaeter separat beobachtet werden.
+- Das vorhandene serielle Dual-Capture-Werkzeug kann beim Portoeffnen durch DTR/RTS-Handling die ESP32-C3-Boards stoeren; fuer den finalen Nachweis wurde deshalb ein No-Reset-Capture verwendet.
+
+10) Nutzen des Schritts
+Mit diesem Wiederholungslauf ist der zuvor offene ENS160-Punkt nicht mehr nur vermutet, sondern real und nachvollziehbar nachgewiesen.
+
+11) Naechster sinnvoller Schritt
+- Die gelegentlichen kurzen Availability-Flanken getrennt analysieren
+- den No-Reset-Serienpfad fuer kuenftige Hardwaretests als Standard absichern
