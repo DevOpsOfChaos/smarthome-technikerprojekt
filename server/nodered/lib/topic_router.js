@@ -1,5 +1,7 @@
 "use strict";
 
+const { nowIso } = require("./time_helpers");
+
 const DEVICE_TOPICS = new Map([
   ["meta", { target_block: "meta", retained_expected: true }],
   ["availability", { target_block: "availability", retained_expected: true }],
@@ -44,7 +46,18 @@ function isSupportedTopic(topic) {
   return Boolean(parseTopic(topic));
 }
 
+function buildRoutingState(topic, receivedAt = nowIso()) {
+  const parsed = parseTopic(topic);
+  return parsed
+    ? {
+        ...parsed,
+        received_at: receivedAt
+      }
+    : null;
+}
+
 module.exports = {
+  buildRoutingState,
   DEVICE_TOPICS,
   MASTER_TOPICS,
   isSupportedTopic,

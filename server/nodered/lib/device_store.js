@@ -67,6 +67,32 @@ function createRuntimeState(timestamp = nowIso()) {
   };
 }
 
+function ensureRuntime(runtime, timestamp = nowIso()) {
+  const nextRuntime = runtime && typeof runtime === "object"
+    ? runtime
+    : createRuntimeState(timestamp);
+
+  nextRuntime.devices = nextRuntime.devices || {};
+  nextRuntime.master = nextRuntime.master || {};
+  nextRuntime.diag = nextRuntime.diag || {
+    booted_at: timestamp,
+    last_boot_reason: "runtime"
+  };
+
+  if (!nextRuntime.initialized_at) {
+    nextRuntime.initialized_at = timestamp;
+  }
+
+  return nextRuntime;
+}
+
+function markRuntimeBoot(runtime, reason = "runtime", timestamp = nowIso()) {
+  const nextRuntime = ensureRuntime(runtime, timestamp);
+  nextRuntime.diag.booted_at = timestamp;
+  nextRuntime.diag.last_boot_reason = reason;
+  return nextRuntime;
+}
+
 function createEmptyDevice(deviceId, timestamp = nowIso()) {
   return {
     identity: {
@@ -285,6 +311,8 @@ module.exports = {
   createEmptyDevice,
   createEmptyMaster,
   createRuntimeState,
+  ensureRuntime,
   ensureDevice,
-  ensureMaster
+  ensureMaster,
+  markRuntimeBoot
 };

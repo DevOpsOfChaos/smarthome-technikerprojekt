@@ -8,6 +8,7 @@ Diese Checkliste prueft nur den Phase-1-Kern:
 - gemeinsames Geraeteobjekt
 - separater Masterpfad
 - partielle Updates ohne Feldzerstoerung
+- eine einzige fachliche Wahrheitsbasis in `server/nodered/lib/`
 
 ## Vorbereitung
 
@@ -15,6 +16,31 @@ Diese Checkliste prueft nur den Phase-1-Kern:
 2. `docker compose up -d`
 3. Node-RED unter `http://localhost:1880` oeffnen
 4. Debug-Ansicht beobachten
+
+## Entdopplung vorab pruefen
+
+Vor den MQTT-Tests kurz kontrollieren:
+
+```bash
+rg -n "global.get\\(\"topicRouter\"\\)|global.get\\(\"topicHandlers\"\\)|global.get\\(\"deviceStore\"\\)" server/nodered/flows/active
+```
+
+Erwartung:
+
+- `10_mqtt_ingest.json` nutzt `topicRouter`
+- `20_device_store.json` und `90_master_diag.json` nutzen `topicHandlers`
+- `00_boot.json` nutzt `deviceStore`
+
+Zusatzcheck:
+
+```bash
+rg -n "aliasMap|stateFields|configFields|coerceBoolean\\(|createDevice\\(" server/nodered/flows/active
+```
+
+Erwartung:
+
+- keine Treffer in den aktiven Flow-Dateien
+- Fachlogik liegt nur noch unter `server/nodered/lib/`
 
 ## Testgerät anlegen
 
@@ -124,3 +150,4 @@ Erfolgreich ist Phase 1 nur dann, wenn alle Punkte gleichzeitig stimmen:
 - `meta`, `availability`, `state`, `event` und `ack` landen in den richtigen Bloecken
 - partielle State-Updates zerstoeren keine vorhandenen Werte
 - der Master bleibt komplett getrennt
+- die aktiven Flows enthalten keine zweite fachliche Logikbasis mehr
