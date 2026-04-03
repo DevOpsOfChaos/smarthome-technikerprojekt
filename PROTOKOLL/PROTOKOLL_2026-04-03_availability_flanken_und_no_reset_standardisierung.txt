@@ -1,0 +1,89 @@
+Titel: Availability-Flanken und serieller No-Reset-Standard
+Datum: 2026-04-03
+Thema: Ursache kurzer Online/Offline-Umschaltungen und Haertung des seriellen Capture-Standards
+
+1) Ziel
+Dieser Schritt sollte zwei enge Restpunkte aus dem erfolgreich bestandenen Umweltpfad sauber klaeren:
+- die kurzen Availability-Flanken von `net_sen_01`
+- die Stoerung von ESP32-C3-Boards beim Oeffnen der seriellen Ports
+
+2) Ausgangslage
+Der Integrationspfad `net_sen_env_bme680_veml` inklusive ENS160 war bereits real nachgewiesen. Offen blieb, warum in den Mitschnitten kurzzeitig `online` und `offline` wechselten und warum serielle Mitschnitte beim Start einzelne Boards stoeren konnten.
+
+3) Untersuchte Dateien und Logs
+Firmware und Doku:
+- `firmware/src/basetypes/master/AppConfig.h`
+- `firmware/src/basetypes/master/main.cpp`
+- `firmware/src/devices/net_sen_env_bme680_veml/DeviceConfig.h`
+- `PROTOKOLL_2026-04-02_master_net_sen_env_bme680_veml_e2e_realtest.txt`
+- `PROTOKOLL_2026-04-02_master_net_sen_env_bme680_veml_e2e_ens160_repeat.txt`
+
+Serielle und MQTT-Mitschnitte vom 2026-04-03:
+- `master.log`
+- `node.log`
+- `combined.log`
+- `mqtt_capture.log`
+
+Capture-Werkzeuge:
+- `serial_log_capture.ps1`
+- `serial_dual_log_capture.ps1`
+- `start_master_node_capture.ps1`
+- `serial_port_check.md`
+
+4) Belegte Ursache der Availability-Flanken
+Die Flanken kommen primaer aus einer falschen Zeitrelation zwischen Node und Master.
+
+Codebasis:
+- Im Master war `MASTER_NODE_OFFLINE_TIMEOUT_MS` auf `15000 ms` gesetzt.
+- Der Umwelt-Node sendet Heartbeats nur alle `60000 ms`.
+- Der regulaere State-Intervall liegt ebenfalls bei `60000 ms`.
+
+Logbeleg aus dem Realtest:
+- `18:43:05` letzter verarbeiteter `STATE_REPORT`
+- `18:43:20` Master setzt `net_sen_01` auf `offline`
+- `18:44:02` naechster `HEARTBEAT`, danach wieder `online`
+
+Der Master markierte die Node also schon nach 15 Sekunden als offline, obwohl der naechste regulaer erwartbare Kontakt erst nach rund 60 Sekunden kommt. Die MQTT-Availability-Flanken sind damit kein primaeres Broker- oder Capture-Problem, sondern eine Folge des zu kurzen Offline-Timeouts.
+
+Die MQTT-Mitschnitte enthalten zusaetzlich alte Retained-Nachrichten zu Beginn des Subscriber-Laufs. Das erklaert unruhige Anfangsbilder, aendert aber nichts an der belegten Hauptursache im Master-Timing.
+
+5) Belegte Ursache der Reset-/Capture-Falle
+Die serielle Capture-Falle lag im Werkzeug selbst.
+
+In den Capture-Skripten wurden beim Portoeffnen bisher beide Steuerleitungen aktiviert:
+- `DtrEnable = true`
+- `RtsEnable = true`
+
+Bei den verwendeten ESP32-C3-Boards kann genau dieses Verhalten beim Oeffnen eines COM-Ports einen Reset ausloesen oder den Log-Anlauf verfaelschen. Das passt zu den bereits beobachteten ROM-Starts, abgeschnittenen Loganfaengen und unsteten Serienmitschnitten.
+
+6) Gemachte Minimalaenderungen
+Oeffentliche Firmware:
+- `MASTER_NODE_OFFLINE_TIMEOUT_MS` von `15000 ms` auf `75000 ms` angehoben
+
+Werkzeugstandard:
+- serielle Capture-Skripte standardmaessig auf No-Reset gestellt
+- DTR und RTS bleiben jetzt beim Portoeffnen standardmaessig deaktiviert
+- ein expliziter Schalter fuer Sonderfaelle bleibt erhalten
+- Doku und Fehlerfalle entsprechend nachgezogen
+
+7) Validierung und Plausibilitaet
+Die Master-Korrektur ist eng und direkt aus Code und Laufzeitabstaenden hergeleitet:
+- erwartbarer Kontaktabstand: 60 Sekunden
+- neues Timeout: 75 Sekunden
+- damit verschwindet das kuenstliche Offline nach 15 Sekunden, ohne die Erkennung echter Ausfaelle vollstaendig aufzugeben
+
+Die Capture-Korrektur ist ebenfalls direkt aus der belegten Hardwarewirkung abgeleitet:
+- Reset-Leitungen aus bedeutet ruhigeres Portoeffnen
+- No-Reset ist fuer laufende Hardwaretests der sinnvolle Standard
+- Reset ueber Steuerleitungen bleibt bewusst nur noch ein Ausnahmepfad
+
+8) Ergebnis und neuer Standard
+Neuer Availability-Standard:
+- Der Master darf einen regulaer nur einmal pro Minute meldenden `net_sen`-Node nicht schon nach 15 Sekunden als offline markieren.
+
+Neuer Serienstandard:
+- Fuer Hardwaretests wird Capture standardmaessig als No-Reset-Capture gestartet.
+- Reset-Leitungen werden nur dann bewusst aktiviert, wenn ein konkreter Sonderfall das verlangt.
+
+9) Naechster sinnvoller Schritt
+Nach einem kurzen Folge-Hardwarelauf sollte nur noch verifiziert werden, dass die Availability-Flanken im MQTT-Verlauf unter dem neuen Timeout nicht mehr auftreten. Ein weiterer Umbau ist dafuer nicht noetig.
