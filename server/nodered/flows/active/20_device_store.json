@@ -17,6 +17,19 @@
     "wires": []
   },
   {
+    "id": "linkout_20_sqlite",
+    "type": "link out",
+    "z": "tab_20_store",
+    "name": "to SQLite writes",
+    "mode": "link",
+    "links": [
+      "linkin_30_writes"
+    ],
+    "x": 605,
+    "y": 420,
+    "wires": []
+  },
+  {
     "id": "linkin_20_meta",
     "type": "link in",
     "z": "tab_20_store",
@@ -37,7 +50,7 @@
     "type": "function",
     "z": "tab_20_store",
     "name": "handleMeta",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"meta without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nreturn msg;",
+    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"meta without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -45,7 +58,11 @@
     "libs": [],
     "x": 290,
     "y": 120,
-    "wires": []
+    "wires": [
+      [
+        "linkout_20_sqlite"
+      ]
+    ]
   },
   {
     "id": "linkin_20_availability",
@@ -68,7 +85,7 @@
     "type": "function",
     "z": "tab_20_store",
     "name": "handleAvailability",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"availability without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nreturn msg;",
+    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"availability without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -76,7 +93,11 @@
     "libs": [],
     "x": 320,
     "y": 180,
-    "wires": []
+    "wires": [
+      [
+        "linkout_20_sqlite"
+      ]
+    ]
   },
   {
     "id": "linkin_20_state",
@@ -99,7 +120,7 @@
     "type": "function",
     "z": "tab_20_store",
     "name": "handleState",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"state without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nreturn msg;",
+    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"state without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -107,7 +128,11 @@
     "libs": [],
     "x": 290,
     "y": 240,
-    "wires": []
+    "wires": [
+      [
+        "linkout_20_sqlite"
+      ]
+    ]
   },
   {
     "id": "linkin_20_event",
@@ -130,7 +155,7 @@
     "type": "function",
     "z": "tab_20_store",
     "name": "handleEvent",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"event without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nreturn msg;",
+    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"event without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -138,7 +163,11 @@
     "libs": [],
     "x": 295,
     "y": 300,
-    "wires": []
+    "wires": [
+      [
+        "linkout_20_sqlite"
+      ]
+    ]
   },
   {
     "id": "linkin_20_ack",
@@ -161,7 +190,7 @@
     "type": "function",
     "z": "tab_20_store",
     "name": "handleAck",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"ack without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nreturn msg;",
+    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"ack without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -169,6 +198,10 @@
     "libs": [],
     "x": 285,
     "y": 360,
-    "wires": []
+    "wires": [
+      [
+        "linkout_20_sqlite"
+      ]
+    ]
   }
 ]

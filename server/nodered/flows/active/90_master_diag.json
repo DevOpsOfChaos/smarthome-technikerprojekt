@@ -17,6 +17,19 @@
     "wires": []
   },
   {
+    "id": "linkout_90_sqlite",
+    "type": "link out",
+    "z": "tab_90_master",
+    "name": "to SQLite writes",
+    "mode": "link",
+    "links": [
+      "linkin_30_writes"
+    ],
+    "x": 635,
+    "y": 300,
+    "wires": []
+  },
+  {
     "id": "linkin_90_master_status",
     "type": "link in",
     "z": "tab_90_master",
@@ -37,7 +50,7 @@
     "type": "function",
     "z": "tab_90_master",
     "name": "handleMasterStatus",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master status without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nreturn msg;",
+    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master status without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -45,7 +58,11 @@
     "libs": [],
     "x": 340,
     "y": 140,
-    "wires": []
+    "wires": [
+      [
+        "linkout_90_sqlite"
+      ]
+    ]
   },
   {
     "id": "linkin_90_master_event",
@@ -68,7 +85,7 @@
     "type": "function",
     "z": "tab_90_master",
     "name": "handleMasterEvent",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master event without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nreturn msg;",
+    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master event without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -76,6 +93,10 @@
     "libs": [],
     "x": 335,
     "y": 220,
-    "wires": []
+    "wires": [
+      [
+        "linkout_90_sqlite"
+      ]
+    ]
   }
 ]

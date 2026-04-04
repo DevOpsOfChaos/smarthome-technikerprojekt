@@ -40,12 +40,75 @@ services:
     volumes:
       - ./nodered:/data
       - ./sqlite:/data/sqlite
-    command:
+    entrypoint:
       - /bin/sh
       - -lc
-      - >
-        node -e "const fs=require('fs');const path=require('path');const dir='/data/flows/active';const files=fs.readdirSync(dir).filter((name)=>name.endsWith('.json')).sort();const merged=files.flatMap((name)=>JSON.parse(fs.readFileSync(path.join(dir,name),'utf8')));fs.writeFileSync('/data/flows.json', JSON.stringify(merged, null, 2));const settingsContent=[\"const base = require('/data/settings.js');\",\"module.exports = {\",\"  ...base,\",\"  functionGlobalContext: {\",\"    ...(base.functionGlobalContext || {}),\",\"    topicRouter: require('/data/lib/topic_router'),\",\"    deviceStore: require('/data/lib/device_store'),\",\"    topicHandlers: require('/data/lib/topic_handlers'),\",\"    capabilityHelpers: require('/data/lib/capability_helpers'),\",\"    timeHelpers: require('/data/lib/time_helpers')\",\"  }\",\"};\",\"\"].join('\\n');fs.writeFileSync('/tmp/settings.generated.js', settingsContent);"
-        && exec npm start -- --userDir /data --settings /tmp/settings.generated.js --flowFile /data/flows.json
+    command:
+      - |
+        if [ ! -d /data/node_modules/node-red-node-sqlite ]; then
+          cd /data && npm install --no-audit --no-fund --unsafe-perm
+        fi
+        node <<'NODE'
+        const fs = require('fs');
+        const path = require('path');
+        const sqlite3 = require('/data/node_modules/sqlite3');
+        const dbPath = process.env.SQLITE_DB_PATH || '/data/sqlite/smarthome_phase1.db';
+        const schemaSql = fs.readFileSync('/data/sqlite/00_schema_phase1.sql', 'utf8');
+        const dir = '/data/flows/active';
+        function ensureSchema() {
+          return new Promise((resolve, reject) => {
+            const db = new sqlite3.Database(dbPath, (openErr) => {
+              if (openErr) {
+                reject(openErr);
+                return;
+              }
+
+              db.exec(schemaSql, (execErr) => {
+                db.close((closeErr) => {
+                  if (execErr) {
+                    reject(execErr);
+                    return;
+                  }
+
+                  if (closeErr) {
+                    reject(closeErr);
+                    return;
+                  }
+
+                  resolve();
+                });
+              });
+            });
+          });
+        }
+
+        (async () => {
+          await ensureSchema();
+          const files = fs.readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
+          const merged = files.flatMap((name) => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')));
+          fs.writeFileSync('/data/flows.json', JSON.stringify(merged, null, 2));
+          const lines = [
+            "const base = require('/data/settings.js');",
+            'module.exports = {',
+            '  ...base,',
+            '  functionGlobalContext: {',
+            '    ...(base.functionGlobalContext || {}),',
+            "    topicRouter: require('/data/lib/topic_router'),",
+            "    deviceStore: require('/data/lib/device_store'),",
+            "    topicHandlers: require('/data/lib/topic_handlers'),",
+            "    capabilityHelpers: require('/data/lib/capability_helpers'),",
+            "    timeHelpers: require('/data/lib/time_helpers')",
+            '  }',
+            '};',
+            ''
+          ];
+          fs.writeFileSync('/tmp/settings.generated.js', lines.join('\n'));
+        })().catch((error) => {
+          console.error(error);
+          process.exit(1);
+        });
+        NODE
+        exec node $$NODE_OPTIONS /usr/src/node-red/node_modules/node-red/red.js --userDir /data --settings /tmp/settings.generated.js --flowFile /data/flows.json
 
 volumes:
   influxdb-data: {}

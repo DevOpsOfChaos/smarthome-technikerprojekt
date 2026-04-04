@@ -7,6 +7,7 @@ Diese Checkliste prueft nur den Phase-1-Kern:
 - MQTT-Ingest
 - gemeinsames Geraeteobjekt
 - separater Masterpfad
+- zentrale SQLite-Writes
 - partielle Updates ohne Feldzerstoerung
 - eine einzige fachliche Wahrheitsbasis in `server/nodered/lib/`
 
@@ -16,31 +17,41 @@ Diese Checkliste prueft nur den Phase-1-Kern:
 2. `docker compose up -d`
 3. Node-RED unter `http://localhost:1880` oeffnen
 4. Debug-Ansicht beobachten
+5. warten, bis der SQLite-Node ohne Install-/Build-Fehler gestartet ist
 
 ## Entdopplung vorab pruefen
 
 Vor den MQTT-Tests kurz kontrollieren:
 
 ```bash
-rg -n "global.get\\(\"topicRouter\"\\)|global.get\\(\"topicHandlers\"\\)|global.get\\(\"deviceStore\"\\)" server/nodered/flows/active
+rg -n "global.get\\(\"topicRouter\"\\)|global.get\\(\"topicHandlers\"\\)|global.get\\(\"deviceStore\"\\)|global.get\\(\"sqliteWrites\"\\)" server/nodered/flows/active
 ```
 
 Erwartung:
 
 - `10_mqtt_ingest.json` nutzt `topicRouter`
-- `20_device_store.json` und `90_master_diag.json` nutzen `topicHandlers`
 - `00_boot.json` nutzt `deviceStore`
+- `20_device_store.json` und `90_master_diag.json` nutzen `topicHandlers`
+- `30_sqlite_persist.json` enthaelt nur den SQLite-Ausfuehrungspfad
 
 Zusatzcheck:
 
 ```bash
-rg -n "aliasMap|stateFields|configFields|coerceBoolean\\(|createDevice\\(" server/nodered/flows/active
+rg -n "aliasMap|stateFields|configFields|coerceBoolean\\(|createDevice\\(|INSERT INTO devices|INSERT INTO device_state_latest" server/nodered/flows/active
 ```
 
 Erwartung:
 
 - keine Treffer in den aktiven Flow-Dateien
 - Fachlogik liegt nur noch unter `server/nodered/lib/`
+
+## SQLite-Datei pruefen
+
+Nach dem Start muss die Datenbankdatei vorhanden sein:
+
+```bash
+test -f server/sqlite/smarthome_phase1.db && echo ok
+```
 
 ## Testgerät anlegen
 
@@ -55,6 +66,7 @@ Erwartung:
 - Geraet wird auto-angelegt
 - `identity.device_id` und `identity.device_name` sind gesetzt
 - `meta.caps` enthaelt mindestens `switchable`, `motion`, `lux`, `online_state`, `fault_state`, `ack_tracking`
+- `devices` enthaelt oder aktualisiert eine Zeile fuer `net_erl_hall_light`
 
 ## Availability prüfen
 
@@ -67,6 +79,7 @@ Erwartung:
 - `availability.online = true`
 - `availability.availability = online`
 - `availability.last_seen_at` wird aktualisiert
+- `device_state_latest.online = 1`
 
 ## State prüfen
 
@@ -83,6 +96,7 @@ Erwartung:
 - `state.lux = 120`
 - `config.report_interval_s = 60`
 - `availability.online` bleibt oder wird `true`
+- `device_state_latest` wird fuer dasselbe Geraet aktualisiert
 
 ### Partieller State
 
@@ -96,6 +110,7 @@ Erwartung:
 - `state.relay_1` bleibt `true`
 - `state.lux` bleibt `120`
 - fehlende Felder loeschen nichts
+- SQLite loescht die vorherigen `device_state_latest`-Werte ebenfalls nicht
 
 ## Event prüfen
 
@@ -108,6 +123,8 @@ Erwartung:
 - `last_event.event_type = motion`
 - `last_event.event_label = motion_clear`
 - normaler `state` bleibt unveraendert
+- `device_event_log` bekommt einen neuen Eintrag
+- `device_state_latest.last_event_*` wird mitgezogen
 
 ## ACK prüfen
 
@@ -121,6 +138,8 @@ Erwartung:
 - `last_ack.channel = relay_1`
 - `last_ack.status = ok`
 - normaler `state` bleibt unveraendert
+- `device_ack_log` bekommt einen neuen Eintrag
+- `device_state_latest.last_ack_*` wird mitgezogen
 
 ## Master separat prüfen
 
@@ -141,6 +160,31 @@ Erwartung:
 - Masterdaten landen nicht im normalen `devices`-Objekt
 - `master_1` fuehrt einen separaten Statusblock
 - `master_1` fuehrt einen separaten letzten Eventblock
+- `master_status` enthaelt den letzten Status
+- `master_event_log` bekommt einen neuen Eintrag
+
+## SQLite-Inhalt stichprobenartig pruefen
+
+Ein kurzer Spot-Check gegen die lokale DB-Datei reicht:
+
+```bash
+python - <<'PY'
+import sqlite3
+db = sqlite3.connect("server/sqlite/smarthome_phase1.db")
+for sql in [
+    "select device_id, device_name from devices order by device_id",
+    "select device_id, online, relay_1, motion, lux from device_state_latest order by device_id",
+    "select device_id, event_type, event_label from device_event_log order by id desc limit 3",
+    "select device_id, request_id, status from device_ack_log order by id desc limit 3",
+    "select master_id, online, wifi, mqtt, espnow from master_status order by master_id",
+    "select master_id, event, message from master_event_log order by id desc limit 3",
+]:
+    print("\\nSQL>", sql)
+    for row in db.execute(sql):
+        print(row)
+db.close()
+PY
+```
 
 ## Abschluss
 
@@ -150,4 +194,5 @@ Erfolgreich ist Phase 1 nur dann, wenn alle Punkte gleichzeitig stimmen:
 - `meta`, `availability`, `state`, `event` und `ack` landen in den richtigen Bloecken
 - partielle State-Updates zerstoeren keine vorhandenen Werte
 - der Master bleibt komplett getrennt
+- die SQLite-Writes kommen aus derselben zentralen Handlerkette
 - die aktiven Flows enthalten keine zweite fachliche Logikbasis mehr

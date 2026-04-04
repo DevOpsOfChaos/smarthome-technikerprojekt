@@ -12,14 +12,32 @@ const {
   ensureDevice,
   ensureMaster
 } = require("./device_store");
+const sqliteWrites = require("./sqlite_writes");
 const { coerceTimestamp, nowIso } = require("./time_helpers");
 
 function normalizeRuntime(runtime) {
   return ensureRuntime(runtime, nowIso());
 }
 
+function normalizePayload(payload) {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  return {};
+}
+
 function normalizeEnvelope(envelope = {}) {
-  const payload = envelope.payload && typeof envelope.payload === "object" ? envelope.payload : {};
+  const payload = normalizePayload(envelope.payload);
   return {
     entity_id: envelope.entity_id || payload.device_id || payload.master_id || "",
     payload,
@@ -105,16 +123,21 @@ function handleRoutedMessage(runtime, routed, payload) {
     }
 
     const result = handler(runtime, message);
-    return result && result.device
-      ? {
-          ...result,
-          payload: {
-            device_id: result.device.identity.device_id,
-            block: descriptor.topic_type,
-            device: result.device
-          }
-        }
-      : null;
+    if (!result || !result.device) {
+      return null;
+    }
+
+    const payloadResult = {
+      device_id: result.device.identity.device_id,
+      block: descriptor.topic_type,
+      device: result.device
+    };
+
+    return {
+      ...result,
+      payload: payloadResult,
+      sqlite_batch: sqliteWrites.buildSqliteBatch(descriptor, payloadResult)
+    };
   }
 
   if (descriptor.scope === "master") {
@@ -128,16 +151,21 @@ function handleRoutedMessage(runtime, routed, payload) {
     }
 
     const result = handler(runtime, message);
-    return result && result.master
-      ? {
-          ...result,
-          payload: {
-            master_id: result.master.status.master_id,
-            block: descriptor.topic_type,
-            master: result.master
-          }
-        }
-      : null;
+    if (!result || !result.master) {
+      return null;
+    }
+
+    const payloadResult = {
+      master_id: result.master.status.master_id,
+      block: descriptor.topic_type,
+      master: result.master
+    };
+
+    return {
+      ...result,
+      payload: payloadResult,
+      sqlite_batch: sqliteWrites.buildSqliteBatch(descriptor, payloadResult)
+    };
   }
 
   return null;

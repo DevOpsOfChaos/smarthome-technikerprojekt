@@ -9,6 +9,7 @@ Der Server verarbeitet MQTT nicht frei nach Bauchgefuehl, sondern nach einer fes
 3. Payload als JSON lesen
 4. passenden Block aktualisieren
 5. den gemeinsamen Laufzeitzustand fortschreiben
+6. die daraus zentral abgeleiteten SQLite-Writes ausfuehren
 
 Die fachliche Wahrheit liegt dabei in den Lib-Dateien unter `server/nodered/lib/`.
 Die aktiven Flows enthalten nur noch die Node-RED-Bruecken fuer:
@@ -16,6 +17,7 @@ Die aktiven Flows enthalten nur noch die Node-RED-Bruecken fuer:
 - MQTT-Eingang und JSON-Lesen
 - Aufruf der zentralen Router- und Handler-Module
 - Schreiben des aktualisierten Runtime-Objekts in den globalen Node-RED-Kontext
+- Ausfuehren der zentral vorbereiteten SQLite-Batches
 
 ## Topic auf Zielblock
 
@@ -75,11 +77,13 @@ Diese Struktur ist absichtlich simpel. Wer hier wieder Sondermodelle pro Geraete
 - `state` ist die Hauptwahrheit fuer den sichtbaren Geraetezustand
 - `event` darf den State nicht heimlich ersetzen
 - `ack` darf keine Bedienerfolge vortaeuschen
+- SQLite bekommt ihre Writes aus derselben Handlerkette wie der Runtime-State
 - `meta`, `availability` und `state` duerfen unbekannte Geraete robust anlegen
 - der Master bleibt separat
 - Topic-Erkennung steht nur in `server/nodered/lib/topic_router.js`
 - Block-Updates stehen nur in `server/nodered/lib/device_store.js`
 - die Zuordnung Topic -> Handler steht nur in `server/nodered/lib/topic_handlers.js`
+- SQL-Statements fuer Phase 1 stehen nur in `server/nodered/lib/sqlite_writes.js`
 
 ## Unvermeidbare Node-RED-Bruecke
 
@@ -99,7 +103,7 @@ neu definiert. Sie macht die zentrale Wahrheit nur im Flow ausfuehrbar.
 Noch nicht Teil dieses Schritts:
 
 - Timeseries-Schreiben
-- Logs- und Console-Historien
+- weitere Verlaufs- oder Console-Historien ausser Event- und ACK-Log
 - UI-Ableitungen
 - Command-Versand
 - Wetter und Automationen

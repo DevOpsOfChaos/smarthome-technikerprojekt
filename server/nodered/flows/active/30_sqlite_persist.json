@@ -1,0 +1,109 @@
+[
+  {
+    "id": "tab_30_sqlite",
+    "type": "tab",
+    "label": "30_sqlite_persist",
+    "disabled": false,
+    "info": "Fuehrt die zentral vorbereiteten SQLite-Batches aus. Die SQL-Fachlogik bleibt in /data/lib/sqlite_writes.js."
+  },
+  {
+    "id": "comment_30_sqlite",
+    "type": "comment",
+    "z": "tab_30_sqlite",
+    "name": "Zentraler SQLite-Pfad",
+    "info": "Die Handler liefern nur noch vorbereitete Batch-Statements. Dieser Tab fuehrt sie gesammelt gegen die Phase-1-Datenbank aus.",
+    "x": 190,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "linkin_30_writes",
+    "type": "link in",
+    "z": "tab_30_sqlite",
+    "name": "sqlite writes",
+    "links": [
+      "linkout_20_sqlite",
+      "linkout_90_sqlite"
+    ],
+    "x": 110,
+    "y": 180,
+    "wires": [
+      [
+        "func_30_batch_topic"
+      ]
+    ]
+  },
+  {
+    "id": "func_30_batch_topic",
+    "type": "function",
+    "z": "tab_30_sqlite",
+    "name": "Batch nach msg.topic",
+    "func": "const batch = typeof msg.sqlite_batch === \"string\" ? msg.sqlite_batch.trim() : \"\";\nif (!batch) {\n    return null;\n}\nmsg.topic = batch;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 340,
+    "y": 180,
+    "wires": [
+      [
+        "sqlite_30_phase1"
+      ]
+    ]
+  },
+  {
+    "id": "sqlite_30_phase1",
+    "type": "sqlite",
+    "z": "tab_30_sqlite",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "batch",
+    "sql": "",
+    "name": "Phase-1 SQLite batch",
+    "x": 600,
+    "y": 180,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "catch_30_sqlite",
+    "type": "catch",
+    "z": "tab_30_sqlite",
+    "name": "SQLite-Fehler",
+    "scope": [
+      "sqlite_30_phase1"
+    ],
+    "uncaught": false,
+    "x": 140,
+    "y": 260,
+    "wires": [
+      [
+        "debug_30_sqlite"
+      ]
+    ]
+  },
+  {
+    "id": "debug_30_sqlite",
+    "type": "debug",
+    "z": "tab_30_sqlite",
+    "name": "SQLite-Fehler",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "error",
+    "targetType": "msg",
+    "statusVal": "error.message",
+    "statusType": "msg",
+    "x": 370,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "sqlitedb_30_phase1",
+    "type": "sqlitedb",
+    "db": "/data/sqlite/smarthome_phase1.db",
+    "mode": "RWC"
+  }
+]

@@ -20,5 +20,13 @@ Thumbs.db
 __pycache__/
 *.pyc
 
+# Node-RED runtime artifacts
+server/nodered/.config*.json
+server/nodered/.config*.json.backup
+server/nodered/.npm/
+server/nodered/flows.json
+server/nodered/node_modules/
+server/sqlite/*.db
+
 # Local archives
 *.zip
