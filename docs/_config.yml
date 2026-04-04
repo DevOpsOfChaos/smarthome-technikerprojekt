@@ -1,0 +1,7 @@
+title: smarthome-technikerprojekt
+description: Öffentliches Smart-Home-Technikerprojekt mit ESP-NOW, Master-Bridge und Node-RED-Server.
+lang: de
+baseurl: "/smarthome-technikerprojekt"
+url: "https://devopsofchaos.github.io"
+theme: minima
+markdown: kramdown
