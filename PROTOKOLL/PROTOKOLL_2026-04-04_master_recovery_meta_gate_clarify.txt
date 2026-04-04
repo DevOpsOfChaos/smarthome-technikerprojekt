@@ -1,0 +1,92 @@
+Titel: Klaerung Master-Recovery-Gate fuer frische meta-Wiederveroeffentlichung
+Datum: 2026-04-04
+Thema: Fachliche Diagnose, ob das bisherige Master-Recovery-Gate korrekt oder zu streng ist
+
+1) Ausgangsfrage
+- Im gegateten Mehrstufenlauf vom 2026-04-04 blieb Stufe B rot, weil nach Master-Reset keine frische `smarthome/device/net_erl_01/meta` beobachtet wurde.
+- Zu klaeren war:
+  - ist frische `meta` nach Master-Recovery fachlich zwingend
+  - oder ist das Gate zu streng und muss sich auf frischen Master-Status plus frische `availability`/`state` stuetzen
+
+2) Relevante Vertrags- und Codeaussagen
+- Oeffentliche Serverdoku `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`:
+  - `state` ist die Hauptwahrheit fuer den sichtbaren Geraetezustand
+  - `ack` dient nur der Nachvollziehbarkeit
+  - `master/status` und `master/event` dienen der Server- und Verbindungsdiagnose
+- Oeffentliche Architektur `docs/public/02_architektur_und_kommunikation.md`:
+  - `state` ist die fachliche Hauptwahrheit fuer die Geraeteanzeige
+- Master-Firmware `firmware/src/basetypes/master/main.cpp`:
+  - `publishBekannteNodesNachReconnect()` publiziert bei MQTT-Reconnect `publishNodeMeta()`, `publishNodeAvailability()` und `publishNodeState()`
+  - `publishNodeMeta()` sendet aber nur, wenn `nodeStates[nodeIndex].meta_bekannt` gesetzt ist
+  - `meta_bekannt` wird erst in `verarbeiteHello(...)` gesetzt
+- Node-Firmware `firmware/src/devices/net_erl_hall_light/main.cpp`:
+  - `sendeHello()` laeuft bis `HELLO_ACK`
+  - nach `HELLO_ACK` setzt der Node `master_mac_gueltig` und `master_bekannt`
+  - danach sendet der Node Heartbeat und State weiter an die bekannte Master-MAC
+  - im Loop wird `HELLO` nur erneut gesendet, solange `master_bekannt` noch nicht gesetzt ist
+
+3) Fachliche Folgerung aus dem Vertrag
+- Nach einem reinen Master-Neustart verliert der Master seinen RAM-Zustand und damit `meta_bekannt`.
+- Der Node verliert seinen Zustand nicht und sendet deshalb kein neues `HELLO`, solange er den Master weiter als bekannt betrachtet.
+- Dadurch kann nach Master-Recovery frische `availability` und frischer `state` wieder sichtbar werden, ohne dass frische `meta` erneut erscheint.
+- Frische `meta` ist damit im aktuellen System keine verlaessliche Pflichtbedingung fuer Master-Recovery.
+
+4) Realer Beobachtungslauf A
+- Arbeitsrepo: `C:\\Users\\mries\\Documents\\LocalRepos\\smarthome-technikerprojekt`
+- Beobachtet wurden nur:
+  - `smarthome/master/MASTER-001/status`
+  - `smarthome/device/net_erl_01/meta`
+  - `smarthome/device/net_erl_01/availability`
+  - `smarthome/device/net_erl_01/state`
+- Capture lief ohne initiale Retained-Ausgabe ueber:
+  - `docker exec server-mosquitto-1 mosquitto_sub -h localhost -R -F "%I|%t|%p" ...`
+- Master-Reset wurde gezielt ueber kurze `platformio device monitor`-Session auf `COM3` ausgeloest.
+- Reset gestartet:
+  - `2026-04-04T22:09:02.1357441+02:00`
+
+Frische Beobachtung nach Reset:
+- `2026-04-04T20:09:10+0000|smarthome/master/MASTER-001/status|{"master_id":"MASTER-001","online":false,"wifi":true,"mqtt":false,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:09:10+0000|smarthome/master/MASTER-001/status|{"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:09:10+0000|smarthome/device/net_erl_01/availability|{"device_id":"net_erl_01","availability":"offline","online":false,"power_type":"mains"}`
+- `2026-04-04T20:09:12+0000|smarthome/device/net_erl_01/availability|{"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `2026-04-04T20:09:12+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":false,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+Nicht beobachtet:
+- keine frische `smarthome/device/net_erl_01/meta`
+
+5) Realer Beobachtungslauf B
+- Zweiter enger Wiederholungslauf mit identischem Capture und erneutem Master-Reset auf `COM3`
+- Reset gestartet:
+  - `2026-04-04T22:10:25.1335487+02:00`
+
+Frische Beobachtung nach Reset:
+- `2026-04-04T20:10:34+0000|smarthome/master/MASTER-001/status|{"master_id":"MASTER-001","online":false,"wifi":true,"mqtt":false,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:10:34+0000|smarthome/master/MASTER-001/status|{"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:10:34+0000|smarthome/device/net_erl_01/availability|{"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `2026-04-04T20:10:34+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":false,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T20:10:42+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":false,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+Nicht beobachtet:
+- erneut keine frische `smarthome/device/net_erl_01/meta`
+
+6) Bewertung von meta
+- `meta` ist im aktuellen System keine robuste Master-Recovery-Sicht.
+- `meta` haengt an `HELLO` und damit am Node-Handshake, nicht am reinen Wiederhochkommen der Master-MQTT-Bruecke.
+- Dass `meta` nach Node-Recovery frisch erscheint, ist logisch, weil der Node dort neu bootet und `HELLO` erneut sendet.
+- Dass `meta` nach Master-Recovery fehlt, ist im aktuellen Laufzeitvertrag erwartbar und kein hinreichender Nachweis fuer einen fachlich kaputten Recovery-Zustand.
+
+7) Entscheidung
+- Entscheidung: Gate zu streng
+- Fachlich korrektes Master-Recovery-Gate im aktuellen System:
+  - frischer `smarthome/master/MASTER-001/status`
+  - frische `smarthome/device/net_erl_01/availability`
+  - frischer `smarthome/device/net_erl_01/state`
+- Frische `meta` darf fuer Node-Recovery oder frischen Handshake ein starker Zusatzbeleg sein, aber nicht als Pflicht-Gate fuer reinen Master-Recovery.
+
+8) Ergebnis
+- Kein Code geaendert
+- Oeffentliche Doku minimal praezisiert
+- Historischer Mehrstufenlauf bleibt als sauberer Nachweis eines zu strengen Gates stehen
+
+9) Engster naechster Schritt
+- Falls der Mehrstufen-Gate-Text aktiv weiterverwendet wird, die Pflichtbedingung fuer Stufe B minimal auf Master-Status plus `availability`/`state` korrigieren.

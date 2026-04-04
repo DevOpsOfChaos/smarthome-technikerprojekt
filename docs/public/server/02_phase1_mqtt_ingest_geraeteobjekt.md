@@ -38,6 +38,8 @@ Diese Strecke erweitert den Ingest nicht um eine zweite Fachwelt. ACK und State 
 - ersetzt die bisher bekannte Metasicht
 - darf unbekannte Geraete auto-anlegen
 - leitet die faehigkeitsnahe Sicht aus `caps` und `device_class` ab
+- ist fachlich Geraetebeschreibung plus Handshake-Sicht, nicht die Hauptwahrheit fuer Recovery
+- nach einem reinen Master-Neustart ist ohne neues Node-`HELLO` keine frische `meta`-Wiederveroeffentlichung garantiert
 
 ### `availability`
 
@@ -88,6 +90,7 @@ Diese Struktur ist absichtlich simpel. Wer hier wieder Sondermodelle pro Geraete
 - `state` ist die Hauptwahrheit fuer den sichtbaren Geraetezustand
 - `event` darf den State nicht heimlich ersetzen
 - `ack` darf keine Bedienerfolge vortaeuschen
+- ein Master-Recovery ist fachlich ueber frischen Master-Status plus frische `availability`/`state` zu bewerten, nicht ueber erzwungen frische `meta`
 - SQLite bekommt ihre Writes aus derselben Handlerkette wie der Runtime-State
 - `meta`, `availability` und `state` duerfen unbekannte Geraete robust anlegen
 - der Master bleibt separat
