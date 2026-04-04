@@ -13,6 +13,19 @@ Phase 1 zieht nur den fachlichen Kern hoch:
 
 Nicht Teil dieser Stufe sind breite UI, Diagramme, eine allgemeine Command-Welt, Wetter oder Automationen.
 
+## Real bestaetigter Stand
+
+Auf `main` ist dieser Zuschnitt nicht nur beschrieben, sondern auf dem realen Pfad nachgewiesen:
+
+- der offizielle Server-Einstieg `POST /api/phase1/net-erl/relay-1` ist aktiv
+- fuer `net_erl_01` ist der echte HTTP -> MQTT -> Master -> Geraet -> ACK/State-Roundtrip belegt
+- derselbe Minimalpfad ist nach Server-Restart erneut belegt
+- derselbe Minimalpfad ist nach gezieltem Node-Recovery erneut belegt
+- der Master-Recovery-Pfad ist fachlich ueber frischen Master-Status plus frische `availability`/`state` eingeordnet
+- der fruehere Null-State nach Master-Recovery ist fuer den betroffenen Pfad behoben und per Hardware-Rerun des Master-Fixes bestaetigt
+
+Die passenden Detailnachweise liegen in `PROTOKOLL/` und bauen auf derselben Phase-1-Linie auf. Diese Doku behauptet daher keinen Zukunftswunsch, sondern beschreibt den real bestaetigten Kern.
+
 ## Minimale Bausteine
 
 ### Laufzeitbasis
@@ -76,3 +89,12 @@ Der alte Fehler war nicht fehlende Features, sondern fehlende Disziplin. Phase 1
 - partielle State-Nachrichten duerfen keine vorhandenen Felder loeschen
 
 Das ist klein genug, um testbar zu bleiben, und stabil genug, um spaeter Persistenz, UI und Commands darauf aufzusetzen.
+
+## Bewusste Grenze dieser Stufe
+
+Real bestaetigt ist ein enger, belastbarer Kern.
+Nicht bestaetigt ist damit automatisch schon:
+
+- eine breite Command-Matrix fuer weitere Geraetetypen
+- eine voll ausgebaute UI oder Bedienoberflaeche
+- Timeseries- oder Komfortwelten ausserhalb des Phase-1-Kerns

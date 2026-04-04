@@ -30,6 +30,16 @@ Phase 1.3 fuehrt genau einen offiziellen Server-Ausgang ein:
 
 Diese Strecke erweitert den Ingest nicht um eine zweite Fachwelt. ACK und State laufen danach weiter ueber dieselbe bestehende Ingest-Kette zurueck.
 
+Auf `main` ist dieser Minimalpfad fuer den realen Node `net_erl_01` belegt:
+
+- echter HTTP-Aufruf gegen `POST /api/phase1/net-erl/relay-1`
+- MQTT-Command ueber `smarthome/device/net_erl_01/command`
+- ACK und State ueber denselben realen Master-/Geraetepfad zurueck
+- erneute Nachweise nach Server-Restart, Node-Recovery und Master-Recovery
+- Hardware-Rerun fuer den frueheren Master-Recovery-Fehler mit bestaetigt erhaltenen Voll-States
+
+Die oeffentliche Aussage ist damit eng, aber klar: Es gibt einen real bestaetigten Minimalpfad, keine allgemeine Command-Welt.
+
 ## Topic auf Zielblock
 
 ### `meta`
@@ -112,6 +122,15 @@ Diese Bruecke ist keine zweite fachliche Wahrheit, weil sie nichts ueber:
 - State-, Event-, ACK- oder Status-Updates
 
 neu definiert. Sie macht die zentrale Wahrheit nur im Flow ausfuehrbar.
+
+## Recovery-Status des bestaetigten Kerns
+
+Fuer den aktuell oeffentlich bestaetigten Minimalpfad ist belegt:
+
+- Node-Recovery liefert wieder frische `meta`, `availability` und `state`
+- reiner Master-Recovery ist fachlich nicht an frische `meta` gebunden
+- der fruehere Null-/Minimal-State nach Master-Recovery war ein echter Master-Projektionsfehler und kein Server-Persistenzfehler
+- der Master-Fix ist per Hardware-Rerun auf `MASTER-001` fuer den realen Pfad bestaetigt
 
 ## Phase-1-Grenze
 
