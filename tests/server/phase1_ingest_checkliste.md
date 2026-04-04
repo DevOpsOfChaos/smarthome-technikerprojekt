@@ -143,35 +143,38 @@ Erwartung:
 
 ## Minimalen Command-/ACK-Pfad pruefen
 
+Fuer den echten Master-/Hardware-Roundtrip den vorhandenen realen Node `net_erl_01` verwenden.
+Der Platzhalter `net_erl_hall_light` taugt fuer den serverseitigen Ingest-Aufbau, aber nicht als belastbarer Hardware-Nachweis.
+
 In einem zweiten Terminal vor dem HTTP-Aufruf den offiziellen Command-Capture starten:
 
 ```bash
-mosquitto_sub -h localhost -t smarthome/device/net_erl_hall_light/command -C 1 -v
+mosquitto_sub -h localhost -t smarthome/device/net_erl_01/command -C 1 -v
 ```
 
 Dann den engen Server-Einstieg aufrufen:
 
 ```bash
-curl -s -X POST http://localhost:1880/api/phase1/net-erl/relay-1 -H "Content-Type: application/json" -d "{\"device_id\":\"net_erl_hall_light\",\"relay_1\":true}"
+curl -s -X POST http://localhost:1880/api/phase1/net-erl/relay-1 -H "Content-Type: application/json" -d "{\"device_id\":\"net_erl_01\",\"relay_1\":true}"
 ```
 
 Erwartung:
 
 - HTTP antwortet mit `202`
 - die Antwort enthaelt `device_id`, `request_id`, `command = set_relay`, `relay_1 = true`
-- MQTT zeigt genau einen Publish auf `smarthome/device/net_erl_hall_light/command`
+- MQTT zeigt genau einen Publish auf `smarthome/device/net_erl_01/command`
 - der publizierte Payload enthaelt dieselbe `request_id`
 
 Mit derselben `request_id` den ACK-Rueckweg pruefen:
 
 ```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/ack -m "{\"device_id\":\"net_erl_hall_light\",\"request_id\":\"<request_id_aus_http>\",\"channel\":\"command\",\"status\":\"ok\",\"status_code\":\"0\",\"ack_msg_type\":\"5\",\"ack_seq\":\"1\"}"
+mosquitto_pub -h localhost -t smarthome/device/net_erl_01/ack -m "{\"device_id\":\"net_erl_01\",\"request_id\":\"<request_id_aus_http>\",\"channel\":\"command\",\"status\":\"ok\",\"status_code\":\"0\",\"ack_msg_type\":\"5\",\"ack_seq\":\"1\"}"
 ```
 
 Optional den sichtbaren Zielzustand nachziehen:
 
 ```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/state -r -m "{\"device_id\":\"net_erl_hall_light\",\"relay_1\":true}"
+mosquitto_pub -h localhost -t smarthome/device/net_erl_01/state -r -m "{\"device_id\":\"net_erl_01\",\"relay_1\":true}"
 ```
 
 Erwartung:

@@ -1,0 +1,113 @@
+Titel: Server Phase 1.4 Realer Master-/Hardware-Command-Roundtrip
+Datum: 2026-04-04
+Thema: Echter Nachweis fuer den vorhandenen net_erl-Relais-Minimalpfad gegen realen Master und reale Hardware
+
+1) Ziel
+Dieser Lauf sollte keinen neuen Command-Pfad bauen.
+Geprueft werden sollte ausschliesslich der vorhandene Minimalpfad:
+- HTTP `POST /api/phase1/net-erl/relay-1`
+- MQTT-Command ueber das offizielle Device-Topic
+- realer Master als Bruecke
+- reales `net_erl`-Zielgeraet
+- echter ACK-/State-Rueckweg
+- SQLite-Beleg im Server
+
+2) Arbeits- und Testkontext
+Arbeitsrepo:
+- `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+
+Git-Gate zu Beginn:
+- `git rev-parse --show-toplevel` -> `C:/Users/mries/Documents/LocalRepos/smarthome-technikerprojekt`
+- `origin` -> `https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git`
+- Branch fuer diesen Lauf -> `test/server-phase1-4-real-command-roundtrip`
+- Working Tree vor der Arbeit sauber
+
+Reale Testumgebung:
+- Broker/Server lokal ueber Docker (`server-mosquitto-1`, `server-nodered-1`)
+- lokale Host-IP fuer Firmware/Broker: `192.168.178.59`
+- Master online auf MQTT als `MASTER-001`
+- serielle Geraete vorhanden auf `COM3` und `COM12`
+- reales Zielgeraet fuer den Roundtrip: `net_erl_01`
+
+3) Wichtiger Befund vor dem Test
+Der serverseitige Phase-1.3-Nachweis war nicht hardwaretauglich, weil er den Minimalpfad auf `net_erl_hall_light` dokumentierte und den ACK-Rueckweg kuenstlich ueber MQTT zurueckspielte.
+
+Der reale Master- und Firmwarepfad arbeitet jedoch auf dem echten Ziel `net_erl_01`.
+Die enge Korrektur fuer diesen Lauf war deshalb zuerst fachlich, nicht architektonisch:
+- realen Pfad mit `net_erl_01` pruefen
+- keine zweite Command-Welt bauen
+- keinen UI- oder Komfort-Umweg anfassen
+
+4) Realer Testlauf
+Es wurden zwei echte HTTP-Ausloesungen gegen den vorhandenen Server-Einstieg gefahren.
+
+Test A:
+- HTTP-Body: `{"device_id":"net_erl_01","relay_1":true}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-on-20260404184923173-813044`
+- MQTT-Command-Topic: `smarthome/device/net_erl_01/command`
+
+Echter Rueckweg Test A:
+- ACK-MQTT:
+  `smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-on-20260404184923173-813044","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":2,"source":"node_ack"}`
+- STATE-MQTT:
+  `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":219,"hum_01pct":483,"lux":4,"motion":true,"fault":false}`
+
+Test B:
+- HTTP-Body: `{"device_id":"net_erl_01","relay_1":false}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-off-20260404184952606-86ced2`
+- MQTT-Command-Topic: `smarthome/device/net_erl_01/command`
+
+Echter Rueckweg Test B:
+- ACK-MQTT:
+  `smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404184952606-86ced2","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":3,"source":"node_ack"}`
+- STATE-MQTT:
+  `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":219,"hum_01pct":482,"lux":4,"motion":true,"fault":false}`
+
+5) SQLite-Belege
+Nach kurzer Persistenzwartezeit lagen die passenden Server-Belege in `server/sqlite/smarthome_phase1.db`.
+
+ACK-Beleg fuer Test B:
+- `device_id = net_erl_01`
+- `request_id = cmd-net-erl-01-relay1-off-20260404184952606-86ced2`
+- `channel = command`
+- `status = ok`
+- `status_code = 0`
+- `ack_msg_type = 5`
+- `ack_seq = 3`
+- `occurred_at = 2026-04-04T18:49:52.705Z`
+
+Latest-State-Beleg danach:
+- `device_id = net_erl_01`
+- `relay_1 = 0`
+- `motion = 1`
+- `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404184952606-86ced2`
+- `last_ack_status = ok`
+- `last_ack_msg_type = 5`
+- `last_ack_seq = 3`
+- `updated_at = 2026-04-04T18:50:02.709Z`
+
+6) Ergebnis
+Der echte Minimalpfad ist gruen:
+- Server erzeugt die `request_id`
+- Server publiziert auf dem offiziellen Command-Topic
+- der reale Master verarbeitet den Command
+- die reale Hardware liefert ACK und State ueber den echten Pfad zurueck
+- MQTT und SQLite enthalten passende Belege
+
+7) Umgesetzt
+- echter Roundtrip mit realem `net_erl_01` statt kuenstlichem `net_erl_hall_light`-Platzhalter geprueft
+- minimalen Command-/ACK-Abschnitt in der Server-Checkliste auf den realen Hardwarepfad nachgezogen
+- Phase-1.4-Protokoll mit realen request_ids und SQLite-Belegen abgelegt
+
+8) Bewusst nicht umgesetzt
+- keine Flow-Aenderung
+- keine Firmware-Aenderung
+- keine UI
+- keine neue Command-Matrix
+- kein zweiter ACK-Pfad
+
+9) Restschuld
+Die historische Phase-1.3-Protokolldatei bleibt bewusst unveraendert, obwohl sie nur den serverseitigen MQTT-Rueckspielpfad belegt.
+Sie ist kein Hardware-Nachweis und darf nicht mehr als solcher gelesen werden.
