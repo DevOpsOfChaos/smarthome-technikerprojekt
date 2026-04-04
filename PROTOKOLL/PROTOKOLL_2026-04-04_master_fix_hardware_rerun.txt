@@ -1,0 +1,186 @@
+Titel: Hardware-Rerun des Master-Fixes gegen Null-State nach Master-Recovery
+Datum: 2026-04-04
+Thema: Reale Verifikation des lokalen Master-Fixes auf `MASTER-001`
+
+1) Ausgangsfrage
+- Funktioniert der bereits lokal implementierte Fix auf dem echten Master `MASTER-001`, sodass nach Master-Recovery valide State-Werte nicht mehr zu Null-/Minimal-States kaputtsaniert werden?
+
+2) Gelesene Vorbefunde
+- `PROTOKOLL/PROTOKOLL_2026-04-04_phase1_8_null_state_after_master_recovery.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-04_master_recovery_meta_gate_clarify.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-04_server_phase1_6_reconnect_recovery.txt`
+
+3) Repo- und Branch-Gate
+1. Arbeitsverzeichnis
+   - `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+2. `git rev-parse --show-toplevel`
+   - `C:/Users/mries/Documents/LocalRepos/smarthome-technikerprojekt`
+3. `git remote -v`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (fetch)`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (push)`
+4. `git status --short`
+   - sauber zu Laufbeginn
+5. Branch
+   - `fix/master-preserve-state-without-meta`
+6. Fix-Commit im Branch enthalten
+   - `84aa0cd615b9447ff5e5b857a925e83148cc9d65`
+
+4) Gepruefter lokaler Fix
+- Datei: `firmware/src/basetypes/master/main.cpp`
+- Relevante Stelle: `sanitisiereNodeStateNachCapabilities(size_t nodeIndex)`
+- Aktueller Schutz:
+  - Kommentar: Nach Master-Recovery kann frischer State vor frischer Meta eintreffen.
+  - Guard: `if (!nodeStates[nodeIndex].meta_bekannt) return;`
+- Bedeutung:
+  - Capability-Sanitisierung laeuft nicht mehr blind mit `caps == 0`, solange nach Recovery noch keine `meta` bekannt ist.
+  - Damit bleiben valide frische Sensorwerte erhalten, statt wieder auf `null` bzw. `false` zurueckzufallen.
+
+5) Altbefund vor dem Fix
+- Referenzlauf: `PROTOKOLL/PROTOKOLL_2026-04-04_phase1_8_null_state_after_master_recovery.txt`
+- Vorher nach Master-Recovery:
+  - `2026-04-04T20:59:05+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+  - derselbe Null-/Minimal-State wiederholt bis mindestens `2026-04-04T21:02:01+0000`
+- Damals stand der Hardware-Rerun des Fixes noch aus.
+
+6) Vorher-Snapshot direkt vor dem heutigen Flash
+- MQTT retained:
+  - `smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+  - `smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+  - `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- SQLite vor dem Flash:
+  - `device_id = net_erl_01`
+  - `availability = online`
+  - `online = 1`
+  - `relay_1 = 1`
+  - `temp_01c = NULL`
+  - `hum_01pct = NULL`
+  - `lux = NULL`
+  - `motion = 0`
+  - `fault = 0`
+
+7) Build-Nachweis
+- Kommando:
+  - `pio run -e master`
+- Ergebnis:
+  - `SUCCESS`
+- Relevanter Stand:
+  - RAM `12.1%`
+  - Flash `57.4%`
+
+8) Flash auf echten Master
+- Kommando:
+  - `pio run -e master -t upload --upload-port COM3`
+- Ziel:
+  - echter Master `MASTER-001` auf `COM3`
+- Ergebnis:
+  - Upload erfolgreich
+  - `Hard resetting via RTS pin...`
+  - `SUCCESS`
+
+9) Realer Recovery-Beobachtungslauf
+Es wurden zwei echte Recovery-Laeufe gefahren.
+
+Lauf A: Recovery-Beobachtung nach Flash
+- MQTT-Capture auf:
+  - `smarthome/master/MASTER-001/status`
+  - `smarthome/device/net_erl_01/availability`
+  - `smarthome/device/net_erl_01/state`
+- Entscheidender Abschnitt:
+  - `2026-04-04T21:18:54.579465+00:00 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":false,"wifi":true,"mqtt":false,"espnow":true,"fw":"0.2.2"}`
+  - `2026-04-04T21:18:54.606045+00:00 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+  - `2026-04-04T21:18:59.568426+00:00 smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+  - `2026-04-04T21:18:59.628020+00:00 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":236,"hum_01pct":458,"lux":4,"motion":true,"fault":false}`
+- Bewertung:
+  - Nach Recovery kam kein Null-/Minimal-State mehr.
+  - Stattdessen kam wieder ein plausibler voller State.
+
+Lauf B: Expliziter harter Reset ueber serielle Steuerleitung
+- Resetstart:
+  - `2026-04-04T21:19:47.338950+00:00`
+- Serieller Boot-Nachweis:
+  - `rst:0x15 (USB_UART_CHIP_RESET),boot:0xd (SPI_FAST_FLASH_BOOT)`
+  - `MASTER v0.3.0`
+  - `FW: 0.2.2`
+  - `MQTT verbunden`
+  - `MQTT retained smarthome/device/net_erl_01/state -> {"device_id":"net_erl_01","relay_1":true,"temp_01c":236,"hum_01pct":459,"lux":4,"motion":true,"fault":false}`
+- MQTT-Beobachtung im selben Lauf:
+  - `2026-04-04T21:19:53.079012+00:00 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":false,"wifi":true,"mqtt":false,"espnow":true,"fw":"0.2.2"}`
+  - `2026-04-04T21:19:53.107699+00:00 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+  - `2026-04-04T21:19:53.107699+00:00 smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+  - `2026-04-04T21:19:53.107699+00:00 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":236,"hum_01pct":459,"lux":4,"motion":true,"fault":false}`
+  - `2026-04-04T21:20:03.317857+00:00 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":236,"hum_01pct":458,"lux":4,"motion":true,"fault":false}`
+- Bewertung:
+  - Auch im explizit ausgelosten Resetlauf kam direkt wieder ein voller plausibler State.
+  - Der fruehere Null-/Minimal-State konnte nicht reproduziert werden.
+
+10) Pflichtvergleich alt vs. neu
+1. Vor dem Fix nach Master-Recovery:
+   - wiederholt Null-/Minimal-States fuer `net_erl_01`
+   - Sensorwerte `null`, `motion=false`
+2. Nach dem Fix auf echter Hardware:
+   - nach Master-Recovery wieder plausible volle State-Werte
+   - `temp_01c`, `hum_01pct`, `lux`, `motion` bleiben erhalten
+3. Ergebnis:
+   - der alte Fehlerpfad ist im heutigen Hardware-Rerun nicht mehr sichtbar
+
+11) SQLite-Sicht nach Recovery
+- Nach den heutigen Recovery-Laeufen:
+  - `device_id = net_erl_01`
+  - `availability = online`
+  - `online = 1`
+  - `relay_1 = 0` oder `1` passend zum letzten Aktorzustand
+  - `temp_01c = 236.0`
+  - `hum_01pct = 458.0`
+  - `lux = 4.0`
+  - `motion = 1`
+  - `fault = 0`
+- Beispiel-Endstand:
+  - `last_seen_at = 2026-04-04T21:21:29.286Z`
+  - `updated_at = 2026-04-04T21:21:29.286Z`
+
+12) Optionaler Minimalpfad-Test
+- HTTP:
+  - `POST http://localhost:1880/api/phase1/net-erl/relay-1`
+  - Body: `{"device_id":"net_erl_01","relay_1":false}`
+- HTTP-Ergebnis:
+  - `202 Accepted`
+- Ruecklauf:
+  - Command:
+    - `2026-04-04T21:20:49.180210+00:00 smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404212049178-5391b2","command":"set_relay","relay_1":false}`
+  - ACK:
+    - `2026-04-04T21:20:49.266192+00:00 smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404212049178-5391b2","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":0,"source":"node_ack"}`
+  - State:
+    - `2026-04-04T21:20:49.267203+00:00 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":236,"hum_01pct":458,"lux":4,"motion":true,"fault":false}`
+- SQLite danach:
+  - `relay_1 = 0`
+  - Sensorwerte weiterhin voll und plausibel
+
+13) Ergebnis
+- Entscheidung: Option 1 - Fix bestaetigt
+- Der Hardware-Rerun zeigt real:
+  - Fix-Firmware wurde erfolgreich gebaut
+  - Fix-Firmware wurde erfolgreich auf `MASTER-001` geflasht
+  - nach Master-Recovery kommen fuer `net_erl_01` wieder plausible volle State-Werte
+  - der fruehere Null-/Minimal-State aus dem Vorbefund ist im Recovery-Rerun nicht mehr sichtbar
+  - der offizielle HTTP-Minimalpfad bleibt ebenfalls intakt
+
+14) Umgesetzt / bewusst nicht umgesetzt / Restschulden
+Umgesetzt:
+- Repo-/Branch-Gate
+- Fix-Stelle geprueft
+- echter Build
+- echter Flash auf `COM3`
+- echter Recovery-Rerun mit MQTT- und seriellem Nachweis
+- SQLite-Pruefung
+- optionaler HTTP-Minimalpfad
+- Protokoll im oeffentlichen Repo
+
+Bewusst nicht umgesetzt:
+- keine neue Architektur
+- keine UI
+- keine neue Command-Welt
+- kein weiterer Blindfix
+
+Restschulden:
+- keine neue technische Restschuld aus diesem Lauf sichtbar
+- fachlich bleibt nur der uebliche Punkt, dass dieser Nachweis auf `MASTER-001` mit `net_erl_01` gefuehrt wurde und nicht automatisch jede andere Geraeteklasse beweist

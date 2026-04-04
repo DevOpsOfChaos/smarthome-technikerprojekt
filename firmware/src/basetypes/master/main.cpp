@@ -319,6 +319,10 @@ void setzeNetSenZusatzwerteUnbekannt(size_t nodeIndex) {
 }
 
 void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
+    // Nach Master-Recovery kann frischer State vor frischer Meta eintreffen.
+    // Ohne bekannte Caps wuerden valide Sensorwerte hier wieder auf "unknown" fallen.
+    if (!nodeStates[nodeIndex].meta_bekannt) return;
+
     if (!nodeHasCap(nodeIndex, SH_CAP_TEMP)) nodeStates[nodeIndex].temp_01c = INT16_MIN;
     if (!nodeHasCap(nodeIndex, SH_CAP_HUM)) nodeStates[nodeIndex].hum_01pct = 0xFFFFU;
     if (!nodeHasCap(nodeIndex, SH_CAP_LUX)) nodeStates[nodeIndex].lux = 0xFFFFU;

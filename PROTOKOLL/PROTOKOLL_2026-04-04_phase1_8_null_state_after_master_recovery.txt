@@ -1,0 +1,203 @@
+Titel: Phase 1.8 Diagnose Null-lastiger State-Payloads nach Master-Recovery
+Datum: 2026-04-04
+Thema: Ursache der Null-/Minimal-State-Payloads fuer `net_erl_01` nach Master-Recovery und kleinster gezielter Fix
+
+1) Ausgangsfrage
+- Nach Master-Recovery blieb der enge HTTP->MQTT->ACK->State-Minimalpfad gruen.
+- Gleichzeitig kamen frische `state`-Payloads fuer `net_erl_01` mit Minimalwerten:
+  - `temp_01c = null`
+  - `hum_01pct = null`
+  - `lux = null`
+  - `motion = false`
+- Zu klaeren war, ob das nur ein kurzer legitimer Uebergang ist oder ein echter Fehler im Datenpfad.
+
+2) Gelesene Vorbefunde
+- `PROTOKOLL/PROTOKOLL_2026-04-04_master_recovery_meta_gate_clarify.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-04_gate_fix_and_rerun_multistage_recovery.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-04_server_phase1_5_restart_roundtrip.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-04_server_phase1_6_reconnect_recovery.txt`
+- `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`
+- `firmware/src/basetypes/master/main.cpp`
+- `firmware/src/devices/net_erl_hall_light/main.cpp`
+- `server/nodered/lib/device_store.js`
+- `server/nodered/lib/sqlite_writes.js`
+
+3) Vertrags- und Codepruefung
+- Der Server behandelt `state` korrekt:
+  - `server/nodered/lib/device_store.js` loescht fehlende Felder nicht.
+  - `server/nodered/lib/sqlite_writes.js` schreibt nur den aktuellen Runtime-Zustand weg.
+- Der Server konserviert also nicht eigenmaechtig Nullwerte, sondern uebernimmt exakt das, was er vom Master als `state` bekommt.
+- Im Master liegt die kritische Stelle in `sanitisiereNodeStateNachCapabilities(...)`:
+  - fehlende `caps` setzen `temp_01c`, `hum_01pct`, `lux` wieder auf "unknown"
+  - fehlendes Motion-Cap setzt `motion = false`
+- Nach Master-Recovery ist frische `meta` laut bereits geklaertem Vertrag nicht garantiert.
+- Genau das bedeutet: Der Master kann nach Recovery frischen `state` empfangen, obwohl `meta_bekannt == false` und `caps == 0` sind.
+
+4) Reale Beobachtung vor dem Fix
+Arbeits- und Repo-Gate:
+1. aktuelles Arbeitsverzeichnis
+   - `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+2. `git rev-parse --show-toplevel`
+   - `C:/Users/mries/Documents/LocalRepos/smarthome-technikerprojekt`
+3. `git remote -v`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (fetch)`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (push)`
+4. `git status --short`
+   - sauber zu Laufbeginn
+5. `git log --oneline -10`
+   - `59cd5b0 docs: record gate fix and multistage recovery rerun`
+   - `b9a8c9a docs: clarify master recovery meta gate`
+   - `30052da docs: record multistage recovery gate result`
+   - `3d1d6a5 docs: record phase1.6 reconnect recovery evidence`
+   - `bd6e311 docs: record restart roundtrip evidence`
+   - `c9c439f docs: record real net_erl command roundtrip`
+   - `d0e01a8 server: add minimal net_erl command ack path`
+   - `32a3d80 test: document successful phase1 smoke test on main`
+   - `0280072 server: add phase1.2 sqlite writes`
+   - `14145b8 Merge 766b7071871b51b478641c4bd12095bc9c9e9a73 into 4c6904620058c6ad1dcec5b1ff96ac65286be117`
+
+Baseline vor dem langen Recovery-Lauf:
+- Retained `smarthome/device/net_erl_01/state` vor Reset:
+  - `2026-04-04T20:58:53+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":true,"temp_01c":236,"hum_01pct":456,"lux":4,"motion":true,"fault":false}`
+
+Master-Recovery-Beobachtungslauf:
+- MQTT-Capture ohne Retained-Ausgabe:
+  - `smarthome/master/MASTER-001/status`
+  - `smarthome/device/net_erl_01/availability`
+  - `smarthome/device/net_erl_01/state`
+- Master-Reset ueber kurze `pio device monitor`-Session auf `COM3`
+- Reset gestartet um `2026-04-04T22:58:55.7104374+02:00`
+
+Direkt nach Recovery beobachtet:
+- `2026-04-04T20:59:05+0000|smarthome/master/MASTER-001/status|{"master_id":"MASTER-001","online":false,"wifi":true,"mqtt":false,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:59:05+0000|smarthome/master/MASTER-001/status|{"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:59:05+0000|smarthome/device/net_erl_01/availability|{"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `2026-04-04T20:59:05+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+Uebergangsphase weiter mitgeschnitten:
+- `2026-04-04T20:59:11+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T20:59:21+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T20:59:31+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T20:59:41+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T20:59:51+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:00:01+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:00:11+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:00:21+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:00:31+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:00:41+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:00:51+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:01:01+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:01:11+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:01:21+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:01:31+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:01:41+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:01:51+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+- `2026-04-04T21:02:01+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+Bewertung:
+- Nicht nur erster Snapshot null.
+- Auch ueber deutlich mehr als drei Minuten kein spaeter voller State sichtbar.
+- Option 1 "nur kurzer Uebergang" ist damit als Erklaerung unhaltbar.
+
+5) Reale Gegenprobe mit bestehendem `get_state`
+Gegenprobe vor Master-Reset:
+- bestehender MQTT-Command `{"device_id":"net_erl_01","command":"get_state"}`
+- Antwort:
+  - `2026-04-04T20:58:01+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":true,"temp_01c":236,"hum_01pct":457,"lux":4,"motion":true,"fault":false}`
+  - `2026-04-04T20:58:11+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":true,"temp_01c":236,"hum_01pct":457,"lux":4,"motion":true,"fault":false}`
+
+Gegenprobe nach Master-Reset im kaputten Zustand:
+- derselbe bestehende MQTT-Command `{"device_id":"net_erl_01","command":"get_state"}`
+- Antwort:
+  - `2026-04-04T21:02:39+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+  - `2026-04-04T21:02:49+0000|smarthome/device/net_erl_01/state|{"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+Schluss daraus:
+- Ein explizit angeforderter frischer State bleibt nach Master-Reset ebenfalls null-lastig.
+- Das Problem sitzt also nicht im Server-Beobachtungszeitpunkt.
+- Es sitzt auch nicht in SQLite.
+- Es sitzt im Master-Projektionspfad vor MQTT.
+
+6) SQLite-Sicht
+Direkt nach den Recovery-Laeufen stand in `device_state_latest`:
+- `device_id = net_erl_01`
+- `availability = online`
+- `online = 1`
+- `relay_1 = 0` bzw. spaeter `1` je nach letztem Aktorzustand
+- `temp_01c = NULL`
+- `hum_01pct = NULL`
+- `lux = NULL`
+- `motion = 0`
+- `last_seen_at = 2026-04-04T20:57:15.102Z`
+- `updated_at = 2026-04-04T20:57:15.102Z`
+
+Bewertung:
+- SQLite spiegelt den vom Master gelieferten Null-State.
+- Kein Beleg fuer einen eigenstaendigen Server-/Persistenzfehler.
+
+7) Eindeutige Ursache
+Die Ursache sitzt im Senderpfad des Masters:
+- Nach Master-Recovery fehlt oft frische `meta` fuer denselben Node.
+- Dadurch bleibt `meta_bekannt == false` und `caps == 0`.
+- Kommt danach ein frischer `state`, werden die Sensorwerte in `verarbeiteStateReport(...)` zwar uebernommen,
+  aber unmittelbar danach in `sanitisiereNodeStateNachCapabilities(...)` wieder auf "unknown" bzw. `false` gesetzt.
+- Betroffen sind genau die beobachteten Felder:
+  - `temp_01c`
+  - `hum_01pct`
+  - `lux`
+  - `motion`
+- `relay_1` bleibt sichtbar, weil dieses Feld nicht an Caps sanitisiert wird.
+
+Das erklaert die komplette reale Beobachtung ohne Bauchgefuehl:
+- voller State vor Reset
+- nach Reset wiederholt Null-State
+- Server und SQLite nur Spiegel
+- Problem verschwindet nicht durch Abwarten
+- Problem passt exakt zur fehlenden `meta` nach Master-Recovery
+
+8) Kleinstmoeglicher Fix
+Geaenderte Datei:
+- `firmware/src/basetypes/master/main.cpp`
+
+Fix:
+- `sanitisiereNodeStateNachCapabilities(...)` laeuft jetzt nur noch, wenn `meta_bekannt == true` ist.
+- Dadurch werden valide frische State-Werte nach Master-Recovery nicht mehr wegsaniert, nur weil `HELLO`/`meta` noch fehlt.
+
+Begruendung:
+- kleiner als Persistenztricks
+- kleiner als Server-Sonderlogik
+- keine neue Architektur
+- keine neue Command-Welt
+- direkt auf den nachgewiesenen Fehlerpfad begrenzt
+
+9) Build-/Validierungsstand
+- Master-Firmware lokal gebaut
+- Kein Reflash auf reale Hardware in diesem Lauf
+- Deshalb ist der Fix code-seitig klar und build-validiert, aber noch nicht als Hardware-Rerun erneut belegt
+
+10) Entscheidung
+- Entscheidung: Option 2 – echter Qualitaetsfehler im Senderpfad
+- Genauer:
+  - kein Node-Sensor-Warmup-Thema als Hauptursache
+  - kein Serverpfad-Qualitaetsfehler
+  - Master-Projektionsfehler nach Recovery durch Sanitisierung ohne bekannte Caps
+
+11) Umgesetzt / bewusst nicht umgesetzt / Restschulden
+Umgesetzt:
+- Vertrags- und Codepruefung
+- echter langer Master-Recovery-Mitschnitt
+- Gegenprobe mit bestehendem `get_state`
+- SQLite-Sicht geprueft
+- kleinster gezielter Fix im Master
+- Protokoll im Repo
+
+Bewusst nicht umgesetzt:
+- keine UI
+- keine neue Command-Welt
+- keine Server-Sonderbehandlung
+- kein Persistenzumbau
+- kein Reflash auf produktionsnahe Hardware in diesem Lauf
+
+Restschuld:
+- Hardware-Rerun des Fixes auf `MASTER-001` steht noch aus
+- ohne diesen Rerun ist die Diagnose eindeutig, die End-to-End-Hardwarebestaetigung des Fixes aber noch offen
