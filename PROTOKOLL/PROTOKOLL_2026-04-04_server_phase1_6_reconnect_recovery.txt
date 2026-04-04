@@ -1,0 +1,173 @@
+Titel: Server Phase 1.6 Reconnect-/Recovery-Nachweis fuer den echten net_erl_01-Minimalpfad
+Datum: 2026-04-04
+Thema: Gezielter Neustart des realen Zielnodes `net_erl_01` und erneuter Nachweis des vorhandenen HTTP->MQTT->Master->Node->ACK/State-Pfads
+
+1) Ziel
+Dieser Lauf baut keine neue Funktion.
+Geprueft wurde ausschliesslich, ob der bereits gruen nachgewiesene echte Minimalpfad nach einem gezielten Neustart des realen Zielnodes wieder sauber funktioniert:
+- reales Zielgeraet `net_erl_01`
+- offizieller Server-Einstieg `POST /api/phase1/net-erl/relay-1`
+- offizielles MQTT-Command-Topic
+- echter ACK-/State-Rueckweg ueber den vorhandenen Master-/Geraetepfad
+- neue SQLite-Belege
+
+2) Repo-Gate und Arbeitsort
+Aktuelles Arbeitsverzeichnis zu Beginn:
+- `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+
+Startpruefung:
+- `git rev-parse --show-toplevel` -> `C:/Users/mries/Documents/LocalRepos/smarthome-technikerprojekt`
+- `git remote -v` -> `https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git`
+- `git status --short` -> sauber
+- `git log --oneline -5` ->
+  - `bd6e311 docs: record restart roundtrip evidence`
+  - `c9c439f docs: record real net_erl command roundtrip`
+  - `d0e01a8 server: add minimal net_erl command ack path`
+  - `32a3d80 test: document successful phase1 smoke test on main`
+  - `0280072 server: add phase1.2 sqlite writes`
+- Arbeitsbranch fuer diesen Lauf: `test/server-phase1-6-reconnect-recovery`
+
+Explizit nicht verwendet:
+- nicht im Playground-Repo gearbeitet
+- nicht im privaten Repo entwickelt
+
+3) Vorpruefung auf vorhandene Gruenbasis
+Auf `main` lagen die relevanten Vorstufen bereits vor:
+- Phase 1.4: `PROTOKOLL_2026-04-04_server_phase1_4_real_command_roundtrip.txt`
+- Phase 1.5: `PROTOKOLL_2026-04-04_server_phase1_5_restart_roundtrip.txt`
+
+Damit war der Server-/Stack-Neustart schon belegt.
+Dieser Lauf prueft nur noch den Recovery-Fall nach Neustart des realen Zielnodes.
+
+4) Gewaehlter Neustartpfad
+Fuer den Recovery-Test wurde bewusst nicht der Master neu geflasht und auch keine neue Tooling-Strecke gebaut.
+
+Gewaehlter reale Neustartpfad:
+- reales Zielgeraet `net_erl_01` auf `COM12`
+- Master weiter aktiv auf `COM3`
+- gezielter USB-seitiger Reset des Zielnodes ueber eine kurze `platformio device monitor`-Session auf `COM12`
+
+Begruendung:
+- enger als Reflash
+- kein Eingriff in Code oder Architektur
+- derselbe reale Node bleibt Testobjekt
+
+5) Baseline vor dem Neustart
+Vor dem gezielten Reset waren Master und Zielgeraet real sichtbar:
+
+MQTT retained / sichtbare Topics:
+- `smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- `smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":227,"hum_01pct":473,"lux":4,"motion":true,"fault":false}`
+
+SQLite vor dem Recovery-Test:
+- letzter ACK-Eintrag fuer `net_erl_01`: ID `6`
+- letzter sichtbarer State:
+  - `device_id = net_erl_01`
+  - `online = 1`
+  - `availability = online`
+  - `relay_1 = 0`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404190958224-e2945f`
+
+6) Erster enger Grenztest direkt an der Recovery-Kante
+Der erste direkte Nachtest lag zu nah an der Recovery-Kante und zaehlt deshalb bewusst nicht als offizieller Gruennachweis.
+
+Direkter Test an der Kante:
+- request_id: `cmd-net-erl-01-relay1-on-20260404192139553-40cade`
+- Ergebnis in MQTT/SQLite:
+  - `ack status = timeout`
+  - `ack_seq = 6`
+  - spaeter trotzdem State-Ruecklauf auf `relay_1:true`
+
+Einordnung:
+- dieser Versuch zeigt keine neue Architekturbaustelle
+- er zeigt eine reale Timing-Kante direkt waehrend der Recovery
+- deshalb wurde nicht schoengeschrieben, sondern ein sauber getrenntes offizielles Recovery-Fenster abgewartet
+
+7) Offizieller Recovery-Nachweis
+Der eigentliche Recovery-Lauf wurde mit Abstand nach dem gezielten Neustart gefahren.
+
+Beobachteter Recovery-Verlauf:
+- MQTT-Capture startete um `2026-04-04T19:22:42Z`
+- der gezielte Node-Neustart lief ueber `COM12`
+- nach dem Reset erschienen frische Publishes fuer denselben realen Node:
+  - `2026-04-04T19:22:53+0000 smarthome/device/net_erl_01/meta ...`
+  - `2026-04-04T19:22:53+0000 smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+  - `2026-04-04T19:22:53+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":228,"hum_01pct":472,"lux":4,"motion":true,"fault":false}`
+- direkt danach war die Kette wieder sichtbar und der Node publizierte erneut State/Event:
+  - `2026-04-04T19:22:54+0000 ... event {"event":"relay_changed",...,"param1":1,...}`
+  - `2026-04-04T19:22:54+0000 ... state {"device_id":"net_erl_01","relay_1":true,"temp_01c":228,"hum_01pct":473,"lux":4,"motion":true,"fault":false}`
+
+Das ist der eigentliche Recovery-Befund:
+- derselbe reale Node kommt nach dem gezielten Neustart wieder auf MQTT hoch
+- `meta`, `availability` und `state` werden erneut sichtbar
+- der Master `MASTER-001` bleibt parallel sichtbar
+
+8) Command-/ACK-/State-Test nach sichtbarer Recovery
+Nach sichtbarer Recovery wurde erst dann derselbe offizielle Minimalpfad erneut ausgeloest.
+
+HTTP-Aufruf:
+- Zeitpunkt: `2026-04-04T19:23:00Z`
+- Body: `{"device_id":"net_erl_01","relay_1":false}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-off-20260404192300426-833a55`
+
+MQTT-Belege fuer denselben Lauf:
+- Command:
+  - `2026-04-04T19:23:00+0000 smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404192300426-833a55","command":"set_relay","relay_1":false}`
+- ACK:
+  - `2026-04-04T19:23:00+0000 smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404192300426-833a55","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":9,"source":"node_ack"}`
+- STATE:
+  - `2026-04-04T19:23:00+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":228,"hum_01pct":471,"lux":4,"motion":true,"fault":false}`
+
+9) SQLite-Belege
+Frischer ACK-Beleg:
+- `device_id = net_erl_01`
+- `request_id = cmd-net-erl-01-relay1-off-20260404192300426-833a55`
+- `channel = command`
+- `status = ok`
+- `status_code = 0`
+- `ack_msg_type = 5`
+- `ack_seq = 9`
+- `occurred_at = 2026-04-04T19:23:00.491Z`
+
+Frischer Latest-State-Beleg:
+- `device_id = net_erl_01`
+- `online = 1`
+- `availability = online`
+- `relay_1 = 0`
+- `motion = 1`
+- `lux = 4.0`
+- `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404192300426-833a55`
+- `last_ack_status = ok`
+- `last_ack_msg_type = 5`
+- `last_ack_seq = 9`
+- `updated_at = 2026-04-04T19:23:52.369Z`
+
+10) Ergebnis
+Der echte Reconnect-/Recovery-Nachweis ist gruen.
+
+Begruendung:
+- der reale Zielnode `net_erl_01` wurde gezielt neu gestartet
+- nach dem Neustart wurde die Kette wieder sichtbar
+- `meta`, `availability` und `state` kamen fuer denselben realen Node erneut ueber MQTT hoch
+- danach wurde derselbe offizielle HTTP-Minimalpfad erneut ausgeloest
+- ACK und State kamen fuer dieselbe `request_id` ueber den echten Pfad sauber zurueck
+- SQLite enthaelt passende neue ACK-/State-Belege
+
+11) Umgesetzt / bewusst nicht umgesetzt / Restschuld
+Umgesetzt:
+- echter Recovery-Test fuer den realen `net_erl_01`-Pfad
+- neuer sachlicher Nachweis im Repo
+
+Bewusst nicht umgesetzt:
+- keine UI
+- keine neue Command-Welt
+- keine Flow-Aenderung
+- keine Firmware-Aenderung
+- keine Architektur-Erweiterung
+
+Restschuld:
+- direkt an der unmittelbaren Recovery-Kante kann ein zu frueher Command noch in einen `master_timeout` laufen
+- fuer belastbare Recovery-Tests sollte erst nach frischer Sichtbarkeit von `meta` + `availability` + `state` der offizielle Command erneut geschickt werden
+- das ist keine neue Produktwelt, sondern eine reale Timing-Bedingung des Testablaufs
