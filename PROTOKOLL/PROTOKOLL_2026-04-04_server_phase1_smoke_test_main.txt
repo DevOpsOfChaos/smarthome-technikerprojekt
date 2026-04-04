@@ -1,0 +1,104 @@
+Titel: Server Phase-1 Smoke-Test auf main
+Datum: 2026-04-04
+Thema: Realer Smoke-Test des dokumentierten Phase-1-Serverkerns auf `main`
+
+1) Ziel des Tests
+Ziel war kein Featurebau, sondern ein echter Smoke-Test des aktuellen Phase-1-Kerns auf `main`. Geprueft werden sollte, ob der dokumentierte Startpfad den Stack real hochbringt und ob der Phase-1-Ingest in diesem Stand ueberhaupt lauffaehig ist.
+
+2) Testbasis
+- Oeffentliches Repository: `smarthome-technikerprojekt`
+- Branch: `main`
+- Commitbasis fuer den Test: `14145b8`
+- Testzeitraum: 2026-04-04 nachts lokal auf dem Entwicklungsrechner
+
+3) Herangezogene oeffentliche Referenzen
+- `docs/public/04_server_schnellstart_phase1.md`
+- `tests/server/phase1_ingest_checkliste.md`
+- `server/docker-compose.yml`
+- aktive Flow-Dateien unter `server/nodered/flows/active/`
+
+4) Vorabbeobachtung zur Struktur
+Die strukturelle Phase-1-Linie wirkt im Repo selbst konsistent:
+- `10_mqtt_ingest.json` referenziert `topicRouter`
+- `20_device_store.json` referenziert `topicHandlers`
+- `00_boot.json` referenziert `deviceStore`
+- die in der Checkliste ausgeschlossenen alten Fachlogikmuster (`aliasMap`, `stateFields`, `configFields`, `coerceBoolean(`, `createDevice(`) tauchen in den aktiven Flow-Dateien nicht auf
+
+Das bedeutet: Die beabsichtigte Entdopplung in `server/nodered/lib/` ist im Dateistand sichtbar.
+
+5) Realer Startversuch
+Dokumentierter Startpfad laut Schnellstart:
+1. in `server/` wechseln
+2. Umgebungswerte uebernehmen
+3. `docker compose up -d`
+4. Node-RED aufrufen
+5. Ingest-Checkliste verwenden
+
+Reale Beobachtung auf dem Testrechner:
+- `docker` war installiert
+- `docker compose` war lokal nicht verfuegbar
+- `docker-compose` war lokal verfuegbar
+- Docker Desktop / Linux Engine war initial nicht aktiv und musste zuerst gestartet werden
+
+Der dokumentierte Startpfad war damit in der lokalen Realitaet bereits nicht direkt reproduzierbar.
+
+6) Reale Laufzeitbeobachtung nach Stack-Start
+Nach Start mit `docker-compose up -d` liefen die drei Container formal an:
+- Mosquitto: oben
+- InfluxDB: oben
+- Node-RED: oben
+
+Der eigentliche Phase-1-Kern war trotzdem nicht geladen:
+- `GET http://localhost:1880/flows` lieferte ein leeres Flow-Set (`[]`)
+- im Node-RED-Container existierte `/data/flows.json` nicht
+- im Node-RED-Container existierte `/tmp/settings.generated.js` nicht
+- Node-RED loggte `Settings file  : /data/settings.js`
+- Node-RED loggte `Flows file     : /data/flows.json`
+- Node-RED loggte gleichzeitig `Creating new flow file`
+
+Das ist der zentrale Befund: Die dokumentierte Startverkabelung laedt die Phase-1-Flows auf `main` real nicht.
+
+7) Zuschaerfender Technikbefund
+`server/docker-compose.yml` versucht fuer `nodered` vor dem Start:
+- die aktiven JSON-Dateien zu `/data/flows.json` zusammenzubauen
+- eine generierte Settings-Datei mit `functionGlobalContext` nach `/tmp/settings.generated.js` zu schreiben
+- Node-RED anschliessend mit `--settings /tmp/settings.generated.js --flowFile /data/flows.json` zu starten
+
+Im real laufenden Container war jedoch sichtbar:
+- der Prozess lief schlicht als `node-red`
+- die erwarteten generierten Dateien fehlten
+- der Admin-Endpunkt zeigte weiterhin keine Flows
+
+Damit ist der dokumentierte Compose-Pfad als Startmechanismus auf dem getesteten `main` faktisch durchgefallen.
+
+8) MQTT-Ingest-Sicht
+Als MQTT-Beobachtung war relevant:
+- im Mosquitto-Log erschien kein Node-RED-Client `nodered-phase1`
+- eine retained Testnachricht auf `smarthome/device/net_erl_hall_light/meta` liess den Node-RED-Zustand unveraendert
+- der Admin-Endpunkt blieb nach dem Publish bei leerem Flow-Set
+
+Folge:
+- Der eigentliche MQTT-Ingest konnte im dokumentierten Hauptpfad nicht real nachgewiesen werden.
+- Nicht weil einzelne Felder falsch gemappt wurden, sondern weil der Kernpfad ueberhaupt nicht geladen war.
+
+9) Ergebnisbewertung
+Der Smoke-Test des aktuellen Phase-1-Kerns auf `main` ist als Gesamttest fehlgeschlagen.
+
+Begruendung:
+- Der dokumentierte Startpfad ist lokal nicht direkt reproduzierbar (`docker compose` fehlte, nur `docker-compose` vorhanden).
+- Nach erfolgreichem Containerstart wird der Phase-1-Flow-Satz real nicht geladen.
+- Ohne geladene Flows gibt es keinen gueltigen Ingest-Nachweis, keinen Device-Store-Nachweis und keinen Masterpfad-Nachweis zur Laufzeit.
+
+Wichtig:
+Die Code- und Dateistruktur wirkt vorbereitet, aber der reale Betriebsweg ist auf diesem `main` nicht funktionsfaehig nachgewiesen.
+
+10) Was bewusst nicht getan wurde
+- kein Featurebau
+- keine Repo-Korrektur am Compose- oder Node-RED-Setup
+- keine nachtraegliche Schoenfaerbung des Ergebnisses
+
+11) Naechster sinnvoller Schritt
+Der naechste Schritt ist kein neues Feature, sondern eine enge Ursachenbehebung des Startpfads:
+- klaeren, warum der `nodered`-Service den vorgesehenen vorbereitenden Compose-Befehl nicht wirksam in eine reale `flows.json`- und `settings.generated.js`-Erzeugung ueberfuehrt
+- danach denselben Smoke-Test erneut auf `main` fahren
+- erst nach bestandenem Lauf die Checkliste fuer `meta`, `availability`, `state`, `event`, `ack` und den separaten Masterpfad erneut komplett abarbeiten
