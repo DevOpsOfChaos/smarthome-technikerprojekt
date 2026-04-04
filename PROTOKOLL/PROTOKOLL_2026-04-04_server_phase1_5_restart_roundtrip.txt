@@ -1,0 +1,164 @@
+Titel: Server Phase 1.5 Restart-/Kaltstart-Nachweis fuer den echten net_erl_01-Command-Roundtrip
+Datum: 2026-04-04
+Thema: Frischer Stop/Start des lokalen Server-Stacks und erneuter Realnachweis des vorhandenen net_erl_01-Minimalpfads
+
+1) Ziel
+Dieser Lauf baut keine neue Funktion.
+Geprueft wurde ausschliesslich, ob der bereits gruen nachgewiesene reale Minimalpfad nach frischem Stack-Start erneut funktioniert:
+- HTTP `POST /api/phase1/net-erl/relay-1`
+- offizielles MQTT-Command-Topic fuer `net_erl_01`
+- realer ACK-Rueckweg ueber Master/Geraet
+- realer State-Rueckweg ueber denselben Pfad
+- neue SQLite-Belege nach dem Restart
+
+2) Arbeits- und Repo-Gate
+Arbeitsrepo:
+- `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+
+Startpruefung:
+- aktuelles Arbeitsverzeichnis: `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+- `git rev-parse --show-toplevel` -> `C:/Users/mries/Documents/LocalRepos/smarthome-technikerprojekt`
+- `git remote -v` -> `https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git`
+- Working Tree vor der Arbeit sauber
+- neuer Branch fuer diesen Lauf: `test/server-phase1-5-restart-roundtrip`
+
+Explizit nicht verwendet:
+- nicht im Playground-Repo gearbeitet
+- nicht im privaten Repo entwickelt
+
+3) Frischer Restart/Kaltstart
+Durchgefuehrte Restart-Schritte:
+1. `cd server`
+2. `docker-compose down`
+3. `docker-compose up -d`
+
+Container nach dem Neustart:
+- `server-mosquitto-1`
+- `server-influxdb-1`
+- `server-nodered-1`
+
+Node-RED-Nachweis nach Restart:
+- HTTP `http://localhost:1880` -> `200`
+- `docker inspect -f "{{.State.Health.Status}}" server-nodered-1` -> `healthy`
+- Node-RED-Log nach Neustart:
+  - `Settings file  : /tmp/settings.generated.js`
+  - `Flows file     : /data/flows.json`
+  - `Started flows`
+  - `Connected to broker: nodered-phase1@mqtt://mosquitto:1883`
+
+4) Reale Verfuegbarkeit nach Restart
+Master nach Restart sichtbar:
+- MQTT retained auf `smarthome/master/MASTER-001/status`
+- Payload: `{"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+
+Zielgeraet nach Restart sichtbar:
+- `smarthome/device/net_erl_01/meta`
+- `smarthome/device/net_erl_01/availability`
+- `smarthome/device/net_erl_01/state`
+
+Letzter sichtbarer State vor dem Restart-Test:
+- `{"device_id":"net_erl_01","relay_1":false,"temp_01c":225,"hum_01pct":477,"lux":4,"motion":true,"fault":false}`
+
+Hinweis zur Testbeobachtung:
+- lokale `mosquitto_sub`/`mosquitto_pub`-CLI war auf dem Host nicht installiert
+- die MQTT-Beobachtung wurde deshalb direkt ueber den laufenden Broker-Container gefahren
+- das aendert den Pfad nicht, sondern nur den Beobachtungspunkt
+
+5) Restart-Test A
+HTTP-Aufruf:
+- Body: `{"device_id":"net_erl_01","relay_1":true}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-on-20260404190853796-af4c49`
+
+MQTT-Belege:
+- Command:
+  `smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-on-20260404190853796-af4c49","command":"set_relay","relay_1":true}`
+- ACK:
+  `smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-on-20260404190853796-af4c49","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":4,"source":"node_ack"}`
+
+Erster Live-State-Mitschnitt waehrend Test A:
+- `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":225,"hum_01pct":477,"lux":4,"motion":true,"fault":false}`
+
+Saubere Einordnung Test A:
+- ACK fuer dieselbe `request_id` kam sofort sauber zurueck
+- der erste rohe State-Mitschnitt war zeitlich nicht belastbar genug, weil der sichtbare Wert noch `false` zeigte
+- deshalb wurde direkt danach nicht spekuliert, sondern SQLite und ein zweiter sauber getakteter Test herangezogen
+
+SQLite-Pruefung nach Test A:
+- `device_ack_log` enthielt den neuen ACK-Beleg fuer `cmd-net-erl-01-relay1-on-20260404190853796-af4c49`
+- `device_state_latest` stand danach auf:
+  - `relay_1 = 1`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-on-20260404190853796-af4c49`
+  - `last_ack_status = ok`
+  - `last_ack_msg_type = 5`
+  - `last_ack_seq = 4`
+  - `updated_at = 2026-04-04T19:09:26.286Z`
+
+Zusaetzlicher Live-State danach:
+- `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":225,"hum_01pct":476,"lux":4,"motion":true,"fault":false}`
+
+6) Restart-Test B
+Um die State-Korrelation nach dem Restart ohne Interpretationsspielraum enger zu machen, wurde direkt anschliessend ein zweiter Minimalfall gefahren.
+
+HTTP-Aufruf:
+- Body: `{"device_id":"net_erl_01","relay_1":false}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-off-20260404190958224-e2945f`
+
+Synchron mitgehoerte MQTT-Belege:
+- Command:
+  `2026-04-04T19:09:58+0000 smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404190958224-e2945f","command":"set_relay","relay_1":false}`
+- ACK:
+  `2026-04-04T19:09:58+0000 smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404190958224-e2945f","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":5,"source":"node_ack"}`
+- STATE:
+  `2026-04-04T19:09:58+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":225,"hum_01pct":476,"lux":4,"motion":true,"fault":false}`
+
+7) SQLite-Belege fuer den sauberen Restart-Test
+ACK-Log:
+- `device_id = net_erl_01`
+- `request_id = cmd-net-erl-01-relay1-off-20260404190958224-e2945f`
+- `channel = command`
+- `status = ok`
+- `ack_msg_type = 5`
+- `ack_seq = 5`
+- `occurred_at = 2026-04-04T19:09:58.327Z`
+
+Latest-State:
+- `device_id = net_erl_01`
+- `relay_1 = 0`
+- `motion = 1`
+- `lux = 4.0`
+- `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404190958224-e2945f`
+- `last_ack_status = ok`
+- `last_ack_msg_type = 5`
+- `last_ack_seq = 5`
+- `updated_at = 2026-04-04T19:09:58.327Z`
+
+8) Ergebnis
+Der echte Restart-/Kaltstart-Nachweis ist gruen.
+
+Begruendung:
+- der Docker-/Server-Stack wurde real gestoppt und frisch gestartet
+- Node-RED war nach dem Restart erreichbar und mit den aktiven Flows am Broker
+- Master `MASTER-001` und Zielgeraet `net_erl_01` waren nach dem Restart sichtbar
+- der offizielle HTTP-Minimalpfad erzeugte neue `request_id`s
+- Command, ACK und State liefen danach erneut ueber den echten Pfad
+- SQLite enthaelt neue ACK-/Latest-State-Belege fuer den Restart-Test
+- der Nachweis basiert nicht auf kuenstlich zurueckgespielten MQTT-Testnachrichten
+
+9) Umgesetzt / nicht umgesetzt / Restschuld
+Umgesetzt:
+- echter Restart/Kaltstart des lokalen Server-Stacks
+- realer Restart-Roundtrip fuer `net_erl_01`
+- neues Restart-Protokoll mit MQTT- und SQLite-Belegen
+
+Bewusst nicht umgesetzt:
+- keine UI
+- keine neue Command-Welt
+- keine Flow-Aenderung
+- keine Firmware-Aenderung
+- keine Architektur-Erweiterung
+
+Restschuld:
+- die Host-Checkliste setzt lokal an mehreren Stellen `mosquitto_*`-CLI auf dem Host voraus; in dieser Umgebung war nur der Weg ueber den Broker-Container direkt nutzbar
+- das ist kein Pfadbruch, aber eine Reproduzierbarkeitskante der lokalen Testumgebung
