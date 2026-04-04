@@ -1,0 +1,259 @@
+Titel: Gate-Fix und erneuter gegateter Mehrstufen-Recovery-Lauf
+Datum: 2026-04-04
+Thema: Minimal korrigiertes Master-Recovery-Gate und erneuter Realtest A -> B -> C fuer den vorhandenen net_erl_01-Minimalpfad
+
+1) Ziel
+Dieser Lauf baut keine neue Funktion.
+Geprueft wurde ausschliesslich:
+- die bereits fachlich begruendete minimale Gate-Korrektur fuer Master-Recovery
+- Stufe A: Node-Recovery fuer `net_erl_01`
+- Stufe B: Master-Recovery fuer `MASTER-001` mit korrigiertem Gate
+- Stufe C: unmittelbarer Wiederholungstest ohne Neustart
+
+Harte Laufregel:
+- strikt sequenziell A -> B -> C
+- Abbruch beim ersten echten Fehler
+- kein kuenstliches MQTT-Zurueckspielen als Hauptnachweis
+
+2) Arbeitsort und Repo-Gate
+Startpruefung:
+1. `aktuelles Arbeitsverzeichnis`
+   - `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+2. `git rev-parse --show-toplevel`
+   - `C:/Users/mries/Documents/LocalRepos/smarthome-technikerprojekt`
+3. `git remote -v`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (fetch)`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (push)`
+4. `git status --short`
+   - sauber
+5. `git log --oneline -8`
+   - `b9a8c9a docs: clarify master recovery meta gate`
+   - `30052da docs: record multistage recovery gate result`
+   - `3d1d6a5 docs: record phase1.6 reconnect recovery evidence`
+   - `bd6e311 docs: record restart roundtrip evidence`
+   - `c9c439f docs: record real net_erl command roundtrip`
+   - `d0e01a8 server: add minimal net_erl command ack path`
+   - `32a3d80 test: document successful phase1 smoke test on main`
+   - `0280072 server: add phase1.2 sqlite writes`
+
+Arbeitsbranch fuer diesen Lauf:
+- `test/gate-fix-and-rerun-multistage-recovery`
+
+Explizit nicht verwendet:
+- kein Playground-Repo
+- keine Entwicklung im privaten Repo
+
+3) Minimale Gate-Korrektur
+Die minimal korrigierte Stelle liegt in:
+- `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`
+
+Fachlich gueltige Master-Recovery-Regel:
+- frischer `smarthome/master/MASTER-001/status`
+- frische `smarthome/device/net_erl_01/availability`
+- frischer `smarthome/device/net_erl_01/state`
+
+Nicht mehr Pflicht-Gate fuer reinen Master-Recovery:
+- frische `smarthome/device/net_erl_01/meta`
+
+Einordnung:
+- `meta` bleibt fuer Node-Recovery ein starker Zusatzbeleg
+- fuer reinen Master-Recovery ist `meta` im aktuellen Laufzeitvertrag optional, weil sie am Node-HELLO haengt
+
+4) Vorbedingungen vor Stufe A
+Server-/Stack-Pruefung:
+- `docker ps`:
+  - `server-nodered-1 Up About an hour (healthy)`
+  - `server-mosquitto-1 Up About an hour`
+  - `server-influxdb-1 Up About an hour`
+- `docker inspect -f "{{.State.Health.Status}}" server-nodered-1` -> `healthy`
+- `http://localhost:1880` -> `200`
+
+Sichtbarkeit vor dem Lauf:
+- `smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- `smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":234,"hum_01pct":461,"lux":4,"motion":true,"fault":false}`
+
+SQLite-Basis vor dem Lauf:
+- letzter ACK fuer `net_erl_01`:
+  - `id = 9`
+  - `request_id = cmd-net-erl-01-relay1-off-20260404194011491-c77e71`
+  - `status = ok`
+  - `ack_seq = 2`
+- letzter Latest-State:
+  - `device_id = net_erl_01`
+  - `online = 1`
+  - `availability = online`
+  - `relay_1 = 1`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404194011491-c77e71`
+
+5) Stufe A - Node-Recovery
+Wie A durchgefuehrt wurde:
+- gezielter Reset des realen Zielnodes `net_erl_01` ueber `COM12`
+- MQTT-Capture ohne Retained-Ausgabe lief parallel
+- erst nach frischer Sichtbarkeit von `meta` + `availability` + `state` wurde der offizielle HTTP-Minimalpfad ausgeloest
+
+Zeitpunkt des Node-Recovery:
+- Reset gestartet um `2026-04-04T20:33:51.4044706Z`
+
+Frische Sichtbarkeit nach Recovery:
+- `2026-04-04T20:33:55+0000 smarthome/device/net_erl_01/meta {...}`
+- `2026-04-04T20:33:55+0000 smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `2026-04-04T20:33:56+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":234,"hum_01pct":461,"lux":4,"motion":true,"fault":false}`
+
+Offizieller Test nach sichtbarer Recovery:
+- HTTP `POST /api/phase1/net-erl/relay-1`
+- Body: `{"device_id":"net_erl_01","relay_1":false}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-off-20260404203421903-9078b6`
+
+Echter Rueckweg:
+- Command:
+  - `2026-04-04T20:34:21+0000 smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404203421903-9078b6","command":"set_relay","relay_1":false}`
+- ACK:
+  - `2026-04-04T20:34:21+0000 smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404203421903-9078b6","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":3,"source":"node_ack"}`
+- State:
+  - `2026-04-04T20:34:41+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":234,"hum_01pct":460,"lux":4,"motion":true,"fault":false}`
+
+SQLite-Belege Stufe A:
+- ACK-Log:
+  - `id = 10`
+  - `request_id = cmd-net-erl-01-relay1-off-20260404203421903-9078b6`
+  - `status = ok`
+  - `ack_seq = 3`
+  - `occurred_at = 2026-04-04T20:34:21.986Z`
+- Latest-State:
+  - `relay_1 = 0`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404203421903-9078b6`
+  - `last_ack_status = ok`
+  - `last_ack_seq = 3`
+  - `updated_at = 2026-04-04T20:34:42.007Z`
+
+Bewertung Stufe A:
+- gruen
+
+6) Stufe B - Master-Recovery
+Wie B durchgefuehrt wurde:
+- gezielter Reset des realen Masters `MASTER-001` ueber `COM3`
+- MQTT-Capture ohne Retained-Ausgabe lief parallel
+- Gate fuer Stufe B verlangte frisch nur:
+  - `smarthome/master/MASTER-001/status`
+  - `smarthome/device/net_erl_01/availability`
+  - `smarthome/device/net_erl_01/state`
+- `meta` wurde mitbeobachtet, aber nicht mehr als Pflicht-Gate gezaehlt
+
+Zeitpunkt des Master-Recovery:
+- Reset gestartet um `2026-04-04T20:34:47.4164812Z`
+
+Frische Sichtbarkeit nach Master-Recovery:
+- `2026-04-04T20:34:56+0000 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":false,"wifi":true,"mqtt":false,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:34:56+0000 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- `2026-04-04T20:34:56+0000 smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `2026-04-04T20:34:56+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+Zusatzbeobachtung:
+- im Capture-Fenster kam keine frische `smarthome/device/net_erl_01/meta`
+- das macht Stufe B nach korrigiertem Gate nicht mehr rot
+
+Offizieller Test nach sichtbarer Recovery:
+- HTTP `POST /api/phase1/net-erl/relay-1`
+- Body: `{"device_id":"net_erl_01","relay_1":true}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-on-20260404203517856-1f4c38`
+
+Echter Rueckweg:
+- Command:
+  - `2026-04-04T20:35:17+0000 smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-on-20260404203517856-1f4c38","command":"set_relay","relay_1":true}`
+- ACK:
+  - `2026-04-04T20:35:17+0000 smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-on-20260404203517856-1f4c38","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":0,"source":"node_ack"}`
+- State:
+  - `2026-04-04T20:35:37+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+SQLite-Belege Stufe B:
+- ACK-Log:
+  - `id = 11`
+  - `request_id = cmd-net-erl-01-relay1-on-20260404203517856-1f4c38`
+  - `status = ok`
+  - `ack_seq = 0`
+  - `occurred_at = 2026-04-04T20:35:17.946Z`
+- Latest-State:
+  - `relay_1 = 1`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-on-20260404203517856-1f4c38`
+  - `last_ack_status = ok`
+  - `last_ack_seq = 0`
+  - `updated_at = 2026-04-04T20:35:37.94Z`
+
+Bewertung Stufe B:
+- gruen
+
+7) Stufe C - unmittelbarer Wiederholungstest ohne Neustart
+Wie C durchgefuehrt wurde:
+- kein weiterer Neustart
+- derselbe offizielle HTTP-Minimalpfad direkt erneut gegen `net_erl_01`
+
+Offizieller Test:
+- HTTP `POST /api/phase1/net-erl/relay-1`
+- Body: `{"device_id":"net_erl_01","relay_1":false}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-off-20260404203543407-2f1fa9`
+
+Echter Rueckweg:
+- Command:
+  - `2026-04-04T20:35:43+0000 smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404203543407-2f1fa9","command":"set_relay","relay_1":false}`
+- ACK:
+  - `2026-04-04T20:35:43+0000 smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404203543407-2f1fa9","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":1,"source":"node_ack"}`
+- State:
+  - `2026-04-04T20:36:03+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+SQLite-Belege Stufe C:
+- ACK-Log:
+  - `id = 12`
+  - `request_id = cmd-net-erl-01-relay1-off-20260404203543407-2f1fa9`
+  - `status = ok`
+  - `ack_seq = 1`
+  - `occurred_at = 2026-04-04T20:35:43.546Z`
+- Latest-State:
+  - `relay_1 = 0`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404203543407-2f1fa9`
+  - `last_ack_status = ok`
+  - `last_ack_seq = 1`
+  - `updated_at = 2026-04-04T20:36:03.526Z`
+
+Bewertung Stufe C:
+- gruen
+
+8) Ergebnis
+Stufe A:
+- gruen
+
+Stufe B:
+- gruen
+
+Stufe C:
+- gruen
+
+Gesamtlauf:
+- gruen
+
+9) Umgesetzt / bewusst nicht umgesetzt / Restschulden
+Umgesetzt:
+- Master-Recovery-Gate fachlich minimal korrigiert
+- echter gegateter Mehrstufenlauf A -> B -> C
+- echter HTTP->MQTT->ACK/State->SQLite-Nachweis je Stufe
+- sauberer Nachweis im Repo
+
+Bewusst nicht umgesetzt:
+- keine UI
+- keine neue Command-Welt
+- keine neue Command-Matrix
+- keine Scheduler
+- keine Automationen
+- keine Timeseries
+- keine neue Persistenzarchitektur
+- keine Firmware- oder Flow-Aenderung fuer diesen Lauf
+
+Restschulden:
+- nach Master-Recovery kamen in B nur Minimalzustandswerte mit `temp_01c = null`, `hum_01pct = null`, `lux = null`, `motion = false`
+- das blockiert den Minimalpfad nicht, bleibt aber ein separater qualitativer Gap ausserhalb dieses engen Laufs
+
+10) Geaenderte Dateien dieses Laufs
+- `PROTOKOLL/PROTOKOLL_2026-04-04_gate_fix_and_rerun_multistage_recovery.txt`
