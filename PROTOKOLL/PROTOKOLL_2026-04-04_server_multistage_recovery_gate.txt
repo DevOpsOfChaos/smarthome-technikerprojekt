@@ -1,0 +1,208 @@
+Titel: Gegateter Mehrstufenlauf Node-Recovery -> Master-Recovery -> Wiederholungstest
+Datum: 2026-04-04
+Thema: Strikt sequenzieller Realtest des vorhandenen net_erl_01-Minimalpfads mit hartem Abbruch beim ersten echten Fehler
+
+1) Ziel
+Dieser Lauf baut keine neue Funktion.
+Geprueft wurde ausschliesslich:
+- Stufe A: Node-Recovery fuer den realen Zielnode `net_erl_01`
+- Stufe B: Master-Recovery fuer den realen Master `MASTER-001`
+- Stufe C: unmittelbarer Wiederholungstest ohne Neustart
+
+Harte Laufregel:
+- jede Stufe startet nur, wenn die Vorstufe real gruen ist
+- beim ersten echten Fehler wird sofort abgebrochen
+
+2) Arbeitsort und Repo-Gate
+Aktuelles Arbeitsverzeichnis:
+- `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+
+Startpruefung:
+1. `aktuelles Arbeitsverzeichnis`
+   - `C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt`
+2. `git rev-parse --show-toplevel`
+   - `C:/Users/mries/Documents/LocalRepos/smarthome-technikerprojekt`
+3. `git remote -v`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (fetch)`
+   - `origin https://github.com/DevOpsOfChaos/smarthome-technikerprojekt.git (push)`
+4. `git status --short`
+   - sauber
+5. `git log --oneline -7`
+   - `3d1d6a5 docs: record phase1.6 reconnect recovery evidence`
+   - `bd6e311 docs: record restart roundtrip evidence`
+   - `c9c439f docs: record real net_erl command roundtrip`
+   - `d0e01a8 server: add minimal net_erl command ack path`
+   - `32a3d80 test: document successful phase1 smoke test on main`
+   - `0280072 server: add phase1.2 sqlite writes`
+   - `14145b8 Merge 766b7071871b51b478641c4bd12095bc9c9e9a73 into 4c6904620058c6ad1dcec5b1ff96ac65286be117`
+
+Arbeitsbranch fuer diesen Lauf:
+- `test/server-multistage-recovery-gate`
+
+Explizit nicht verwendet:
+- kein Arbeitslauf im Playground-Repo
+- keine Entwicklung im privaten Repo
+
+3) Vorbedingungen vor Stufe A
+Server-/Stack-Pruefung:
+- `docker ps` zeigte:
+  - `server-nodered-1 Up (healthy)`
+  - `server-mosquitto-1 Up`
+  - `server-influxdb-1 Up`
+- `http://localhost:1880` antwortete mit `200`
+- `docker inspect -f "{{.State.Health.Status}}" server-nodered-1` -> `healthy`
+
+Sichtbarkeit vor dem Lauf:
+- `smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- `smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":230,"hum_01pct":468,"lux":4,"motion":true,"fault":false}`
+
+SQLite-Basis vor dem Lauf:
+- letzter ACK fuer `net_erl_01`:
+  - `id = 8`
+  - `request_id = cmd-net-erl-01-relay1-off-20260404192300426-833a55`
+  - `status = ok`
+  - `ack_seq = 9`
+- letzter Latest-State:
+  - `device_id = net_erl_01`
+  - `online = 1`
+  - `availability = online`
+  - `relay_1 = 0`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404192300426-833a55`
+
+4) Stufe A - Node-Recovery
+Wie Node-Recovery durchgefuehrt wurde:
+- gezielter serieller Reset des realen Zielnodes `net_erl_01` ueber `COM12`
+- MQTT-Capture lief parallel ohne Retained-Nachrichten als Gate-Pruefung
+- erst nach frischer Sichtbarkeit von `meta` + `availability` + `state` wurde der offizielle HTTP-Minimalpfad ausgeloest
+
+Zeitpunkt des Node-Recovery:
+- Reset gestartet um `2026-04-04T19:39:53Z`
+
+Frische Sichtbarkeit nach Recovery:
+- `2026-04-04T19:39:54+0000 smarthome/device/net_erl_01/meta {...}`
+- `2026-04-04T19:39:54+0000 smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- `2026-04-04T19:39:54+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":true,"temp_01c":231,"hum_01pct":468,"lux":4,"motion":true,"fault":false}`
+
+Offizieller Test nach sichtbarer Recovery:
+- HTTP `POST /api/phase1/net-erl/relay-1`
+- Body: `{"device_id":"net_erl_01","relay_1":false}`
+- HTTP-Status: `202`
+- request_id: `cmd-net-erl-01-relay1-off-20260404194011491-c77e71`
+
+Echter Rueckweg:
+- Command:
+  - `2026-04-04T19:40:11+0000 smarthome/device/net_erl_01/command {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404194011491-c77e71","command":"set_relay","relay_1":false}`
+- ACK:
+  - `2026-04-04T19:40:11+0000 smarthome/device/net_erl_01/ack {"device_id":"net_erl_01","request_id":"cmd-net-erl-01-relay1-off-20260404194011491-c77e71","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":2,"source":"node_ack"}`
+- State:
+  - `2026-04-04T19:40:21+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":231,"hum_01pct":469,"lux":4,"motion":true,"fault":false}`
+
+SQLite-Belege Stufe A:
+- ACK-Log:
+  - `device_id = net_erl_01`
+  - `request_id = cmd-net-erl-01-relay1-off-20260404194011491-c77e71`
+  - `channel = command`
+  - `status = ok`
+  - `status_code = 0`
+  - `ack_msg_type = 5`
+  - `ack_seq = 2`
+  - `occurred_at = 2026-04-04T19:40:11.581Z`
+- Latest-State:
+  - `device_id = net_erl_01`
+  - `online = 1`
+  - `availability = online`
+  - `relay_1 = 0`
+  - `motion = 1`
+  - `lux = 4.0`
+  - `last_ack_request_id = cmd-net-erl-01-relay1-off-20260404194011491-c77e71`
+  - `last_ack_status = ok`
+  - `last_ack_msg_type = 5`
+  - `last_ack_seq = 2`
+  - `updated_at = 2026-04-04T19:40:21.593Z`
+
+Bewertung Stufe A:
+- gruen
+- ACK und State kamen ueber den echten Pfad zurueck
+- SQLite enthaelt den frischen Beleg
+
+5) Stufe B - Master-Recovery
+Wie Master-Recovery durchgefuehrt wurde:
+- gezielter serieller Reset des realen Masters `MASTER-001` ueber `COM3`
+- MQTT-Capture lief parallel ohne Retained-Nachrichten
+- Gate fuer Stufe B verlangte frische Sichtbarkeit von:
+  - `smarthome/master/MASTER-001/status`
+  - `smarthome/device/net_erl_01/meta`
+  - `smarthome/device/net_erl_01/availability`
+  - `smarthome/device/net_erl_01/state`
+
+Zeitpunkt des Master-Recovery:
+- Reset gestartet um `2026-04-04T19:41:09Z`
+
+Beobachtete frische Sichtbarkeit nach Master-Reset:
+- Master-Status kam frisch zurueck:
+  - `2026-04-04T19:41:16+0000 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":false,"wifi":true,"mqtt":false,"espnow":true,"fw":"0.2.2"}`
+  - `2026-04-04T19:41:16+0000 smarthome/master/MASTER-001/status {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.2.2"}`
+- Device-Availability kam frisch zurueck:
+  - `2026-04-04T19:41:16+0000 smarthome/device/net_erl_01/availability {"device_id":"net_erl_01","availability":"online","online":true,"power_type":"mains"}`
+- Device-State kam frisch zurueck:
+  - `2026-04-04T19:41:16+0000 smarthome/device/net_erl_01/state {"device_id":"net_erl_01","relay_1":false,"temp_01c":null,"hum_01pct":null,"lux":null,"motion":false,"fault":false}`
+
+Fehlender Gate-Nachweis:
+- innerhalb des Capture-Fensters kam keine frische `smarthome/device/net_erl_01/meta`-Nachricht zurueck
+
+Bewertung Stufe B:
+- rot
+- echte Bruchstelle: Gate fuer frische Sichtbarkeit nicht erfuellt, weil `meta` nach Master-Recovery nicht frisch beobachtet wurde
+- deshalb kein offizieller HTTP-Minimalpfad gestartet
+- deshalb keine request_id fuer Stufe B
+- deshalb keine ACK-/State-/SQLite-Testbelege fuer einen gueltigen Stufe-B-Command
+
+6) Stufe C - unmittelbarer Wiederholungstest ohne Neustart
+Nicht gestartet.
+
+Begruendung:
+- Zusatzregel greift: A gruen und B rot => C wird nicht gestartet
+- Weiterlaufen waere Testbetrug
+
+7) Gesamtergebnis
+Stufe A:
+- gruen
+
+Stufe B:
+- rot
+
+Stufe C:
+- nicht gestartet
+
+Gesamtlauf:
+- nicht gruen
+- sauberer Abbruch in Stufe B an einem echten Gate-Fehler
+
+8) Umgesetzt / bewusst nicht umgesetzt / Restschulden
+Umgesetzt:
+- echter gegateter Mehrstufenlauf bis zum ersten echten Fehler
+- sachliches Protokoll mit Recovery-, MQTT- und SQLite-Nachweisen
+
+Bewusst nicht umgesetzt:
+- keine UI
+- keine neue Command-Welt
+- keine neue Command-Matrix
+- keine Automationen
+- keine Scheduler
+- keine Timeseries
+- keine neue Persistenzarchitektur
+- keine Codeaenderung am Server- oder Firmwarepfad
+- kein Wiederholungstest C nach roter Stufe B
+
+Restschulden:
+- Master-Recovery liefert in diesem Lauf keinen belastbaren frischen `meta`-Nachweis fuer `net_erl_01`
+- solange dieses Gate nicht real gruen ist, ist ein gesamter Mehrstufenlauf nicht bestanden
+
+9) Geaenderte Dateien
+- nur dieses Protokoll:
+  - `PROTOKOLL/PROTOKOLL_2026-04-04_server_multistage_recovery_gate.txt`
+
+10) Codeaenderung ja/nein
+- keine Codeaenderung
+- nur Dokumentation des echten Laufs
