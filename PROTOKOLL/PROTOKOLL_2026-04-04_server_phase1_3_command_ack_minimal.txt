@@ -1,0 +1,104 @@
+Titel: Server Phase 1.3 Command-ACK Minimalpfad
+Datum: 2026-04-04
+Thema: Enger Serverpfad fuer net_erl Relay 1 mit request_id, MQTT-Publish, ACK-Rueckweg und SQLite-Nachweis
+
+1) Ziel
+Dieser Lauf sollte keinen breiten Command-Ausbau liefern, sondern genau einen offiziellen Minimalpfad:
+- Server erzeugt einen Command
+- nur fuer `net_erl`
+- nur fuer `set_relay`
+- nur fuer `relay_1`
+- mit serverseitig erzeugter `request_id`
+- mit nachvollziehbarem ACK-Rueckweg bis in SQLite
+
+2) Umgesetzter Serverpfad
+Der Server bietet jetzt genau einen HTTP-Eingang:
+- `POST /api/phase1/net-erl/relay-1`
+
+Der Pfad erzeugt:
+- MQTT-Topic `smarthome/device/<device_id>/command`
+- Payload `{"device_id":"...","request_id":"...","command":"set_relay","relay_1":true|false}`
+
+ACK und State laufen unveraendert ueber die bestehende Ingest-Kette zurueck:
+- `smarthome/device/<device_id>/ack`
+- `smarthome/device/<device_id>/state`
+
+3) Testaufbau
+Geprueft wurde der lokale Server-Stack aus dem oeffentlichen Repo:
+- `docker compose up -d` unter `server/`
+- Node-RED auf `http://localhost:1880`
+- Mosquitto auf `localhost:1883`
+- SQLite unter `server/sqlite/smarthome_phase1.db`
+
+Vor dem Command-Test wurde `net_erl_hall_light` ueber die bestehenden Ingest-Themen angelegt:
+- `meta`
+- `availability`
+- `state`
+
+4) Realer Testlauf
+Der Command wurde ueber den offiziellen Server-Einstieg ausgelost:
+- HTTP `POST http://localhost:1880/api/phase1/net-erl/relay-1`
+- Body `{"device_id":"net_erl_hall_light","relay_1":true}`
+
+Die reale Serverantwort war:
+- HTTP-Status `202`
+- `request_id = cmd-net-erl-hall-light-relay1-on-20260404105111329-76de91`
+- MQTT-Ziel `smarthome/device/net_erl_hall_light/command`
+
+Der MQTT-Capture zeigte exakt denselben Publish:
+- Topic `smarthome/device/net_erl_hall_light/command`
+- Payload `{"device_id":"net_erl_hall_light","request_id":"cmd-net-erl-hall-light-relay1-on-20260404105111329-76de91","command":"set_relay","relay_1":true}`
+
+5) ACK-Rueckweg
+Fuer den Servernachweis wurde der ACK-Rueckweg ueber das offizielle ACK-Thema mit derselben `request_id` zurueckgefuehrt:
+- Topic `smarthome/device/net_erl_hall_light/ack`
+- `channel = command`
+- `status = ok`
+- `ack_msg_type = 5`
+- `ack_seq = 1`
+
+Zusaetzlich wurde der sichtbare Zielzustand ueber das offizielle State-Thema nachgezogen:
+- Topic `smarthome/device/net_erl_hall_light/state`
+- Payload `{"device_id":"net_erl_hall_light","relay_1":true}`
+
+Wichtig:
+Dieser Nachweis prueft den echten Serverpfad end-to-end im lokalen Stack.
+Der ACK-/State-Ruecklauf wurde in diesem Lauf gezielt serverseitig ueber MQTT zurueckgespielt, nicht ueber reale Hardware oder den Master-Firmwarepfad.
+
+6) SQLite-Beleg
+`device_ack_log` enthielt danach fuer die neue `request_id`:
+- `device_id = net_erl_hall_light`
+- `request_id = cmd-net-erl-hall-light-relay1-on-20260404105111329-76de91`
+- `channel = command`
+- `status = ok`
+- `ack_msg_type = 5`
+- `ack_seq = 1`
+
+`device_state_latest` enthielt danach:
+- `device_id = net_erl_hall_light`
+- `relay_1 = 1`
+- `last_ack_request_id = cmd-net-erl-hall-light-relay1-on-20260404105111329-76de91`
+- `last_ack_channel = command`
+- `last_ack_status = ok`
+- `last_ack_msg_type = 5`
+- `last_ack_seq = 1`
+
+7) Ergebnis
+Der enge Server-Minimalpfad ist fuer den lokalen Stack gruen:
+- Server erzeugt `request_id` selbst
+- Server publiziert auf dem offiziellen Command-Topic
+- die publizierte Nachricht traegt dieselbe `request_id` wie die HTTP-Antwort
+- ACK kann mit derselben `request_id` sauber zurueckgefuehrt werden
+- `device_ack_log` und `device_state_latest` bleiben konsistent
+
+8) Bewusst nicht umgesetzt
+- keine UI
+- keine Automationen
+- keine Scheduler
+- keine breite Command-Matrix
+- kein zweiter Command-Pfad fuer andere Geraete oder Topics
+- keine neue Persistenzstruktur fuer Commands
+
+9) Offene Restschuld
+Der reale Hardware-Nachweis fuer diesen neuen Server-Einstieg gegen den Master- und Node-Firmwarepfad ist damit noch nicht automatisch erbracht.
+Dieser Lauf beweist den offiziellen Serverpfad und den ACK-/SQLite-Rueckweg im lokalen Stack, nicht den kompletten Funk-/Hardwarepfad.

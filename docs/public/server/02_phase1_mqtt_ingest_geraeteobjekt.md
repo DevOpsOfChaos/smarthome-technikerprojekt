@@ -19,6 +19,17 @@ Die aktiven Flows enthalten nur noch die Node-RED-Bruecken fuer:
 - Schreiben des aktualisierten Runtime-Objekts in den globalen Node-RED-Kontext
 - Ausfuehren der zentral vorbereiteten SQLite-Batches
 
+## Minimaler Command-Ausgang
+
+Phase 1.3 fuehrt genau einen offiziellen Server-Ausgang ein:
+
+- HTTP-Eingang: `POST /api/phase1/net-erl/relay-1`
+- MQTT-Ziel: `smarthome/device/<device_id>/command`
+- erlaubter Inhalt: nur `set_relay` fuer `relay_1`
+- `request_id` wird serverseitig erzeugt
+
+Diese Strecke erweitert den Ingest nicht um eine zweite Fachwelt. ACK und State laufen danach weiter ueber dieselbe bestehende Ingest-Kette zurueck.
+
 ## Topic auf Zielblock
 
 ### `meta`
@@ -84,6 +95,7 @@ Diese Struktur ist absichtlich simpel. Wer hier wieder Sondermodelle pro Geraete
 - Block-Updates stehen nur in `server/nodered/lib/device_store.js`
 - die Zuordnung Topic -> Handler steht nur in `server/nodered/lib/topic_handlers.js`
 - SQL-Statements fuer Phase 1 stehen nur in `server/nodered/lib/sqlite_writes.js`
+- der minimale Command-Bau steht nur in `server/nodered/lib/command_minimal.js`
 
 ## Unvermeidbare Node-RED-Bruecke
 
@@ -105,7 +117,7 @@ Noch nicht Teil dieses Schritts:
 - Timeseries-Schreiben
 - weitere Verlaufs- oder Console-Historien ausser Event- und ACK-Log
 - UI-Ableitungen
-- Command-Versand
+- jede breitere oder generische Command-Welt ausser `net_erl` Relay 1
 - Wetter und Automationen
 
 Das ist kein Mangel. Das ist Scope-Kontrolle.

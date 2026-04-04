@@ -141,6 +141,46 @@ Erwartung:
 - `device_ack_log` bekommt einen neuen Eintrag
 - `device_state_latest.last_ack_*` wird mitgezogen
 
+## Minimalen Command-/ACK-Pfad pruefen
+
+In einem zweiten Terminal vor dem HTTP-Aufruf den offiziellen Command-Capture starten:
+
+```bash
+mosquitto_sub -h localhost -t smarthome/device/net_erl_hall_light/command -C 1 -v
+```
+
+Dann den engen Server-Einstieg aufrufen:
+
+```bash
+curl -s -X POST http://localhost:1880/api/phase1/net-erl/relay-1 -H "Content-Type: application/json" -d "{\"device_id\":\"net_erl_hall_light\",\"relay_1\":true}"
+```
+
+Erwartung:
+
+- HTTP antwortet mit `202`
+- die Antwort enthaelt `device_id`, `request_id`, `command = set_relay`, `relay_1 = true`
+- MQTT zeigt genau einen Publish auf `smarthome/device/net_erl_hall_light/command`
+- der publizierte Payload enthaelt dieselbe `request_id`
+
+Mit derselben `request_id` den ACK-Rueckweg pruefen:
+
+```bash
+mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/ack -m "{\"device_id\":\"net_erl_hall_light\",\"request_id\":\"<request_id_aus_http>\",\"channel\":\"command\",\"status\":\"ok\",\"status_code\":\"0\",\"ack_msg_type\":\"5\",\"ack_seq\":\"1\"}"
+```
+
+Optional den sichtbaren Zielzustand nachziehen:
+
+```bash
+mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/state -r -m "{\"device_id\":\"net_erl_hall_light\",\"relay_1\":true}"
+```
+
+Erwartung:
+
+- `device_ack_log` bekommt einen neuen Eintrag mit derselben `request_id`
+- `device_state_latest.last_ack_request_id` entspricht der HTTP-Antwort
+- `device_state_latest.last_ack_channel = command`
+- `device_state_latest.relay_1 = true`, wenn der optionale State-Nachtrag gefahren wurde
+
 ## Master separat prüfen
 
 ### Masterstatus

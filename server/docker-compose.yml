@@ -97,7 +97,8 @@ services:
             "    deviceStore: require('/data/lib/device_store'),",
             "    topicHandlers: require('/data/lib/topic_handlers'),",
             "    capabilityHelpers: require('/data/lib/capability_helpers'),",
-            "    timeHelpers: require('/data/lib/time_helpers')",
+            "    timeHelpers: require('/data/lib/time_helpers'),",
+            "    commandMinimal: require('/data/lib/command_minimal')",
             '  }',
             '};',
             ''

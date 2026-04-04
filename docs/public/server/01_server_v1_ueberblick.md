@@ -7,10 +7,11 @@ Phase 1 zieht nur den fachlichen Kern hoch:
 - MQTT-Ingest fuer Geraete und Master
 - Topic-Routing auf kleine Handler
 - gemeinsames Geraeteobjekt als fachliche Mitte
+- ein einziger offizieller Command-Ausgang fuer `net_erl` Relay 1
 - separater Masterzustand
 - minimales SQLite-Schema als spaetere Persistenzbasis
 
-Nicht Teil dieser Stufe sind breite UI, Diagramme, Commands, Wetter oder Automationen.
+Nicht Teil dieser Stufe sind breite UI, Diagramme, eine allgemeine Command-Welt, Wetter oder Automationen.
 
 ## Minimale Bausteine
 
@@ -25,6 +26,7 @@ Nicht Teil dieser Stufe sind breite UI, Diagramme, Commands, Wetter oder Automat
 - `00_boot` initialisiert den gemeinsamen Runtime-State
 - `10_mqtt_ingest` abonniert nur die Pflicht-Topics und verteilt sie weiter
 - `20_device_store` pflegt das Geraeteobjekt
+- `40_command_minimal` baut genau einen offiziellen Command-Einstieg fuer `net_erl` Relay 1
 - `90_master_diag` haelt Masterstatus und Masterevents getrennt
 
 ### Fachliche Mitte
@@ -52,6 +54,12 @@ Masterdaten laufen bewusst ausserhalb dieser Geraeteobjekte.
 - `smarthome/device/+/event`
 - `smarthome/device/+/ack`
 
+### Geraete-Command Minimalpfad
+
+- `POST /api/phase1/net-erl/relay-1`
+- MQTT-Publish auf `smarthome/device/<device_id>/command`
+- Payload nur fuer `set_relay` auf `relay_1` mit serverseitig erzeugter `request_id`
+
 ### Master
 
 - `smarthome/master/+/status`
@@ -63,6 +71,7 @@ Der alte Fehler war nicht fehlende Features, sondern fehlende Disziplin. Phase 1
 
 - State bleibt Hauptwahrheit
 - Event und ACK ergaenzen nur
+- der Server erzeugt Commands nur ueber einen engen offiziellen Pfad
 - unbekannte Geraete duerfen bei validem Meta-, Availability- oder State-Pfad auto-angelegt werden
 - partielle State-Nachrichten duerfen keine vorhandenen Felder loeschen
 
