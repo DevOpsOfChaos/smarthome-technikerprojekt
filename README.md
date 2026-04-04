@@ -12,7 +12,7 @@ Im Mittelpunkt stehen:
 - **ein Master** als einzige Brücke zwischen Funknetz und Server
 - **MQTT** ausschließlich zwischen Master und Server
 - **Node-RED** als aktueller Server- und Visualisierungskern
-- eine Architektur, die **lehrerlesbar**, modular und begründbar bleibt
+- eine Architektur, die **lehrerlesbar, modular und begründbar** bleibt
 
 ## Systemarchitektur in Kurzform
 
@@ -68,9 +68,11 @@ Bereits sichtbar und nachweisbar sind unter anderem:
 - gemeinsames Geräteobjekt und separater Masterpfad
 - minimales SQLite-Schema für Zustände und Nachweise
 - minimaler Command-/ACK-Pfad für `net_erl_01`
-- reale Roundtrip-Nachweise
+- realer Roundtrip-Nachweis für den offiziellen Minimalpfad
+- Restart-/Kaltstart-Nachweis desselben Pfads
 - Recovery-Nachweise für Node- und Master-Pfad
-- nachgewiesener Master-Fix für den früheren Null-State-Fehler nach Master-Recovery
+- fachlich korrigiertes Master-Recovery-Gate
+- nachgewiesener Master-Fix gegen den früheren Null-/Minimal-State nach Master-Recovery
 
 Wichtig:
 Das Repo zeigt damit bereits einen **real belastbaren technischen Kern**, ohne künstlich zu behaupten, dass das Gesamtsystem schon vollständig fertig wäre.
@@ -102,7 +104,7 @@ Für den aktuellen Serverkern zusätzlich sinnvoll:
 ## Was dieses öffentliche Repo bewusst nicht sein soll
 
 Dieses Repo ist **nicht** gedacht als:
-- Ablage für interne KI-/Prompt-/Arbeitsmaterialien
+- Ablage für interne oder nichtöffentliche Arbeitsstände
 - Sammelbecken für unfertige Nebenthemen ohne klare Linie
 - Experimentierfläche für unnötig abstrakte Architekturspielereien
 - Ort für sensible Daten, Zugangsdaten oder private Arbeitsstände

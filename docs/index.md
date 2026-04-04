@@ -39,7 +39,9 @@ Der aktuelle öffentliche Stand zeigt bereits eine belastbare Phase-1-Linie mit:
 - minimalem SQLite-Pfad
 - minimalem Command-/ACK-Pfad für `net_erl_01`
 - realem Roundtrip-Nachweis
-- Recovery-Nachweisen für Node- und Master-Pfad
+- Restart- und Recovery-Nachweisen für den Minimalpfad
+- fachlich korrigiertem Master-Recovery-Gate
+- nachgewiesenem Master-Fix gegen Null-/Minimal-State nach Master-Recovery
 
 Wichtig:
 Dies ist **keine fertige Produktplattform**, sondern ein kontrolliert wachsender, nachvollziehbarer Projektstand.
@@ -56,7 +58,7 @@ Dies ist **keine fertige Produktplattform**, sondern ein kontrolliert wachsender
 ## Hinweise
 
 - Das öffentliche Repo bleibt bewusst technisch und systemneutral formuliert.
-- Interne Arbeitsmaterialien, Prompts und KI-Hilfen gehören nicht hierher.
+- Interne oder nichtöffentliche Arbeitsstände gehören nicht hierher.
 - Kleine, nachvollziehbare Schritte sind ausdrücklich wichtiger als breite unkontrollierte Umbauten.
 
 ## Repository
