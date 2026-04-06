@@ -33,23 +33,23 @@ constexpr char DATEI_VERSION[] = "0.2.0";
 #endif
 
 #ifndef NET_ZRL_BUTTON_UP_PIN
-#define NET_ZRL_BUTTON_UP_PIN -1
+#define NET_ZRL_BUTTON_UP_PIN 2
 #endif
 
 #ifndef NET_ZRL_BUTTON_DOWN_PIN
-#define NET_ZRL_BUTTON_DOWN_PIN -1
+#define NET_ZRL_BUTTON_DOWN_PIN 4
 #endif
 
 #ifndef NET_ZRL_BUTTON_STOP_PIN
-#define NET_ZRL_BUTTON_STOP_PIN -1
+#define NET_ZRL_BUTTON_STOP_PIN 3
 #endif
 
 #ifndef NET_ZRL_LED_UP_PIN
-#define NET_ZRL_LED_UP_PIN -1
+#define NET_ZRL_LED_UP_PIN 6
 #endif
 
 #ifndef NET_ZRL_LED_DOWN_PIN
-#define NET_ZRL_LED_DOWN_PIN -1
+#define NET_ZRL_LED_DOWN_PIN 7
 #endif
 
 #ifndef NET_ZRL_LED_ACTIVE_HIGH
