@@ -9,6 +9,7 @@ Diese Checkliste prueft nur den Phase-1-Kern:
 - separater Masterpfad
 - zentrale SQLite-Writes
 - partielle Updates ohne Feldzerstoerung
+- minimalen `cover`-State ohne neue Command-Welt
 - eine einzige fachliche Wahrheitsbasis in `server/nodered/lib/`
 
 ## Vorbereitung
@@ -97,6 +98,50 @@ Erwartung:
 - `config.report_interval_s = 60`
 - `availability.online` bleibt oder wird `true`
 - `device_state_latest` wird fuer dasselbe Geraet aktualisiert
+
+## Minimalen Cover-Pfad pruefen
+
+### Cover-Meta senden
+
+```bash
+mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/meta -r -m "{\"device_id\":\"net_zrl_demo\",\"device_name\":\"Rolladen Demo\",\"device_class\":\"NET-ZRL\",\"power_type\":\"mains\",\"caps\":[\"cover\"],\"fw_version\":\"0.1.0\"}"
+```
+
+Erwartung:
+
+- Geraet wird auto-angelegt
+- `meta.device_class = NET-ZRL`
+- `meta.caps` enthaelt mindestens `cover`, `online_state`, `fault_state`, `ack_tracking`
+
+### Cover-State senden
+
+```bash
+mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/state -r -m "{\"device_id\":\"net_zrl_demo\",\"cover_state\":\"moving\",\"cover_direction\":\"down\",\"cover_position\":35,\"is_calibrated\":true}"
+```
+
+Erwartung:
+
+- `state.cover_state = moving`
+- `state.cover_direction = down`
+- `state.cover_position = 35`
+- `state.is_calibrated = true`
+- `availability.online` bleibt oder wird `true`
+- `device_state_latest.cover_state = moving`
+- `device_state_latest.cover_direction = down`
+- `device_state_latest.cover_position = 35`
+
+### Partiellen Cover-State pruefen
+
+```bash
+mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/state -r -m "{\"device_id\":\"net_zrl_demo\",\"cover_state\":\"stopped\"}"
+```
+
+Erwartung:
+
+- `state.cover_state` wird auf `stopped` gesetzt
+- `state.cover_direction` bleibt `down`
+- `state.cover_position` bleibt `35`
+- fehlende Cover-Felder loeschen nichts
 
 ### Partieller State
 
@@ -216,7 +261,7 @@ import sqlite3
 db = sqlite3.connect("server/sqlite/smarthome_phase1.db")
 for sql in [
     "select device_id, device_name from devices order by device_id",
-    "select device_id, online, relay_1, motion, lux from device_state_latest order by device_id",
+    "select device_id, online, relay_1, motion, lux, cover_state, cover_direction, cover_position from device_state_latest order by device_id",
     "select device_id, event_type, event_label from device_event_log order by id desc limit 3",
     "select device_id, request_id, status from device_ack_log order by id desc limit 3",
     "select master_id, online, wifi, mqtt, espnow from master_status order by master_id",

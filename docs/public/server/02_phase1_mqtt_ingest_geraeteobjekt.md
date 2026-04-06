@@ -61,6 +61,7 @@ Die oeffentliche Aussage ist damit eng, aber klar: Es gibt einen real bestaetigt
 ### `state`
 
 - aktualisiert nur bekannte State-Felder
+- traegt fuer `cover` minimal `cover_state`, `cover_direction` und `cover_position`
 - spiegelt wenige echte Laufzeitparameter nach `config`
 - setzt `last_seen_at`
 - behandelt fehlende Felder nicht als Loeschsignal
@@ -140,6 +141,7 @@ Noch nicht Teil dieses Schritts:
 - weitere Verlaufs- oder Console-Historien ausser Event- und ACK-Log
 - UI-Ableitungen
 - jede breitere oder generische Command-Welt ausser `net_erl` Relay 1
+- serverseitige Cover-Commands oder Rolladen-Komfortlogik
 - Wetter und Automationen
 
 Das ist kein Mangel. Das ist Scope-Kontrolle.

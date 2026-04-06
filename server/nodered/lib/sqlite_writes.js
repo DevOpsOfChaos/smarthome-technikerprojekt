@@ -104,6 +104,7 @@ function buildDeviceStateLatestUpsert(device) {
     relay_2: device.state.relay_2,
     cover_mode: device.state.cover_mode,
     cover_state: device.state.cover_state,
+    cover_direction: device.state.cover_direction,
     cover_position: device.state.cover_position,
     is_calibrated: device.state.is_calibrated,
     travel_time_ms: device.state.travel_time_ms,

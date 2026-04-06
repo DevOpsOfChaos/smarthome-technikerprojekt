@@ -55,6 +55,35 @@ services:
         const dbPath = process.env.SQLITE_DB_PATH || '/data/sqlite/smarthome_phase1.db';
         const schemaSql = fs.readFileSync('/data/sqlite/00_schema_phase1.sql', 'utf8');
         const dir = '/data/flows/active';
+        function runSql(db, sql) {
+          return new Promise((resolve, reject) => {
+            db.run(sql, (error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve();
+            });
+          });
+        }
+        function queryAll(db, sql) {
+          return new Promise((resolve, reject) => {
+            db.all(sql, (error, rows) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              resolve(rows || []);
+            });
+          });
+        }
+        async function ensurePhase1Migrations(db) {
+          const stateColumns = await queryAll(db, "PRAGMA table_info(device_state_latest)");
+          const hasCoverDirection = stateColumns.some((column) => column && column.name === 'cover_direction');
+          if (!hasCoverDirection) {
+            await runSql(db, "ALTER TABLE device_state_latest ADD COLUMN cover_direction TEXT");
+          }
+        }
         function ensureSchema() {
           return new Promise((resolve, reject) => {
             const db = new sqlite3.Database(dbPath, (openErr) => {
@@ -63,13 +92,20 @@ services:
                 return;
               }
 
-              db.exec(schemaSql, (execErr) => {
-                db.close((closeErr) => {
-                  if (execErr) {
-                    reject(execErr);
-                    return;
-                  }
+              db.exec(schemaSql, async (execErr) => {
+                if (execErr) {
+                  db.close(() => reject(execErr));
+                  return;
+                }
 
+                try {
+                  await ensurePhase1Migrations(db);
+                } catch (migrationErr) {
+                  db.close(() => reject(migrationErr));
+                  return;
+                }
+
+                db.close((closeErr) => {
                   if (closeErr) {
                     reject(closeErr);
                     return;

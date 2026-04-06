@@ -33,6 +33,7 @@ const STATE_FIELD_TRANSFORMS = {
   relay_2: (value) => coerceBoolean(value, false),
   cover_mode: (value) => value,
   cover_state: (value) => value,
+  cover_direction: (value) => value,
   cover_position: (value) => coerceNumber(value, null),
   is_calibrated: (value) => coerceBoolean(value, false),
   travel_time_ms: (value) => coerceNumber(value, null),

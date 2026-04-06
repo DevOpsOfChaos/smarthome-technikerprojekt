@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS device_state_latest (
     relay_2 INTEGER,
     cover_mode TEXT,
     cover_state TEXT,
+    cover_direction TEXT,
     cover_position REAL,
     is_calibrated INTEGER,
     travel_time_ms INTEGER,
