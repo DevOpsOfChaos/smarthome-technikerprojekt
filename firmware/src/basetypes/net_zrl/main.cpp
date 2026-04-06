@@ -57,7 +57,7 @@ constexpr char DATEI_VERSION[] = "0.2.0";
 #endif
 
 #ifndef NET_ZRL_BUTTON_ACTIVE_LOW
-#define NET_ZRL_BUTTON_ACTIVE_LOW 1
+#define NET_ZRL_BUTTON_ACTIVE_LOW 0
 #endif
 
 constexpr bool DEBUG_AKTIV = NET_ZRL_DEBUG_ENABLED != 0;
@@ -75,6 +75,7 @@ constexpr bool BUTTON_ACTIVE_LOW = NET_ZRL_BUTTON_ACTIVE_LOW != 0;
 
 constexpr unsigned long LOOP_DELAY_MS = 10UL;
 constexpr unsigned long BUTTON_POLL_MS = 20UL;
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 35UL;
 constexpr unsigned long STOP_CALIBRATION_HOLD_MS = 5000UL;
 constexpr unsigned long DOWN_SETUP_HOLD_MS = 15000UL;
 constexpr unsigned long DOWN_RESET_HOLD_MS = 30000UL;
@@ -121,6 +122,15 @@ struct RuntimeState {
     int16_t movementStartPosition;
     bool movementTargetsEndPosition;
     unsigned long lastButtonPollMs;
+    bool upButtonStableActive;
+    bool downButtonStableActive;
+    bool stopButtonStableActive;
+    bool upButtonRawActive;
+    bool downButtonRawActive;
+    bool stopButtonRawActive;
+    unsigned long upButtonRawChangedAtMs;
+    unsigned long downButtonRawChangedAtMs;
+    unsigned long stopButtonRawChangedAtMs;
     bool lastUpButtonActive;
     bool lastDownButtonActive;
     bool lastStopButtonActive;
@@ -153,6 +163,10 @@ void logf(const char* level, const char* format, ...) {
     Serial.print(level);
     Serial.print("] ");
     Serial.println(message);
+}
+
+void loggeButtonKante(const char* name, bool active, unsigned long heldMs) {
+    logf("INFO", "Button %s %s (held_ms=%lu)", name, active ? "pressed" : "released", heldMs);
 }
 
 const char* toText(CoverState state) {
@@ -193,6 +207,17 @@ bool leseButtonAktiv(int pin) {
     if (pin < 0) return false;
     const int raw = digitalRead(pin);
     return BUTTON_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
+}
+
+bool entprelleButton(bool rawActive, bool& lastRawActive, unsigned long& changedAtMs, bool stableActive, unsigned long jetztMs) {
+    if (rawActive != lastRawActive) {
+        lastRawActive = rawActive;
+        changedAtMs = jetztMs;
+    }
+    if (stableActive != rawActive && (jetztMs - changedAtMs) >= BUTTON_DEBOUNCE_MS) {
+        return rawActive;
+    }
+    return stableActive;
 }
 
 void schreibePin(int pin, bool active, bool activeHigh) {
@@ -744,6 +769,7 @@ void verarbeiteBewegungsTimeouts() {
 
 void behandleStopButton(bool stopActive, unsigned long jetztMs) {
     if (stopActive && !runtime.lastStopButtonActive) {
+        loggeButtonKante("stop", true, 0UL);
         runtime.stopPressedAtMs = jetztMs;
         runtime.stopHoldConsumed = false;
         if (runtime.coverState == CoverState::Moving) {
@@ -773,6 +799,9 @@ void behandleStopButton(bool stopActive, unsigned long jetztMs) {
         starteKalibriermodus();
     }
     if (!stopActive && runtime.lastStopButtonActive) {
+        const unsigned long heldMs =
+            runtime.stopPressedAtMs > 0UL ? (jetztMs - runtime.stopPressedAtMs) : 0UL;
+        loggeButtonKante("stop", false, heldMs);
         runtime.stopPressedAtMs = 0UL;
         runtime.stopHoldConsumed = false;
     }
@@ -781,9 +810,13 @@ void behandleStopButton(bool stopActive, unsigned long jetztMs) {
 
 void behandleUpButton(bool upActive) {
     if (!upActive || runtime.lastUpButtonActive) {
+        if (!upActive && runtime.lastUpButtonActive) {
+            loggeButtonKante("up", false, 0UL);
+        }
         runtime.lastUpButtonActive = upActive;
         return;
     }
+    loggeButtonKante("up", true, 0UL);
     if (runtime.coverState == CoverState::Moving) {
         logf("INFO", "Up ignoriert: waehrend Fahrt ist nur stop relevant");
     } else if (runtime.setupMode) {
@@ -802,11 +835,17 @@ void behandleUpButton(bool upActive) {
 
 void behandleDownButton(bool downActive, unsigned long jetztMs) {
     if (downActive && !runtime.lastDownButtonActive) {
+        loggeButtonKante("down", true, 0UL);
         runtime.downPressedAtMs = jetztMs;
         runtime.downSetupSignalActive = false;
         runtime.downResetTriggered = false;
         if (runtime.coverState == CoverState::Moving) {
-            logf("INFO", "Down ignoriert: waehrend Fahrt ist nur stop relevant");
+            logf("INFO",
+                 "Down ignoriert: waehrend Fahrt ist nur stop relevant (state=%s direction=%s setup=%s calibration=%s)",
+                 toText(runtime.coverState),
+                 toText(runtime.coverDirection),
+                 runtime.setupMode ? "true" : "false",
+                 runtime.calibrationMode ? "true" : "false");
         } else if (runtime.calibrationMode &&
                    runtime.calibrationPhase == CalibrationPhase::WaitForDownStart) {
             bestaetigeMitBeidenLeds(LedMode::DownOn);
@@ -828,6 +867,7 @@ void behandleDownButton(bool downActive, unsigned long jetztMs) {
     if (!downActive && runtime.lastDownButtonActive) {
         const unsigned long heldMs =
             runtime.downPressedAtMs > 0UL ? (jetztMs - runtime.downPressedAtMs) : 0UL;
+        loggeButtonKante("down", false, heldMs);
         if (!runtime.calibrationMode && !runtime.setupMode &&
             runtime.coverState == CoverState::Stopped && !runtime.downResetTriggered) {
             if (heldMs >= DOWN_SETUP_HOLD_MS) {
@@ -850,12 +890,27 @@ void pollButtons() {
     const unsigned long jetztMs = millis();
     if ((jetztMs - runtime.lastButtonPollMs) < BUTTON_POLL_MS) return;
     runtime.lastButtonPollMs = jetztMs;
-    const bool upActive = leseButtonAktiv(PIN_BUTTON_UP);
-    const bool downActive = leseButtonAktiv(PIN_BUTTON_DOWN);
-    const bool stopActive = leseButtonAktiv(PIN_BUTTON_STOP);
-    behandleStopButton(stopActive, jetztMs);
-    behandleUpButton(upActive);
-    behandleDownButton(downActive, jetztMs);
+    runtime.upButtonStableActive = entprelleButton(
+        leseButtonAktiv(PIN_BUTTON_UP),
+        runtime.upButtonRawActive,
+        runtime.upButtonRawChangedAtMs,
+        runtime.upButtonStableActive,
+        jetztMs);
+    runtime.downButtonStableActive = entprelleButton(
+        leseButtonAktiv(PIN_BUTTON_DOWN),
+        runtime.downButtonRawActive,
+        runtime.downButtonRawChangedAtMs,
+        runtime.downButtonStableActive,
+        jetztMs);
+    runtime.stopButtonStableActive = entprelleButton(
+        leseButtonAktiv(PIN_BUTTON_STOP),
+        runtime.stopButtonRawActive,
+        runtime.stopButtonRawChangedAtMs,
+        runtime.stopButtonStableActive,
+        jetztMs);
+    behandleStopButton(runtime.stopButtonStableActive, jetztMs);
+    behandleUpButton(runtime.upButtonStableActive);
+    behandleDownButton(runtime.downButtonStableActive, jetztMs);
 }
 
 void initialisierePin(int pin, uint8_t mode) {
@@ -882,20 +937,21 @@ void setup() {
     initialisierePin(PIN_LED_DOWN, OUTPUT);
     setzeLedPins(false, false);
     setzeRelaisNeutral("boot");
-    initialisierePin(PIN_BUTTON_UP, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT);
-    initialisierePin(PIN_BUTTON_DOWN, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT);
-    initialisierePin(PIN_BUTTON_STOP, BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT);
+    initialisierePin(PIN_BUTTON_UP, INPUT);
+    initialisierePin(PIN_BUTTON_DOWN, INPUT);
+    initialisierePin(PIN_BUTTON_STOP, INPUT);
     ladePersistenz();
     logf("INFO", "%s v%s startet", DATEI_GERAET, DATEI_VERSION);
     logf("INFO",
-         "Pins relay_a=%d relay_b=%d button_up=%d button_down=%d button_stop=%d led_up=%d led_down=%d",
+         "Pins relay_a=%d relay_b=%d button_up=%d button_down=%d button_stop=%d led_up=%d led_down=%d button_active_low=%s",
          PIN_RELAY_A,
          PIN_RELAY_B,
          PIN_BUTTON_UP,
          PIN_BUTTON_DOWN,
          PIN_BUTTON_STOP,
          PIN_LED_UP,
-         PIN_LED_DOWN);
+         PIN_LED_DOWN,
+         BUTTON_ACTIVE_LOW ? "true" : "false");
     gibHilfeAus();
     gibStatusAus();
 }
