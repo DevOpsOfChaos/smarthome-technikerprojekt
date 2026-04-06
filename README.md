@@ -101,16 +101,6 @@ Für den aktuellen Serverkern zusätzlich sinnvoll:
 - `PROTOKOLL/` – offizielle Projektprotokolle und Entwicklungsnachweise
 - `docs/` – zusätzlicher Pages-/Doku-Einstieg für den öffentlichen Lesepfad
 
-## Was dieses öffentliche Repo bewusst nicht sein soll
-
-Dieses Repo ist **nicht** gedacht als:
-- Ablage für interne oder nichtöffentliche Arbeitsstände
-- Sammelbecken für unfertige Nebenthemen ohne klare Linie
-- Experimentierfläche für unnötig abstrakte Architekturspielereien
-- Ort für sensible Daten, Zugangsdaten oder private Arbeitsstände
-
-Die öffentliche Linie soll technisch professionell aussehen, aber nicht künstlich größer wirken als sie real ist.
-
 ## Dokumentation und Nachweise
 
 Ein zentrales Ziel dieses Projekts ist nicht nur Code, sondern **sauber belegbare technische Entwicklung**.
