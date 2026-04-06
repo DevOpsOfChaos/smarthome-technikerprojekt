@@ -77,8 +77,7 @@ constexpr unsigned long LOOP_DELAY_MS = 10UL;
 constexpr unsigned long BUTTON_POLL_MS = 20UL;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 35UL;
 constexpr unsigned long STOP_CALIBRATION_HOLD_MS = 5000UL;
-constexpr unsigned long DOWN_SETUP_HOLD_MS = 15000UL;
-constexpr unsigned long DOWN_RESET_HOLD_MS = 30000UL;
+constexpr unsigned long REENTRY_HOLD_MS = 5000UL;
 constexpr unsigned long DEFAULT_ESTIMATED_TRAVEL_TIME_MS = 100000UL;
 constexpr unsigned long LED_BLINK_INTERVAL_MS = 300UL;
 constexpr unsigned long LED_SUCCESS_INTERVAL_MS = 180UL;
@@ -86,6 +85,7 @@ constexpr unsigned long LED_ACK_DURATION_MS = 180UL;
 constexpr uint32_t MIN_TRAVEL_TIME_MS = 1000UL;
 constexpr uint32_t MAX_TRAVEL_TIME_MS = 180000UL;
 constexpr uint8_t SUCCESS_BLINK_PULSES = 3U;
+constexpr uint8_t RESET_REENTRY_BLINK_PULSES = 10U;
 constexpr size_t SERIAL_BUFFER_SIZE = 128U;
 
 enum class CoverState : uint8_t { Stopped = 0, Moving = 1 };
@@ -100,6 +100,7 @@ enum class CalibrationPhase : uint8_t {
     SuccessBlink
 };
 enum class LedMode : uint8_t { Off = 0, BothBlink, UpBlink, DownBlink, UpOn, DownOn };
+enum class PendingAction : uint8_t { None = 0, FactoryReset };
 
 struct RuntimeState {
     CoverState coverState;
@@ -134,17 +135,20 @@ struct RuntimeState {
     bool lastUpButtonActive;
     bool lastDownButtonActive;
     bool lastStopButtonActive;
+    unsigned long upPressedAtMs;
     unsigned long downPressedAtMs;
     unsigned long stopPressedAtMs;
+    bool upHoldConsumed;
     bool stopHoldConsumed;
-    bool downSetupSignalActive;
-    bool downResetTriggered;
+    bool downHoldConsumed;
     LedMode ledMode;
     LedMode ledModeAfterAck;
     bool ledBlinkState;
     unsigned long ledLastTickMs;
     unsigned long ledAckUntilMs;
     uint8_t successBlinkToggleCount;
+    PendingAction pendingAction;
+    uint8_t pendingActionBlinkToggleCount;
     char serialBuffer[SERIAL_BUFFER_SIZE];
     size_t serialLength;
 };
@@ -195,6 +199,14 @@ const char* toText(CalibrationPhase phase) {
     }
 }
 
+const char* toText(PendingAction action) {
+    switch (action) {
+        case PendingAction::FactoryReset: return "factory_reset";
+        case PendingAction::None:
+        default: return "none";
+    }
+}
+
 bool isTravelTimeValid(uint32_t valueMs) {
     return valueMs >= MIN_TRAVEL_TIME_MS && valueMs <= MAX_TRAVEL_TIME_MS;
 }
@@ -241,6 +253,14 @@ void bestaetigeMitBeidenLeds(LedMode nextMode) {
     runtime.ledAckUntilMs = millis() + LED_ACK_DURATION_MS;
     runtime.ledModeAfterAck = nextMode;
     setzeLedPins(true, true);
+}
+
+bool hatAusstehendeAktion() {
+    return runtime.pendingAction != PendingAction::None;
+}
+
+bool blinktAusstehendeAktion() {
+    return hatAusstehendeAktion() && runtime.pendingActionBlinkToggleCount > 0U;
 }
 
 int pinFuerRichtung(CoverDirection direction) {
@@ -443,6 +463,7 @@ void uebernehmeKalibrierMessung(CoverDirection direction) {
 void enterSetupMode() {
     if (runtime.setupMode || runtime.coverState == CoverState::Moving) return;
     runtime.setupMode = true;
+    logf("INFO", "Setup-Modus aktiviert");
     setzeLedMode(LedMode::BothBlink);
 }
 
@@ -459,7 +480,27 @@ void fuehreFactoryResetAus() {
     runtime.defaultEstimatedTravelTimeMs = DEFAULT_ESTIMATED_TRAVEL_TIME_MS;
     setzeKalibrierungUngueltig();
     runtime.coverDirection = CoverDirection::None;
-    runtime.downResetTriggered = true;
+    logf("INFO", "Factory Reset ausgefuehrt");
+}
+
+void starteAusstehendeAktion(PendingAction action, uint8_t blinkPulses) {
+    if (action == PendingAction::None || blinkPulses == 0U || hatAusstehendeAktion()) return;
+    runtime.pendingAction = action;
+    runtime.pendingActionBlinkToggleCount = blinkPulses * 2U;
+    logf("INFO", "Ausstehende Aktion gestartet (%s, blink_pulses=%u)", toText(action), blinkPulses);
+    runtime.ledBlinkState = false;
+    runtime.ledLastTickMs = millis();
+    setzeLedPins(false, false);
+}
+
+void verwerfeAusstehendeAktion(const char* grund) {
+    if (!hatAusstehendeAktion()) return;
+    logf("INFO", "Ausstehende Aktion verworfen (%s)", grund ? grund : "ohne grund");
+    runtime.pendingAction = PendingAction::None;
+    runtime.pendingActionBlinkToggleCount = 0U;
+    if (!runtime.setupMode && !runtime.calibrationMode) {
+        setzeLedMode(LedMode::Off);
+    }
 }
 
 void tickLeds() {
@@ -471,6 +512,25 @@ void tickLeds() {
         }
         runtime.ledAckUntilMs = 0UL;
         setzeLedMode(runtime.ledModeAfterAck);
+    }
+    if (hatAusstehendeAktion()) {
+        if (runtime.pendingActionBlinkToggleCount == 0U) {
+            const PendingAction action = runtime.pendingAction;
+            runtime.pendingAction = PendingAction::None;
+            runtime.pendingActionBlinkToggleCount = 0U;
+            logf("INFO", "Ausstehende Aktion wird ausgefuehrt (%s)", toText(action));
+            if (action == PendingAction::FactoryReset) {
+                fuehreFactoryResetAus();
+            }
+            return;
+        }
+        if ((jetztMs - runtime.ledLastTickMs) >= LED_SUCCESS_INTERVAL_MS) {
+            runtime.ledLastTickMs = jetztMs;
+            runtime.ledBlinkState = !runtime.ledBlinkState;
+            setzeLedPins(runtime.ledBlinkState, runtime.ledBlinkState);
+            --runtime.pendingActionBlinkToggleCount;
+        }
+        return;
     }
     if (runtime.calibrationPhase == CalibrationPhase::SuccessBlink) {
         if (runtime.successBlinkToggleCount == 0U) {
@@ -554,7 +614,7 @@ void gibStatusAus() {
     snprintf(
         buffer,
         sizeof(buffer),
-        "state=%s direction=%s relay_a=%s relay_b=%s calibration_mode=%s calibration_phase=%s setup_mode=%s is_calibrated=%s travel_time_up_ms=%lu travel_time_down_ms=%lu default_estimated_travel_time_ms=%lu relay_up_mapping=%s cover_position=%d",
+        "state=%s direction=%s relay_a=%s relay_b=%s calibration_mode=%s calibration_phase=%s setup_mode=%s pending_action=%s pending_blinks=%u is_calibrated=%s travel_time_up_ms=%lu travel_time_down_ms=%lu default_estimated_travel_time_ms=%lu relay_up_mapping=%s cover_position=%d",
         toText(runtime.coverState),
         toText(runtime.coverDirection),
         runtime.relayAActive ? "true" : "false",
@@ -562,6 +622,8 @@ void gibStatusAus() {
         runtime.calibrationMode ? "true" : "false",
         toText(runtime.calibrationPhase),
         runtime.setupMode ? "true" : "false",
+        toText(runtime.pendingAction),
+        runtime.pendingActionBlinkToggleCount,
         runtime.isCalibrated ? "true" : "false",
         (unsigned long)runtime.travelTimeUpMs,
         (unsigned long)runtime.travelTimeDownMs,
@@ -772,7 +834,10 @@ void behandleStopButton(bool stopActive, unsigned long jetztMs) {
         loggeButtonKante("stop", true, 0UL);
         runtime.stopPressedAtMs = jetztMs;
         runtime.stopHoldConsumed = false;
-        if (runtime.coverState == CoverState::Moving) {
+        if (runtime.pendingAction == PendingAction::FactoryReset) {
+            verwerfeAusstehendeAktion("reset per stop abgebrochen");
+            runtime.stopHoldConsumed = true;
+        } else if (runtime.coverState == CoverState::Moving) {
             if (runtime.calibrationMode &&
                 (runtime.calibrationPhase == CalibrationPhase::MeasuringDown ||
                  runtime.calibrationPhase == CalibrationPhase::MeasuringUp)) {
@@ -808,27 +873,43 @@ void behandleStopButton(bool stopActive, unsigned long jetztMs) {
     runtime.lastStopButtonActive = stopActive;
 }
 
-void behandleUpButton(bool upActive) {
-    if (!upActive || runtime.lastUpButtonActive) {
-        if (!upActive && runtime.lastUpButtonActive) {
-            loggeButtonKante("up", false, 0UL);
-        }
-        runtime.lastUpButtonActive = upActive;
-        return;
-    }
-    loggeButtonKante("up", true, 0UL);
-    if (runtime.coverState == CoverState::Moving) {
-        logf("INFO", "Up ignoriert: waehrend Fahrt ist nur stop relevant");
-    } else if (runtime.setupMode) {
-        logf("INFO", "Up ignoriert: Setup-Modus aktiv");
-    } else if (runtime.calibrationMode) {
-        if (runtime.calibrationPhase == CalibrationPhase::WaitForUpStart) {
+void behandleUpButton(bool upActive, unsigned long jetztMs) {
+    if (upActive && !runtime.lastUpButtonActive) {
+        loggeButtonKante("up", true, 0UL);
+        runtime.upPressedAtMs = jetztMs;
+        runtime.upHoldConsumed = false;
+        if (runtime.coverState == CoverState::Moving) {
+            logf("INFO", "Up ignoriert: waehrend Fahrt ist nur stop relevant");
+        } else if (runtime.setupMode) {
+            logf("INFO", "Up ignoriert: Setup-Modus aktiv");
+        } else if (runtime.calibrationMode &&
+                   runtime.calibrationPhase == CalibrationPhase::WaitForUpStart) {
             bestaetigeMitBeidenLeds(LedMode::UpOn);
             runtime.calibrationPhase = CalibrationPhase::MeasuringUp;
             starteFahrt(CoverDirection::Up, "kalibrierung messfahrt up", MAX_TRAVEL_TIME_MS, false);
+            runtime.upHoldConsumed = true;
         }
-    } else {
-        starteNormaleFahrtNachOben("lokaler taster up");
+    }
+    if (upActive && !runtime.upHoldConsumed && !runtime.calibrationMode && !runtime.setupMode &&
+        runtime.coverState == CoverState::Stopped && runtime.upPressedAtMs > 0UL &&
+        !hatAusstehendeAktion() && (jetztMs - runtime.upPressedAtMs) >= REENTRY_HOLD_MS) {
+        runtime.upHoldConsumed = true;
+        starteAusstehendeAktion(PendingAction::FactoryReset, RESET_REENTRY_BLINK_PULSES);
+    }
+    if (!upActive && runtime.lastUpButtonActive) {
+        const unsigned long heldMs =
+            runtime.upPressedAtMs > 0UL ? (jetztMs - runtime.upPressedAtMs) : 0UL;
+        loggeButtonKante("up", false, heldMs);
+        if (!runtime.upHoldConsumed && !runtime.calibrationMode && !runtime.setupMode &&
+            runtime.coverState == CoverState::Stopped && !hatAusstehendeAktion() && heldMs > 0UL) {
+            starteNormaleFahrtNachOben("lokaler taster up");
+        }
+        runtime.upPressedAtMs = 0UL;
+        runtime.upHoldConsumed = false;
+        if (!runtime.setupMode && !runtime.calibrationMode &&
+            runtime.coverState == CoverState::Stopped && !hatAusstehendeAktion()) {
+            setzeLedMode(LedMode::Off);
+        }
     }
     runtime.lastUpButtonActive = upActive;
 }
@@ -837,8 +918,7 @@ void behandleDownButton(bool downActive, unsigned long jetztMs) {
     if (downActive && !runtime.lastDownButtonActive) {
         loggeButtonKante("down", true, 0UL);
         runtime.downPressedAtMs = jetztMs;
-        runtime.downSetupSignalActive = false;
-        runtime.downResetTriggered = false;
+        runtime.downHoldConsumed = false;
         if (runtime.coverState == CoverState::Moving) {
             logf("INFO",
                  "Down ignoriert: waehrend Fahrt ist nur stop relevant (state=%s direction=%s setup=%s calibration=%s)",
@@ -851,35 +931,29 @@ void behandleDownButton(bool downActive, unsigned long jetztMs) {
             bestaetigeMitBeidenLeds(LedMode::DownOn);
             runtime.calibrationPhase = CalibrationPhase::MeasuringDown;
             starteFahrt(CoverDirection::Down, "kalibrierung messfahrt down", MAX_TRAVEL_TIME_MS, false);
+            runtime.downHoldConsumed = true;
         }
     }
     if (downActive && !runtime.calibrationMode && !runtime.setupMode &&
-        runtime.coverState == CoverState::Stopped && runtime.downPressedAtMs > 0UL) {
-        const unsigned long heldMs = jetztMs - runtime.downPressedAtMs;
-        if (heldMs >= DOWN_SETUP_HOLD_MS && !runtime.downSetupSignalActive) {
-            runtime.downSetupSignalActive = true;
-            setzeLedMode(LedMode::BothBlink);
-        }
-        if (heldMs >= DOWN_RESET_HOLD_MS && !runtime.downResetTriggered) {
-            fuehreFactoryResetAus();
-        }
+        runtime.coverState == CoverState::Stopped && runtime.downPressedAtMs > 0UL &&
+        !runtime.downHoldConsumed && !hatAusstehendeAktion() &&
+        (jetztMs - runtime.downPressedAtMs) >= REENTRY_HOLD_MS) {
+        runtime.downHoldConsumed = true;
+        enterSetupMode();
     }
     if (!downActive && runtime.lastDownButtonActive) {
         const unsigned long heldMs =
             runtime.downPressedAtMs > 0UL ? (jetztMs - runtime.downPressedAtMs) : 0UL;
         loggeButtonKante("down", false, heldMs);
         if (!runtime.calibrationMode && !runtime.setupMode &&
-            runtime.coverState == CoverState::Stopped && !runtime.downResetTriggered) {
-            if (heldMs >= DOWN_SETUP_HOLD_MS) {
-                enterSetupMode();
-            } else if (heldMs > 0UL) {
-                starteNormaleFahrtNachUnten("lokaler taster down");
-            }
+            runtime.coverState == CoverState::Stopped && !runtime.downHoldConsumed &&
+            !hatAusstehendeAktion() && heldMs > 0UL) {
+            starteNormaleFahrtNachUnten("lokaler taster down");
         }
         runtime.downPressedAtMs = 0UL;
-        runtime.downSetupSignalActive = false;
+        runtime.downHoldConsumed = false;
         if (!runtime.setupMode && !runtime.calibrationMode &&
-            runtime.coverState == CoverState::Stopped) {
+            runtime.coverState == CoverState::Stopped && !hatAusstehendeAktion()) {
             setzeLedMode(LedMode::Off);
         }
     }
@@ -909,7 +983,7 @@ void pollButtons() {
         runtime.stopButtonStableActive,
         jetztMs);
     behandleStopButton(runtime.stopButtonStableActive, jetztMs);
-    behandleUpButton(runtime.upButtonStableActive);
+    behandleUpButton(runtime.upButtonStableActive, jetztMs);
     behandleDownButton(runtime.downButtonStableActive, jetztMs);
 }
 
