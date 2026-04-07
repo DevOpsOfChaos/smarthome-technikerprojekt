@@ -1224,7 +1224,7 @@ void verarbeiteSetupSet(const char* commandPrefix, const char* valueText) {
     holeSetupSnapshot(previousBasisSnapshot, previousDeviceSnapshot);
 
     uint32_t value = 0UL;
-    if (strcmp(commandPrefix, "setup set relay_up") == 0) {
+    if (strcmp(commandPrefix, "setup set relay_up ") == 0) {
         if (strcmp(valueText, "relay_a") == 0) runtime.relayUpUsesRelayA = true;
         else if (strcmp(valueText, "relay_b") == 0) runtime.relayUpUsesRelayA = false;
         else {
@@ -1240,7 +1240,7 @@ void verarbeiteSetupSet(const char* commandPrefix, const char* valueText) {
         return;
     }
 
-    if (strcmp(commandPrefix, "setup set master_mac") == 0) {
+    if (strcmp(commandPrefix, "setup set master_mac ") == 0) {
         uint8_t parsedMac[6] = {0};
         if (!parseMacText(valueText, parsedMac)) {
             Serial.println("Ungueltige Master-MAC.");
@@ -1260,31 +1260,31 @@ void verarbeiteSetupSet(const char* commandPrefix, const char* valueText) {
         return;
     }
 
-    if (strcmp(commandPrefix, "setup set tt_up_ms") == 0) {
+    if (strcmp(commandPrefix, "setup set tt_up_ms ") == 0) {
         if (!isTravelTimeValid(value)) {
             Serial.println("tt_up_ms ausserhalb des gueltigen Bereichs.");
             return;
         }
         runtime.travelTimeUpMs = value;
-    } else if (strcmp(commandPrefix, "setup set tt_down_ms") == 0) {
+    } else if (strcmp(commandPrefix, "setup set tt_down_ms ") == 0) {
         if (!isTravelTimeValid(value)) {
             Serial.println("tt_down_ms ausserhalb des gueltigen Bereichs.");
             return;
         }
         runtime.travelTimeDownMs = value;
-    } else if (strcmp(commandPrefix, "setup set default_ms") == 0) {
+    } else if (strcmp(commandPrefix, "setup set default_ms ") == 0) {
         if (!isTravelTimeValid(value)) {
             Serial.println("default_ms ausserhalb des gueltigen Bereichs.");
             return;
         }
         runtime.defaultEstimatedTravelTimeMs = sanitizeEstimatedTravelTime(value);
-    } else if (strcmp(commandPrefix, "setup set status_interval_s") == 0) {
+    } else if (strcmp(commandPrefix, "setup set status_interval_s ") == 0) {
         if (!isSendIntervalValid(value)) {
             Serial.println("status_interval_s ausserhalb des gueltigen Bereichs.");
             return;
         }
         runtime.statusSendIntervalS = value;
-    } else if (strcmp(commandPrefix, "setup set sensor_interval_s") == 0) {
+    } else if (strcmp(commandPrefix, "setup set sensor_interval_s ") == 0) {
         if (!isSendIntervalValid(value)) {
             Serial.println("sensor_interval_s ausserhalb des gueltigen Bereichs.");
             return;
