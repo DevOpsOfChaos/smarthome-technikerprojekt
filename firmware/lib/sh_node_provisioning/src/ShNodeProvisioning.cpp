@@ -39,6 +39,13 @@ bool basisBlobValid(const NodeBasisSettings& settings) {
     return settings.magic == NODE_BASIS_MAGIC && settings.version == NODE_BASIS_VERSION;
 }
 
+bool basisSettingsEqual(const NodeBasisSettings& left, const NodeBasisSettings& right) {
+    return left.magic == right.magic && left.version == right.version &&
+           left.flags == right.flags && memcmp(left.masterMac, right.masterMac, sizeof(left.masterMac)) == 0 &&
+           left.statusSendIntervalS == right.statusSendIntervalS &&
+           left.sensorSendIntervalS == right.sensorSendIntervalS;
+}
+
 }  // namespace
 
 NodeProvisioningController::NodeProvisioningController()
@@ -375,6 +382,17 @@ bool NodeProvisioningController::parseUnsignedLongText(
     return true;
 }
 
+void NodeProvisioningController::appendSharedStyles(String& page) const {
+    page += F(":root{--bg:#070b14;--bg2:#0b1220;--card:#101827;--card2:#0c1320;--text:#edf3ff;--muted:#8ea0bf;--line:#1e2c45;--accent:#35c486;--accent2:#1d8a61;--danger:#ff6b6b;--danger2:#c94949;--ok:#91f0c5;--error:#ffb1b1;}");
+    page += F("*{box-sizing:border-box}html,body{margin:0;padding:0;min-height:100%;background:radial-gradient(circle at top,#15233d 0%,var(--bg) 56%,#04060d 100%);color:var(--text);font-family:\"Segoe UI\",Tahoma,sans-serif}");
+    page += F("body{padding:14px}.wrap{max-width:460px;margin:0 auto}.stack{display:grid;gap:12px}.card{background:linear-gradient(180deg,rgba(20,29,45,.96) 0%,rgba(12,19,32,.98) 100%);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 18px 48px rgba(0,0,0,.34)}");
+    page += F(".eyebrow{font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}.sub{margin:6px 0 0;color:var(--muted);font-size:.83rem;line-height:1.4}.status{display:grid;gap:4px;margin:14px 0 0;padding:11px 12px;border-radius:14px;border:1px solid #1f3a34;background:rgba(16,44,37,.9);color:var(--ok);font-size:.84rem;line-height:1.35}.status.error{border-color:#4d2428;background:rgba(60,19,22,.88);color:var(--error)}");
+    page += F(".status strong,.status code{color:var(--text)}h1{margin:0;font-size:1.28rem;line-height:1.2}h2{margin:0;font-size:.96rem}.section{display:grid;gap:12px;margin-top:16px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.tag{display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em}");
+    page += F(".field{display:grid;gap:6px}label{font-weight:700;font-size:.88rem;color:#d9e4f8}.hint{font-size:.76rem;line-height:1.3;color:var(--muted)}input,select{width:100%;min-height:44px;border-radius:12px;border:1px solid var(--line);background:#0a111d;color:var(--text);padding:0 12px;font-size:.96rem}input::placeholder{color:#617393}hr{border:0;border-top:1px solid var(--line);margin:16px 0 0}");
+    page += F(".actions{display:grid;gap:10px;margin-top:16px}.btn,.linkbtn{display:flex;align-items:center;justify-content:center;min-height:46px;padding:0 14px;border-radius:12px;border:1px solid transparent;font-size:.95rem;font-weight:700;text-decoration:none}.btn{width:100%;cursor:pointer}.btn-primary{background:linear-gradient(180deg,var(--accent) 0%,var(--accent2) 100%);color:#06140f}.btn-danger{background:linear-gradient(180deg,var(--danger) 0%,var(--danger2) 100%);color:#fff}.btn-secondary,.linkbtn{background:transparent;border-color:var(--line);color:var(--text)}");
+    page += F(".meta{display:grid;gap:4px;margin-top:10px;font-size:.78rem;color:var(--muted)}.meta code{color:var(--text)}.footer{margin-top:2px;font-size:.75rem;color:var(--muted)}");
+}
+
 String NodeProvisioningController::buildPage(
     const String& masterMacText,
     const String& statusIntervalText,
@@ -383,7 +401,7 @@ String NodeProvisioningController::buildPage(
     const String& errorText,
     WebServer* sourceServer) const {
     String page;
-    page.reserve(7600U);
+    page.reserve(9200U);
 
     const String escapedTitle = htmlEscape(String(deviceHandler_->pageTitle()));
     const String escapedIntro = htmlEscape(String(deviceHandler_->pageIntro()));
@@ -400,45 +418,39 @@ String NodeProvisioningController::buildPage(
     page += F("<title>");
     page += escapedTitle;
     page += F("</title><style>");
-    page += F(":root{--bg:#f2eee5;--card:#fffdf8;--text:#1e1c17;--muted:#6f675c;--line:#d8cfc0;--accent:#1d6b58;--accent2:#164e41;--error:#a61f16;--ok:#1d6b58;--info:#eef8f3;}");
-    page += F("*{box-sizing:border-box}html,body{margin:0;padding:0;background:linear-gradient(180deg,#eee4d4 0%,#f7f2ea 100%);color:var(--text);font-family:Arial,Helvetica,sans-serif;min-height:100%}");
-    page += F("body{padding:18px 14px}.wrap{max-width:480px;margin:0 auto}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px 16px;box-shadow:0 18px 42px rgba(0,0,0,.08)}");
-    page += F("h1{margin:0 0 8px;font-size:1.35rem;line-height:1.2}p{margin:0 0 14px;color:var(--muted);line-height:1.45}.section{display:grid;gap:14px;margin-top:18px}.section h2{margin:0;font-size:1rem}.section p{margin:0;color:var(--muted);font-size:.86rem}");
-    page += F(".field{display:grid;gap:7px}label{font-weight:700;font-size:.92rem}.hint{font-size:.8rem;color:var(--muted);line-height:1.35}.info,.error{border-radius:14px;padding:12px 13px;font-size:.87rem;line-height:1.4;margin-top:12px}");
-    page += F(".info{background:var(--info);border:1px solid #c8e4d8;color:var(--ok)}.error{background:#fff1ef;border:1px solid #f0c1bc;color:var(--error)}");
-    page += F("input,select{width:100%;min-height:48px;border-radius:14px;border:1px solid var(--line);background:#fff;padding:0 13px;font-size:1rem;color:var(--text)}");
-    page += F("button{width:100%;min-height:52px;border:0;border-radius:14px;background:linear-gradient(180deg,var(--accent),var(--accent2));color:#fff;font-size:1rem;font-weight:700;margin-top:20px}");
-    page += F(".footer{margin-top:14px;font-size:.78rem;color:var(--muted)}hr{border:0;border-top:1px solid var(--line);margin:6px 0 0}");
-    page += F("</style></head><body><div class=\"wrap\"><form class=\"card\" method=\"post\" action=\"/save\" id=\"setupForm\" novalidate>");
-    page += F("<h1>");
+    appendSharedStyles(page);
+    page += F("</style></head><body><div class=\"wrap stack\"><form class=\"card\" method=\"post\" action=\"/save\" id=\"setupForm\" novalidate>");
+    page += F("<div class=\"eyebrow\">Provisioning</div><h1>");
     page += escapedTitle;
-    page += F("</h1><p>");
-    page += escapedIntro;
-    page += F("</p>");
+    page += F("</h1>");
+    if (escapedIntro.length() > 0U) {
+        page += F("<div class=\"sub\">");
+        page += escapedIntro;
+        page += F("</div>");
+    }
 
     if (errorText.length() > 0U) {
-        page += F("<div class=\"error\">");
+        page += F("<div class=\"status error\">");
         page += escapedError;
         page += F("</div>");
     } else {
-        page += F("<div class=\"info\">");
+        page += F("<div class=\"status\">");
         page += escapedInfo;
         if (*setupApActive_) {
-            page += F("<br>AP: <strong>");
+            page += F("<span>AP <strong>");
             page += htmlEscape(String(setupApSsid_));
-            page += F("</strong><br>URL: <strong>http://");
+            page += F("</strong></span><span>URL <code>http://");
             page += htmlEscape(WiFi.softAPIP().toString());
-            page += F("/</strong>");
+            page += F("/</code></span>");
         }
         page += F("</div>");
     }
 
-    page += F("<section class=\"section\"><h2>Gemeinsame Node-Basis</h2>");
-    page += F("<p>Diese Felder gelten basistypuebergreifend und bleiben bewusst getrennt von geraetespezifischen Details.</p>");
+    page += F("<section class=\"section\"><div class=\"section-head\"><h2>Node-Basis</h2><span class=\"tag\">global</span></div>");
     page += F("<div class=\"field\"><label for=\"master_mac\">master_mac</label>");
     page += F("<input id=\"master_mac\" name=\"master_mac\" type=\"text\" maxlength=\"17\" autocapitalize=\"characters\" autocomplete=\"off\" spellcheck=\"false\" placeholder=\"AA:BB:CC:DD:EE:FF\" value=\"");
     page += escapedMasterMac;
-    page += F("\"><div class=\"hint\">Wird per Link auch ueber <code>?master_mac=...</code> oder <code>?mac=...</code> uebernommen.</div></div>");
+    page += F("\"><div class=\"hint\">Auch per <code>?master_mac=...</code> oder <code>?mac=...</code>.</div></div>");
     page += F("<div class=\"field\"><label for=\"status_send_interval_s\">status_send_interval_s</label>");
     page += F("<input id=\"status_send_interval_s\" name=\"status_send_interval_s\" type=\"number\" min=\"");
     page += String(config_.minSendIntervalS);
@@ -446,7 +458,7 @@ String NodeProvisioningController::buildPage(
     page += String(config_.maxSendIntervalS);
     page += F("\" step=\"1\" inputmode=\"numeric\" value=\"");
     page += escapedStatusInterval;
-    page += F("\"><div class=\"hint\">Persistiert sauber in der gemeinsamen Node-Basis. Die echte Laufzeitkopplung von net_zrl ist bewusst noch nicht versprochen.</div></div>");
+    page += F("\"><div class=\"hint\">Statusintervall in Sekunden.</div></div>");
     page += F("<div class=\"field\"><label for=\"sensor_send_interval_s\">sensor_send_interval_s</label>");
     page += F("<input id=\"sensor_send_interval_s\" name=\"sensor_send_interval_s\" type=\"number\" min=\"");
     page += String(config_.minSendIntervalS);
@@ -454,19 +466,24 @@ String NodeProvisioningController::buildPage(
     page += String(config_.maxSendIntervalS);
     page += F("\" step=\"1\" inputmode=\"numeric\" value=\"");
     page += escapedSensorInterval;
-    page += F("\"><div class=\"hint\">Bleibt ebenfalls global, auch wenn net_zrl aktuell noch keinen echten Sensor-Sendepfad besitzt.</div></div>");
+    page += F("\"><div class=\"hint\">Sensorintervall in Sekunden.</div></div>");
     page += F("</section><hr>");
 
-    page += F("<section class=\"section\"><h2>");
+    page += F("<section class=\"section\"><div class=\"section-head\"><h2>");
     page += escapedDeviceTitle;
-    page += F("</h2><p>");
-    page += escapedDeviceIntro;
-    page += F("</p>");
+    page += F("</h2><span class=\"tag\">lokal</span></div>");
+    if (escapedDeviceIntro.length() > 0U) {
+        page += F("<div class=\"sub\">");
+        page += escapedDeviceIntro;
+        page += F("</div>");
+    }
     deviceHandler_->appendDeviceFieldsHtml(page, sourceServer);
     page += F("</section>");
-    page += F("<button id=\"saveBtn\" type=\"submit\">Speichern und neu starten</button>");
-    page += F("<div class=\"footer\">Nach erfolgreichem Speichern wird der Setup-AP beendet und das Geraet neu gestartet.</div>");
-    page += F("</form></div>");
+    page += F("<div class=\"actions\"><button class=\"btn btn-primary\" id=\"saveBtn\" type=\"submit\">Speichern und neu starten</button>");
+    page += F("<div class=\"footer\">Nur geaenderte Werte werden neu geschrieben.</div></div>");
+    page += F("</form>");
+    deviceHandler_->appendDeviceActionsHtml(page);
+    page += F("</div>");
     page += F("<script>(function(){const form=document.getElementById('setupForm');const mac=document.getElementById('master_mac');");
     page += F("function norm(v){return v.trim().toUpperCase().replace(/-/g,':');}");
     page += F("function valid(v){return /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(v);}mac.addEventListener('blur',function(){mac.value=norm(mac.value);});");
@@ -494,6 +511,56 @@ void NodeProvisioningController::sendForm(
             infoText,
             errorText,
             sourceServer));
+}
+
+String NodeProvisioningController::buildResultPage(
+    const String& titleText,
+    const String& messageText,
+    bool isError,
+    bool showBackButton) const {
+    String page;
+    page.reserve(3800U);
+
+    const String escapedTitle = htmlEscape(titleText);
+    const String escapedMessage = htmlEscape(messageText);
+
+    page += F("<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">");
+    page += F("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">");
+    page += F("<title>");
+    page += escapedTitle;
+    page += F("</title><style>");
+    appendSharedStyles(page);
+    page += F("</style></head><body><div class=\"wrap\"><div class=\"card\">");
+    page += F("<div class=\"eyebrow\">");
+    page += isError ? F("Fehler") : F("Ergebnis");
+    page += F("</div><h1>");
+    page += escapedTitle;
+    page += F("</h1><div class=\"status");
+    if (isError) page += F(" error");
+    page += F("\">");
+    page += escapedMessage;
+    page += F("</div>");
+
+    if (showBackButton) {
+        page += F("<div class=\"actions\">");
+        page += F("<button class=\"btn btn-secondary\" type=\"button\" onclick=\"history.back()\">Zurueck zum Setup</button>");
+        page += F("<a class=\"linkbtn\" href=\"/\">Setup neu laden</a></div>");
+    }
+
+    page += F("</div></div></body></html>");
+    return page;
+}
+
+void NodeProvisioningController::sendResultPage(
+    const String& titleText,
+    const String& messageText,
+    bool isError,
+    int statusCode,
+    bool showBackButton) {
+    server_.send(
+        statusCode,
+        "text/html; charset=utf-8",
+        buildResultPage(titleText, messageText, isError, showBackButton));
 }
 
 void NodeProvisioningController::handleRoot() {
@@ -530,6 +597,38 @@ void NodeProvisioningController::handleRoot() {
 }
 
 void NodeProvisioningController::handleSave() {
+    if (server_.hasArg("device_action")) {
+        deviceHandler_->discardParsedDeviceSettings();
+
+        String actionTitle;
+        String actionMessage;
+        int actionStatusCode = 400;
+        bool restartRequired = false;
+        const bool actionOk = deviceHandler_->handleDeviceAction(
+            server_,
+            actionTitle,
+            actionMessage,
+            actionStatusCode,
+            restartRequired);
+
+        if (restartRequired) {
+            *restartPending_ = true;
+            *restartRequestedAtMs_ = millis();
+        }
+
+        sendResultPage(
+            actionTitle.length() > 0U
+                ? actionTitle
+                : (actionOk ? String(F("Aktion gespeichert")) : String(F("Aktion fehlgeschlagen"))),
+            actionMessage.length() > 0U
+                ? actionMessage
+                : (actionOk ? String(F("Aktion ausgefuehrt.")) : String(F("Aktion ist fehlgeschlagen."))),
+            !actionOk,
+            actionStatusCode,
+            !restartRequired);
+        return;
+    }
+
     const String masterMacText = server_.arg(MASTER_MAC_ARG_PRIMARY);
     const String statusIntervalText = server_.arg("status_send_interval_s");
     const String sensorIntervalText = server_.arg("sensor_send_interval_s");
@@ -537,14 +636,12 @@ void NodeProvisioningController::handleSave() {
     uint8_t parsedMasterMac[6] = {0};
     if (!parseMacText(masterMacText.c_str(), parsedMasterMac)) {
         deviceHandler_->discardParsedDeviceSettings();
-        sendForm(
-            masterMacText,
-            statusIntervalText,
-            sensorIntervalText,
-            String(),
+        sendResultPage(
+            F("Eingabe ungueltig"),
             F("master_mac ist ungueltig. Erwartet wird AA:BB:CC:DD:EE:FF."),
+            true,
             400,
-            &server_);
+            true);
         return;
     }
 
@@ -555,14 +652,12 @@ void NodeProvisioningController::handleSave() {
             config_.maxSendIntervalS,
             statusIntervalS)) {
         deviceHandler_->discardParsedDeviceSettings();
-        sendForm(
-            masterMacText,
-            statusIntervalText,
-            sensorIntervalText,
-            String(),
+        sendResultPage(
+            F("Eingabe ungueltig"),
             F("status_send_interval_s ist ungueltig."),
+            true,
             400,
-            &server_);
+            true);
         return;
     }
 
@@ -573,28 +668,24 @@ void NodeProvisioningController::handleSave() {
             config_.maxSendIntervalS,
             sensorIntervalS)) {
         deviceHandler_->discardParsedDeviceSettings();
-        sendForm(
-            masterMacText,
-            statusIntervalText,
-            sensorIntervalText,
-            String(),
+        sendResultPage(
+            F("Eingabe ungueltig"),
             F("sensor_send_interval_s ist ungueltig."),
+            true,
             400,
-            &server_);
+            true);
         return;
     }
 
     String deviceError;
     if (!deviceHandler_->parseDeviceSave(server_, deviceError)) {
         deviceHandler_->discardParsedDeviceSettings();
-        sendForm(
-            masterMacText,
-            statusIntervalText,
-            sensorIntervalText,
-            String(),
+        sendResultPage(
+            F("Eingabe ungueltig"),
             deviceError,
+            true,
             400,
-            &server_);
+            true);
         return;
     }
 
@@ -611,32 +702,26 @@ void NodeProvisioningController::handleSave() {
         restoreBasisSnapshot(previousBasis);
         deviceHandler_->restoreDeviceSnapshot();
         deviceHandler_->discardParsedDeviceSettings();
-        sendForm(
-            masterMacText,
-            statusIntervalText,
-            sensorIntervalText,
-            String(),
+        sendResultPage(
+            F("Speichern fehlgeschlagen"),
             F("Speichern in NVS fehlgeschlagen. Vorzustand wurde wiederhergestellt."),
+            true,
             500,
-            &server_);
+            true);
         return;
     }
 
     deviceHandler_->discardParsedDeviceSettings();
 
-    char savedMasterMacText[MASTER_MAC_TEXT_LEN] = {0};
-    formatMacText(masterMac_, *masterMacValid_, savedMasterMacText, sizeof(savedMasterMacText));
     *restartPending_ = true;
     *restartRequestedAtMs_ = millis();
 
-    sendForm(
-        String(savedMasterMacText),
-        String(*statusSendIntervalS_),
-        String(*sensorSendIntervalS_),
-        F("Node-Basis und geraetespezifische Setup-Daten gespeichert. Das Geraet startet gleich neu."),
-        String(),
+    sendResultPage(
+        F("Gespeichert"),
+        F("Setup-Daten gespeichert. Neustart laeuft."),
+        false,
         200,
-        nullptr);
+        false);
 }
 
 bool NodeProvisioningController::loadBasisFromStorage(Preferences& prefs) {
@@ -707,8 +792,13 @@ NodeBasisSettings NodeProvisioningController::buildBasisSettings() const {
 }
 
 bool NodeProvisioningController::writeBasisToStorage(Preferences& prefs) const {
+    return writeBasisToStorage(prefs, buildBasisSettings());
+}
+
+bool NodeProvisioningController::writeBasisToStorage(
+    Preferences& prefs,
+    const NodeBasisSettings& settings) const {
     const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
-    const NodeBasisSettings settings = buildBasisSettings();
     return prefs.putBytes(basisKey, &settings, sizeof(settings)) == sizeof(settings);
 }
 
@@ -729,18 +819,20 @@ bool NodeProvisioningController::saveCurrentState() {
 
     NodeBasisSettings previousBasis = {};
     const bool hadPreviousBasis = readBasisBlob(prefs, previousBasis);
+    const NodeBasisSettings nextBasis = buildBasisSettings();
+    const bool basisChanged = !hadPreviousBasis || !basisSettingsEqual(previousBasis, nextBasis);
 
-    if (!writeBasisToStorage(prefs)) {
+    if (basisChanged && !writeBasisToStorage(prefs, nextBasis)) {
         prefs.end();
         log("WARN", "Gemeinsame Node-Basis konnte nicht gespeichert werden.");
         return false;
     }
 
     if (!deviceHandler_->saveDeviceSettings(prefs)) {
-        if (hadPreviousBasis) {
+        if (basisChanged && hadPreviousBasis) {
             const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
             prefs.putBytes(basisKey, &previousBasis, sizeof(previousBasis));
-        } else {
+        } else if (basisChanged) {
             removeBasisFromStorage(prefs);
         }
 
@@ -755,7 +847,8 @@ bool NodeProvisioningController::saveCurrentState() {
     formatMacText(masterMac_, *masterMacValid_, masterMacText, sizeof(masterMacText));
     log(
         "INFO",
-        "Node-Basis gespeichert: master_mac=%s status_s=%lu sensor_s=%lu",
+        "Node-Basis %s: master_mac=%s status_s=%lu sensor_s=%lu",
+        basisChanged ? "gespeichert" : "unveraendert",
         *masterMacValid_ ? masterMacText : "unset",
         (unsigned long)*statusSendIntervalS_,
         (unsigned long)*sensorSendIntervalS_);

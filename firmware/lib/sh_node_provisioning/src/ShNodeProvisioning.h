@@ -62,6 +62,20 @@ class DeviceProvisioningHandler {
     virtual void applyParsedDeviceSettings() = 0;
     virtual void discardParsedDeviceSettings() = 0;
     virtual void appendDeviceFieldsHtml(String& page, WebServer* sourceServer) const = 0;
+    virtual void appendDeviceActionsHtml(String& page) const { (void)page; }
+    virtual bool handleDeviceAction(
+        WebServer& server,
+        String& titleText,
+        String& messageText,
+        int& statusCode,
+        bool& restartRequired) {
+        (void)server;
+        titleText = F("Aktion ungueltig");
+        messageText = F("Dieses Geraet kennt keine separate Setup-Aktion.");
+        statusCode = 400;
+        restartRequired = false;
+        return false;
+    }
 
     virtual bool loadLegacyBasisSettings(Preferences& prefs, NodeBasisSnapshot& outBasis) {
         (void)prefs;
@@ -135,10 +149,23 @@ class NodeProvisioningController {
         const String& infoText,
         const String& errorText,
         WebServer* sourceServer) const;
+    void appendSharedStyles(String& page) const;
+    void sendResultPage(
+        const String& titleText,
+        const String& messageText,
+        bool isError,
+        int statusCode,
+        bool showBackButton);
+    String buildResultPage(
+        const String& titleText,
+        const String& messageText,
+        bool isError,
+        bool showBackButton) const;
 
     bool loadBasisFromStorage(Preferences& prefs);
     bool loadLegacyBasisFromHandler(Preferences& prefs);
     bool writeBasisToStorage(Preferences& prefs) const;
+    bool writeBasisToStorage(Preferences& prefs, const NodeBasisSettings& settings) const;
     bool removeBasisFromStorage(Preferences& prefs) const;
     bool readBasisBlob(Preferences& prefs, NodeBasisSettings& outSettings) const;
     void applyBasisSettings(const NodeBasisSettings& settings);

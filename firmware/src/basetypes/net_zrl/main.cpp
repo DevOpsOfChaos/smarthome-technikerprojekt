@@ -464,6 +464,12 @@ void loescheKalibrierungszustandImRuntime() {
 }
 
 bool parseUIntValue(const char* text, uint32_t& outValue);
+void holeSetupSnapshot(
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
+    NetZrlSetupSnapshot& deviceSnapshot);
+bool speicherePersistenzMitRollback(
+    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
+    const NetZrlSetupSnapshot& deviceSnapshot);
 
 void holeNetZrlSetupSnapshot(NetZrlSetupSnapshot& snapshot) {
     snapshot.travelTimeUpMs = runtime.travelTimeUpMs;
@@ -491,6 +497,16 @@ NetZrlPersistedSetupData baueNetZrlPersistenzdatenAusRuntime() {
     return data;
 }
 
+bool netZrlPersistenzdatenSindGleich(
+    const NetZrlPersistedSetupData& left,
+    const NetZrlPersistedSetupData& right) {
+    return left.magic == right.magic && left.version == right.version &&
+           left.travelTimeUpMs == right.travelTimeUpMs &&
+           left.travelTimeDownMs == right.travelTimeDownMs &&
+           left.defaultEstimatedTravelTimeMs == right.defaultEstimatedTravelTimeMs &&
+           left.relayUpUsesRelayA == right.relayUpUsesRelayA;
+}
+
 bool netZrlPersistenzdatenGueltig(const NetZrlPersistedSetupData& data) {
     return data.magic == NET_ZRL_SETUP_MAGIC && data.version == NET_ZRL_SETUP_VERSION;
 }
@@ -512,15 +528,9 @@ bool legacyPersistenzdatenGueltig(const LegacyPersistedSetupData& data) {
 class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
   public:
     const char* pageTitle() const override { return "NET-ZRL Provisioning"; }
-    const char* pageIntro() const override {
-        return "Gemeinsame Node-Basis oben, rolladenspezifische Werte unten. "
-               "Genau diese Trennung ist die Architekturentscheidung.";
-    }
+    const char* pageIntro() const override { return "Node-Basis oben, Rolladenwerte unten."; }
     const char* deviceSectionTitle() const override { return "NET-ZRL-Spezifisch"; }
-    const char* deviceSectionIntro() const override {
-        return "Fahrzeiten, Fallback-Fahrzeit und Relais-Zuordnung bleiben bewusst lokal "
-               "im Rolladenpfad.";
-    }
+    const char* deviceSectionIntro() const override { return "Fahrzeiten setzen, Kalibrierung separat loeschen."; }
 
     void loadDeviceDefaults() override {
         runtime.travelTimeUpMs = 0UL;
@@ -570,6 +580,14 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
 
     bool saveDeviceSettings(Preferences& prefs) override {
         const NetZrlPersistedSetupData data = baueNetZrlPersistenzdatenAusRuntime();
+        NetZrlPersistedSetupData current = {};
+        if (prefs.getBytesLength(STORAGE_KEY_NET_ZRL_BLOB) == sizeof(NetZrlPersistedSetupData) &&
+            prefs.getBytes(STORAGE_KEY_NET_ZRL_BLOB, &current, sizeof(current)) == sizeof(current) &&
+            netZrlPersistenzdatenGueltig(current) &&
+            netZrlPersistenzdatenSindGleich(current, data)) {
+            return true;
+        }
+
         const bool writeOk =
             prefs.putBytes(STORAGE_KEY_NET_ZRL_BLOB, &data, sizeof(data)) == sizeof(data);
         if (!writeOk) {
@@ -602,15 +620,13 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
         const String travelTimeDownText = server.arg("travel_time_down_ms");
         const String defaultTravelTimeText = server.arg("default_estimated_travel_time_ms");
         const String relayMappingText = server.arg("relay_up_mapping");
-        const bool resetCalibrationRequested = server.hasArg("reset_calibration");
 
         pending_ = {};
 
         if (!parseWebTravelTimeField(
                 travelTimeUpText,
                 runtime.travelTimeUpMs,
-                pending_.travelTimeUpMs,
-                pending_.travelTimeUpChanged)) {
+                pending_.travelTimeUpMs)) {
             errorText = F(
                 "travel_time_up_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms. "
                 "Leer laesst den aktuellen Wert unveraendert.");
@@ -620,8 +636,7 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
         if (!parseWebTravelTimeField(
                 travelTimeDownText,
                 runtime.travelTimeDownMs,
-                pending_.travelTimeDownMs,
-                pending_.travelTimeDownChanged)) {
+                pending_.travelTimeDownMs)) {
             errorText = F(
                 "travel_time_down_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms. "
                 "Leer laesst den aktuellen Wert unveraendert.");
@@ -643,14 +658,6 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
             return false;
         }
 
-        if (resetCalibrationRequested &&
-            (pending_.travelTimeUpChanged || pending_.travelTimeDownChanged)) {
-            errorText = F(
-                "Kalibrierungs-Reset darf nicht zusammen mit neuen Fahrzeiten gespeichert werden.");
-            return false;
-        }
-
-        pending_.resetCalibration = resetCalibrationRequested;
         pending_.relayUpUsesRelayA = relayMappingText == "relay_a";
         pending_.valid = true;
         return true;
@@ -659,13 +666,9 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
     void applyParsedDeviceSettings() override {
         if (!pending_.valid) return;
 
-        if (pending_.resetCalibration) {
-            loescheKalibrierungszustandImRuntime();
-        } else {
-            runtime.travelTimeUpMs = pending_.travelTimeUpMs;
-            runtime.travelTimeDownMs = pending_.travelTimeDownMs;
-            berechneKalibrierstatus();
-        }
+        runtime.travelTimeUpMs = pending_.travelTimeUpMs;
+        runtime.travelTimeDownMs = pending_.travelTimeDownMs;
+        berechneKalibrierstatus();
         runtime.defaultEstimatedTravelTimeMs =
             sanitizeEstimatedTravelTime(pending_.defaultEstimatedTravelTimeMs);
         runtime.relayUpUsesRelayA = pending_.relayUpUsesRelayA;
@@ -691,35 +694,79 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
                 ? sourceServer->arg("relay_up_mapping")
                 : String(runtime.relayUpUsesRelayA ? "relay_a" : "relay_b");
         const bool relayASelected = relayMappingText != "relay_b";
-        const bool resetCalibrationChecked =
-            sourceServer != nullptr && sourceServer->hasArg("reset_calibration");
         const String escapedTravelTimeUp = htmlEscapeLocal(travelTimeUpText);
         const String escapedTravelTimeDown = htmlEscapeLocal(travelTimeDownText);
         const String escapedDefaultTravelTime = htmlEscapeLocal(defaultTravelTimeText);
+        const String calibrationState = runtime.isCalibrated ? String(F("Kalibriert")) : String(F("Nicht kalibriert"));
 
         page += F("<div class=\"field\"><label for=\"travel_time_up_ms\">travel_time_up_ms</label>");
-        page += F("<input id=\"travel_time_up_ms\" name=\"travel_time_up_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"nur Zahl = neuer Wert\" value=\"");
+        page += F("<input id=\"travel_time_up_ms\" name=\"travel_time_up_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"leer = unveraendert\" value=\"");
         page += escapedTravelTimeUp;
-        page += F("\"><div class=\"hint\">Leer laesst den aktuellen Wert unveraendert. Fuer Loeschen den expliziten Reset unten verwenden.</div></div>");
+        page += F("\"><div class=\"hint\">Aktuell nur Zahl setzen.</div></div>");
         page += F("<div class=\"field\"><label for=\"travel_time_down_ms\">travel_time_down_ms</label>");
-        page += F("<input id=\"travel_time_down_ms\" name=\"travel_time_down_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"nur Zahl = neuer Wert\" value=\"");
+        page += F("<input id=\"travel_time_down_ms\" name=\"travel_time_down_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"leer = unveraendert\" value=\"");
         page += escapedTravelTimeDown;
-        page += F("\"><div class=\"hint\">Leer laesst den aktuellen Wert unveraendert. Fuer Loeschen den expliziten Reset unten verwenden.</div></div>");
-        page += F("<div class=\"field\"><label for=\"reset_calibration\">Kalibrierung explizit loeschen</label>");
-        page += F("<input id=\"reset_calibration\" name=\"reset_calibration\" type=\"checkbox\" value=\"1\"");
-        if (resetCalibrationChecked) page += F(" checked");
-        page += F("><div class=\"hint\">Loescht beide Fahrzeiten bewusst. Nicht zusammen mit neuen Fahrzeiten speichern.</div></div>");
+        page += F("\"><div class=\"hint\">Aktuell nur Zahl setzen.</div></div>");
         page += F("<div class=\"field\"><label for=\"default_estimated_travel_time_ms\">default_estimated_travel_time_ms</label>");
         page += F("<input id=\"default_estimated_travel_time_ms\" name=\"default_estimated_travel_time_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" value=\"");
         page += escapedDefaultTravelTime;
-        page += F("\"><div class=\"hint\">Fallback fuer die automatische Anfangsfahrt, Standard: 100000 ms.</div></div>");
+        page += F("\"><div class=\"hint\">Fallbackfahrt bei Start.</div></div>");
         page += F("<div class=\"field\"><label for=\"relay_up_mapping\">Relais-Zuordnung fuer Richtung up</label>");
         page += F("<select id=\"relay_up_mapping\" name=\"relay_up_mapping\">");
         page += relayASelected ? F("<option value=\"relay_a\" selected>relay_a = up</option>")
                                : F("<option value=\"relay_a\">relay_a = up</option>");
         page += relayASelected ? F("<option value=\"relay_b\">relay_b = up</option>")
                                : F("<option value=\"relay_b\" selected>relay_b = up</option>");
-        page += F("</select><div class=\"hint\">Das andere Relais wird automatisch als down verwendet.</div></div>");
+        page += F("</select><div class=\"hint\">Status: ");
+        page += htmlEscapeLocal(calibrationState);
+        page += F("</div></div>");
+    }
+
+    void appendDeviceActionsHtml(String& page) const override {
+        page += F("<form class=\"card\" method=\"post\" action=\"/save\">");
+        page += F("<div class=\"section-head\"><h2>Kalibrierung</h2><span class=\"tag\">reset</span></div>");
+        page += F("<div class=\"sub\">Loescht nur die gespeicherten Fahrzeiten.</div>");
+        page += F("<div class=\"meta\"><span>up <code>");
+        page += htmlEscapeLocal(travelTimeText(runtime.travelTimeUpMs).length() > 0U ? travelTimeText(runtime.travelTimeUpMs) : String(F("-")));
+        page += F("</code></span><span>down <code>");
+        page += htmlEscapeLocal(travelTimeText(runtime.travelTimeDownMs).length() > 0U ? travelTimeText(runtime.travelTimeDownMs) : String(F("-")));
+        page += F("</code></span></div>");
+        page += F("<input type=\"hidden\" name=\"device_action\" value=\"reset_calibration\">");
+        page += F("<div class=\"actions\"><button class=\"btn btn-danger\" type=\"submit\">Kalibrierung loeschen</button>");
+        page += F("<div class=\"footer\">Basisdaten und Relais-Zuordnung bleiben unberuehrt.</div></div></form>");
+    }
+
+    bool handleDeviceAction(
+        WebServer& server,
+        String& titleText,
+        String& messageText,
+        int& statusCode,
+        bool& restartRequired) override {
+        restartRequired = false;
+
+        if (server.arg("device_action") != "reset_calibration") {
+            titleText = F("Aktion ungueltig");
+            messageText = F("Die angeforderte NET-ZRL-Aktion wird nicht unterstuetzt.");
+            statusCode = 400;
+            return false;
+        }
+
+        SmartHome::ShNodeProvisioning::NodeBasisSnapshot previousBasisSnapshot = {};
+        NetZrlSetupSnapshot previousDeviceSnapshot = {};
+        holeSetupSnapshot(previousBasisSnapshot, previousDeviceSnapshot);
+
+        loescheKalibrierungszustandImRuntime();
+        if (!speicherePersistenzMitRollback(previousBasisSnapshot, previousDeviceSnapshot)) {
+            titleText = F("Loeschen fehlgeschlagen");
+            messageText = F("Kalibrierung konnte nicht gespeichert geloescht werden.");
+            statusCode = 500;
+            return false;
+        }
+
+        titleText = F("Kalibrierung geloescht");
+        messageText = F("Fahrzeiten entfernt. Setup bleibt offen.");
+        statusCode = 200;
+        return true;
     }
 
     bool loadLegacyBasisSettings(
@@ -748,9 +795,6 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
         bool valid;
         uint32_t travelTimeUpMs;
         uint32_t travelTimeDownMs;
-        bool travelTimeUpChanged;
-        bool travelTimeDownChanged;
-        bool resetCalibration;
         uint32_t defaultEstimatedTravelTimeMs;
         bool relayUpUsesRelayA;
     };
@@ -771,11 +815,9 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
     static bool parseWebTravelTimeField(
         const String& rawText,
         uint32_t currentValue,
-        uint32_t& outValue,
-        bool& wasChanged) {
+        uint32_t& outValue) {
         if (rawText.length() == 0U) {
             outValue = currentValue;
-            wasChanged = false;
             return true;
         }
 
@@ -785,7 +827,6 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
         }
 
         outValue = parsedValue;
-        wasChanged = parsedValue != currentValue;
         return true;
     }
 };
