@@ -453,6 +453,16 @@ void berechneKalibrierstatus() {
     }
 }
 
+void loescheKalibrierungszustandImRuntime() {
+    runtime.travelTimeUpMs = 0UL;
+    runtime.travelTimeDownMs = 0UL;
+    runtime.candidateTravelTimeUpMs = 0UL;
+    runtime.candidateTravelTimeDownMs = 0UL;
+    runtime.isCalibrated = false;
+    runtime.coverPosition = 0;
+    berechneKalibrierstatus();
+}
+
 bool parseUIntValue(const char* text, uint32_t& outValue);
 
 void holeNetZrlSetupSnapshot(NetZrlSetupSnapshot& snapshot) {
@@ -592,18 +602,29 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
         const String travelTimeDownText = server.arg("travel_time_down_ms");
         const String defaultTravelTimeText = server.arg("default_estimated_travel_time_ms");
         const String relayMappingText = server.arg("relay_up_mapping");
+        const bool resetCalibrationRequested = server.hasArg("reset_calibration");
 
-        if (!parseOptionalTravelTimeField(travelTimeUpText, pending_.travelTimeUpMs, pending_.travelTimeUpSet)) {
-            errorText = F("travel_time_up_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms oder leer.");
+        pending_ = {};
+
+        if (!parseWebTravelTimeField(
+                travelTimeUpText,
+                runtime.travelTimeUpMs,
+                pending_.travelTimeUpMs,
+                pending_.travelTimeUpChanged)) {
+            errorText = F(
+                "travel_time_up_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms. "
+                "Leer laesst den aktuellen Wert unveraendert.");
             return false;
         }
 
-        if (!parseOptionalTravelTimeField(
+        if (!parseWebTravelTimeField(
                 travelTimeDownText,
+                runtime.travelTimeDownMs,
                 pending_.travelTimeDownMs,
-                pending_.travelTimeDownSet)) {
-            errorText =
-                F("travel_time_down_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms oder leer.");
+                pending_.travelTimeDownChanged)) {
+            errorText = F(
+                "travel_time_down_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms. "
+                "Leer laesst den aktuellen Wert unveraendert.");
             return false;
         }
 
@@ -622,6 +643,14 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
             return false;
         }
 
+        if (resetCalibrationRequested &&
+            (pending_.travelTimeUpChanged || pending_.travelTimeDownChanged)) {
+            errorText = F(
+                "Kalibrierungs-Reset darf nicht zusammen mit neuen Fahrzeiten gespeichert werden.");
+            return false;
+        }
+
+        pending_.resetCalibration = resetCalibrationRequested;
         pending_.relayUpUsesRelayA = relayMappingText == "relay_a";
         pending_.valid = true;
         return true;
@@ -630,12 +659,16 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
     void applyParsedDeviceSettings() override {
         if (!pending_.valid) return;
 
-        runtime.travelTimeUpMs = pending_.travelTimeUpSet ? pending_.travelTimeUpMs : 0UL;
-        runtime.travelTimeDownMs = pending_.travelTimeDownSet ? pending_.travelTimeDownMs : 0UL;
+        if (pending_.resetCalibration) {
+            loescheKalibrierungszustandImRuntime();
+        } else {
+            runtime.travelTimeUpMs = pending_.travelTimeUpMs;
+            runtime.travelTimeDownMs = pending_.travelTimeDownMs;
+            berechneKalibrierstatus();
+        }
         runtime.defaultEstimatedTravelTimeMs =
             sanitizeEstimatedTravelTime(pending_.defaultEstimatedTravelTimeMs);
         runtime.relayUpUsesRelayA = pending_.relayUpUsesRelayA;
-        berechneKalibrierstatus();
     }
 
     void discardParsedDeviceSettings() override { pending_ = {}; }
@@ -658,18 +691,24 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
                 ? sourceServer->arg("relay_up_mapping")
                 : String(runtime.relayUpUsesRelayA ? "relay_a" : "relay_b");
         const bool relayASelected = relayMappingText != "relay_b";
+        const bool resetCalibrationChecked =
+            sourceServer != nullptr && sourceServer->hasArg("reset_calibration");
         const String escapedTravelTimeUp = htmlEscapeLocal(travelTimeUpText);
         const String escapedTravelTimeDown = htmlEscapeLocal(travelTimeDownText);
         const String escapedDefaultTravelTime = htmlEscapeLocal(defaultTravelTimeText);
 
         page += F("<div class=\"field\"><label for=\"travel_time_up_ms\">travel_time_up_ms</label>");
-        page += F("<input id=\"travel_time_up_ms\" name=\"travel_time_up_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"leer = unkalibriert\" value=\"");
+        page += F("<input id=\"travel_time_up_ms\" name=\"travel_time_up_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"nur Zahl = neuer Wert\" value=\"");
         page += escapedTravelTimeUp;
-        page += F("\"><div class=\"hint\">Leer lassen, wenn noch keine valide Aufwaerts-Kalibrierung vorliegt.</div></div>");
+        page += F("\"><div class=\"hint\">Leer laesst den aktuellen Wert unveraendert. Fuer Loeschen den expliziten Reset unten verwenden.</div></div>");
         page += F("<div class=\"field\"><label for=\"travel_time_down_ms\">travel_time_down_ms</label>");
-        page += F("<input id=\"travel_time_down_ms\" name=\"travel_time_down_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"leer = unkalibriert\" value=\"");
+        page += F("<input id=\"travel_time_down_ms\" name=\"travel_time_down_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"nur Zahl = neuer Wert\" value=\"");
         page += escapedTravelTimeDown;
-        page += F("\"><div class=\"hint\">Leer lassen, wenn noch keine valide Abwaerts-Kalibrierung vorliegt.</div></div>");
+        page += F("\"><div class=\"hint\">Leer laesst den aktuellen Wert unveraendert. Fuer Loeschen den expliziten Reset unten verwenden.</div></div>");
+        page += F("<div class=\"field\"><label for=\"reset_calibration\">Kalibrierung explizit loeschen</label>");
+        page += F("<input id=\"reset_calibration\" name=\"reset_calibration\" type=\"checkbox\" value=\"1\"");
+        if (resetCalibrationChecked) page += F(" checked");
+        page += F("><div class=\"hint\">Loescht beide Fahrzeiten bewusst. Nicht zusammen mit neuen Fahrzeiten speichern.</div></div>");
         page += F("<div class=\"field\"><label for=\"default_estimated_travel_time_ms\">default_estimated_travel_time_ms</label>");
         page += F("<input id=\"default_estimated_travel_time_ms\" name=\"default_estimated_travel_time_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" value=\"");
         page += escapedDefaultTravelTime;
@@ -709,8 +748,9 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
         bool valid;
         uint32_t travelTimeUpMs;
         uint32_t travelTimeDownMs;
-        bool travelTimeUpSet;
-        bool travelTimeDownSet;
+        bool travelTimeUpChanged;
+        bool travelTimeDownChanged;
+        bool resetCalibration;
         uint32_t defaultEstimatedTravelTimeMs;
         bool relayUpUsesRelayA;
     };
@@ -728,18 +768,25 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
                outValue <= maxValue;
     }
 
-    static bool parseOptionalTravelTimeField(
+    static bool parseWebTravelTimeField(
         const String& rawText,
+        uint32_t currentValue,
         uint32_t& outValue,
-        bool& isSet) {
+        bool& wasChanged) {
         if (rawText.length() == 0U) {
-            isSet = false;
-            outValue = 0UL;
+            outValue = currentValue;
+            wasChanged = false;
             return true;
         }
 
-        isSet = parseUIntValue(rawText.c_str(), outValue) && isTravelTimeValid(outValue);
-        return isSet;
+        uint32_t parsedValue = 0UL;
+        if (!parseUIntValue(rawText.c_str(), parsedValue) || !isTravelTimeValid(parsedValue)) {
+            return false;
+        }
+
+        outValue = parsedValue;
+        wasChanged = parsedValue != currentValue;
+        return true;
     }
 };
 
@@ -857,13 +904,7 @@ void setzeKalibrierungUngueltig() {
     NetZrlSetupSnapshot previousDeviceSnapshot = {};
     holeSetupSnapshot(previousBasisSnapshot, previousDeviceSnapshot);
 
-    runtime.travelTimeUpMs = 0UL;
-    runtime.travelTimeDownMs = 0UL;
-    runtime.candidateTravelTimeUpMs = 0UL;
-    runtime.candidateTravelTimeDownMs = 0UL;
-    runtime.isCalibrated = false;
-    runtime.coverPosition = 0;
-    berechneKalibrierstatus();
+    loescheKalibrierungszustandImRuntime();
 
     if (!speicherePersistenzMitRollback(previousBasisSnapshot, previousDeviceSnapshot)) {
         logf("WARN", "Kalibrierung konnte nicht geloescht werden, Vorzustand wiederhergestellt");
