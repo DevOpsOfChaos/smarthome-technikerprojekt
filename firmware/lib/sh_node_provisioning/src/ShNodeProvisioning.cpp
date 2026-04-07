@@ -284,14 +284,19 @@ void NodeProvisioningController::enterSetupMode() {
     delay(25);
     WiFi.mode(WIFI_AP);
 
-    *setupMode_ = true;
     if (!WiFi.softAP(setupApSsid_, nullptr, config_.apChannel)) {
+        *setupMode_ = false;
         *setupApActive_ = false;
+        setupApSsid_[0] = '\0';
+        WiFi.softAPdisconnect(true);
+        WiFi.disconnect(true, true);
+        WiFi.mode(WIFI_MODE_NULL);
         log("WARN", "Setup-AP konnte nicht gestartet werden.");
         return;
     }
 
     server_.begin();
+    *setupMode_ = true;
     *setupApActive_ = true;
     log(
         "INFO",

@@ -875,7 +875,11 @@ void enterSetupMode() {
     setzeLedMode(LedMode::Off);
     setzeLedPins(false, false);
     nodeProvisioning.enterSetupMode();
-    logf("INFO", "Setup-Modus aktiviert");
+    if (runtime.setupMode && runtime.setupApActive) {
+        logf("INFO", "Setup-Modus aktiviert");
+    } else {
+        logf("WARN", "Setup-Modus konnte nicht sauber aktiviert werden");
+    }
 }
 
 void exitSetupMode(const char* grund) {
