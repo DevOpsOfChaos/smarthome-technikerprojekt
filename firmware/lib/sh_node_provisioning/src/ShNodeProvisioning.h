@@ -77,11 +77,6 @@ class DeviceProvisioningHandler {
         return false;
     }
 
-    virtual bool loadLegacyBasisSettings(Preferences& prefs, NodeBasisSnapshot& outBasis) {
-        (void)prefs;
-        outBasis = {};
-        return false;
-    }
 };
 
 class NodeProvisioningController {
@@ -163,7 +158,6 @@ class NodeProvisioningController {
         bool showBackButton) const;
 
     bool loadBasisFromStorage(Preferences& prefs);
-    bool loadLegacyBasisFromHandler(Preferences& prefs);
     bool writeBasisToStorage(Preferences& prefs) const;
     bool writeBasisToStorage(Preferences& prefs, const NodeBasisSettings& settings) const;
     bool removeBasisFromStorage(Preferences& prefs) const;

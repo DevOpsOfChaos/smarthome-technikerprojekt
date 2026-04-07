@@ -114,7 +114,7 @@ bool NodeProvisioningController::begin(
 
     Preferences prefs;
     if (prefs.begin(config_.storageNamespace, true)) {
-        const bool basisLoaded = loadBasisFromStorage(prefs) || loadLegacyBasisFromHandler(prefs);
+        const bool basisLoaded = loadBasisFromStorage(prefs);
         const bool deviceLoaded = deviceHandler_->loadDeviceSettings(prefs);
         prefs.end();
 
@@ -731,18 +731,6 @@ bool NodeProvisioningController::loadBasisFromStorage(Preferences& prefs) {
     }
 
     applyBasisSettings(settings);
-    return true;
-}
-
-bool NodeProvisioningController::loadLegacyBasisFromHandler(Preferences& prefs) {
-    NodeBasisSnapshot legacyBasis = {};
-    if (!deviceHandler_->loadLegacyBasisSettings(prefs, legacyBasis)) {
-        return false;
-    }
-
-    restoreBasisSnapshot(legacyBasis);
-    *statusSendIntervalS_ = sanitizeStatusSendInterval(*statusSendIntervalS_);
-    *sensorSendIntervalS_ = sanitizeSensorSendInterval(*sensorSendIntervalS_);
     return true;
 }
 

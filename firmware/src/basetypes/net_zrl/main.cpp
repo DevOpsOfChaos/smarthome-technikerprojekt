@@ -97,18 +97,10 @@ constexpr size_t SETUP_SSID_BUFFER_SIZE = 32U;
 constexpr const char* STORAGE_NAMESPACE = "net_zrl";
 constexpr const char* STORAGE_KEY_NODE_BASIS = "node_basis_v1";
 constexpr const char* STORAGE_KEY_NET_ZRL_BLOB = "net_zrl_v1";
-constexpr const char* STORAGE_KEY_LEGACY_BLOB = "setup_v1";
-constexpr const char* STORAGE_KEY_LEGACY_TT_UP = "tt_up_ms";
-constexpr const char* STORAGE_KEY_LEGACY_TT_DOWN = "tt_dn_ms";
-constexpr const char* STORAGE_KEY_LEGACY_EST = "est_ms";
-constexpr const char* STORAGE_KEY_LEGACY_RELAY = "up_is_a";
 constexpr const char* SETUP_AP_PREFIX = "NET-ZRL-SETUP";
 constexpr int SETUP_AP_CHANNEL = 1;
 constexpr uint32_t NET_ZRL_SETUP_MAGIC = 0x5A524C32UL;
 constexpr uint16_t NET_ZRL_SETUP_VERSION = 1U;
-constexpr uint32_t LEGACY_SETUP_PERSIST_MAGIC = 0x5A524C31UL;
-constexpr uint16_t LEGACY_SETUP_PERSIST_VERSION = 1U;
-constexpr uint32_t LEGACY_SETUP_FLAG_MASTER_MAC = 0x00000001UL;
 
 enum class CoverState : uint8_t { Stopped = 0, Moving = 1 };
 enum class CoverDirection : uint8_t { None = 0, Up = 1, Down = 2 };
@@ -123,22 +115,6 @@ enum class CalibrationPhase : uint8_t {
 };
 enum class LedMode : uint8_t { Off = 0, BothBlink, UpBlink, DownBlink, UpOn, DownOn };
 enum class PendingAction : uint8_t { None = 0, SetupEnter, FactoryReset };
-
-struct LegacyPersistedSetupData {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t reserved;
-    uint32_t flags;
-    uint8_t masterMac[6];
-    uint8_t reservedMac[2];
-    uint32_t travelTimeUpMs;
-    uint32_t travelTimeDownMs;
-    uint32_t defaultEstimatedTravelTimeMs;
-    uint32_t statusSendIntervalS;
-    uint32_t sensorSendIntervalS;
-    uint8_t relayUpUsesRelayA;
-    uint8_t reservedBytes[3];
-};
 
 struct NetZrlPersistedSetupData {
     uint32_t magic;
@@ -520,11 +496,6 @@ void wendeNetZrlPersistenzdatenAn(const NetZrlPersistedSetupData& data) {
     berechneKalibrierstatus();
 }
 
-bool legacyPersistenzdatenGueltig(const LegacyPersistedSetupData& data) {
-    return data.magic == LEGACY_SETUP_PERSIST_MAGIC &&
-           data.version == LEGACY_SETUP_PERSIST_VERSION;
-}
-
 class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
   public:
     const char* pageTitle() const override { return "NET-ZRL Provisioning"; }
@@ -548,34 +519,7 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
             wendeNetZrlPersistenzdatenAn(data);
             return true;
         }
-
-        LegacyPersistedSetupData legacy = {};
-        if (prefs.getBytesLength(STORAGE_KEY_LEGACY_BLOB) == sizeof(LegacyPersistedSetupData) &&
-            prefs.getBytes(STORAGE_KEY_LEGACY_BLOB, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-            legacyPersistenzdatenGueltig(legacy)) {
-            runtime.travelTimeUpMs = isTravelTimeValid(legacy.travelTimeUpMs) ? legacy.travelTimeUpMs : 0UL;
-            runtime.travelTimeDownMs = isTravelTimeValid(legacy.travelTimeDownMs) ? legacy.travelTimeDownMs : 0UL;
-            runtime.defaultEstimatedTravelTimeMs =
-                sanitizeEstimatedTravelTime(legacy.defaultEstimatedTravelTimeMs);
-            runtime.relayUpUsesRelayA = legacy.relayUpUsesRelayA != 0U;
-            berechneKalibrierstatus();
-            return true;
-        }
-
-        runtime.travelTimeUpMs = prefs.getUInt(STORAGE_KEY_LEGACY_TT_UP, 0UL);
-        runtime.travelTimeDownMs = prefs.getUInt(STORAGE_KEY_LEGACY_TT_DOWN, 0UL);
-        runtime.defaultEstimatedTravelTimeMs =
-            sanitizeEstimatedTravelTime(
-                prefs.getUInt(STORAGE_KEY_LEGACY_EST, DEFAULT_ESTIMATED_TRAVEL_TIME_MS));
-        runtime.relayUpUsesRelayA = prefs.getBool(STORAGE_KEY_LEGACY_RELAY, true);
-
-        if (!isTravelTimeValid(runtime.travelTimeUpMs)) runtime.travelTimeUpMs = 0UL;
-        if (!isTravelTimeValid(runtime.travelTimeDownMs)) runtime.travelTimeDownMs = 0UL;
-        berechneKalibrierstatus();
-
-        return runtime.travelTimeUpMs > 0UL || runtime.travelTimeDownMs > 0UL ||
-               runtime.defaultEstimatedTravelTimeMs != DEFAULT_ESTIMATED_TRAVEL_TIME_MS ||
-               !runtime.relayUpUsesRelayA;
+        return false;
     }
 
     bool saveDeviceSettings(Preferences& prefs) override {
@@ -588,27 +532,11 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
             return true;
         }
 
-        const bool writeOk =
-            prefs.putBytes(STORAGE_KEY_NET_ZRL_BLOB, &data, sizeof(data)) == sizeof(data);
-        if (!writeOk) {
-            return false;
-        }
-
-        prefs.remove(STORAGE_KEY_LEGACY_BLOB);
-        prefs.remove(STORAGE_KEY_LEGACY_TT_UP);
-        prefs.remove(STORAGE_KEY_LEGACY_TT_DOWN);
-        prefs.remove(STORAGE_KEY_LEGACY_EST);
-        prefs.remove(STORAGE_KEY_LEGACY_RELAY);
-        return true;
+        return prefs.putBytes(STORAGE_KEY_NET_ZRL_BLOB, &data, sizeof(data)) == sizeof(data);
     }
 
     bool clearDeviceSettings(Preferences& prefs) override {
         prefs.remove(STORAGE_KEY_NET_ZRL_BLOB);
-        prefs.remove(STORAGE_KEY_LEGACY_BLOB);
-        prefs.remove(STORAGE_KEY_LEGACY_TT_UP);
-        prefs.remove(STORAGE_KEY_LEGACY_TT_DOWN);
-        prefs.remove(STORAGE_KEY_LEGACY_EST);
-        prefs.remove(STORAGE_KEY_LEGACY_RELAY);
         return true;
     }
 
@@ -766,27 +694,6 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
         titleText = F("Kalibrierung geloescht");
         messageText = F("Fahrzeiten entfernt. Setup bleibt offen.");
         statusCode = 200;
-        return true;
-    }
-
-    bool loadLegacyBasisSettings(
-        Preferences& prefs,
-        SmartHome::ShNodeProvisioning::NodeBasisSnapshot& outBasis) override {
-        LegacyPersistedSetupData legacy = {};
-        if (prefs.getBytesLength(STORAGE_KEY_LEGACY_BLOB) != sizeof(LegacyPersistedSetupData)) {
-            return false;
-        }
-
-        if (prefs.getBytes(STORAGE_KEY_LEGACY_BLOB, &legacy, sizeof(legacy)) != sizeof(legacy) ||
-            !legacyPersistenzdatenGueltig(legacy)) {
-            return false;
-        }
-
-        outBasis = {};
-        outBasis.masterMacValid = (legacy.flags & LEGACY_SETUP_FLAG_MASTER_MAC) != 0U;
-        memcpy(outBasis.masterMac, legacy.masterMac, sizeof(outBasis.masterMac));
-        outBasis.statusSendIntervalS = sanitizeStatusSendInterval(legacy.statusSendIntervalS);
-        outBasis.sensorSendIntervalS = sanitizeSensorSendInterval(legacy.sensorSendIntervalS);
         return true;
     }
 
