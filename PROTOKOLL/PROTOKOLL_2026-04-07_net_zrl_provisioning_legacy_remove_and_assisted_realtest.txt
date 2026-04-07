@@ -1,0 +1,127 @@
+PROTOKOLL
+Datum: 2026-04-07
+Thema: net_zrl Provisioning ohne Legacy-Pfade und assistierter Realtest
+
+1. Ziel dieses Laufs
+- verbleibende Legacy-/Altbestandspfade aus dem aktuellen Provisioning-/`net_zrl`-Code entfernen
+- aktuellen Stand bauen und auf reale Hardware flashen
+- Realtest nur assistiert mit Nutzerbericht als reale Beobachtungsgrundlage fahren
+- Ergebnis ehrlich protokollieren
+
+2. Ausgangslage
+Vor dem Lauf war der aktuelle Provisioning-Pfad funktional bereits auf gemeinsamer Node-Provisioning-Basis, enthielt aber noch Altpfade:
+- Fallback-Laden alter Basisdaten ueber den Device-Handler
+- Laden eines alten Legacy-Blobs `setup_v1`
+- Laden alter Einzelkeys `tt_up_ms`, `tt_dn_ms`, `est_ms`, `up_is_a`
+- Restlogik zum Entfernen alter Keys beim Speichern bzw. Reset
+
+Das war fuer den geforderten Zielstand falsch, weil dadurch der neue Persistenzpfad weiterhin von Altformat-Kompatibilitaet gestuetzt wurde.
+
+3. Umsetzung im Code
+Geaenderte Dateien:
+- `firmware/lib/sh_node_provisioning/src/ShNodeProvisioning.h`
+- `firmware/lib/sh_node_provisioning/src/ShNodeProvisioning.cpp`
+- `firmware/src/basetypes/net_zrl/main.cpp`
+
+Entfernt wurden:
+- `loadLegacyBasisSettings(...)` aus der Device-Handler-Schnittstelle
+- `loadLegacyBasisFromHandler(...)` aus der gemeinsamen Provisioning-Basis
+- Legacy-Konstanten und Legacy-Datenstruktur in `net_zrl`
+- Legacy-Blob-Read fuer `setup_v1`
+- Legacy-Einzelkey-Reads fuer `tt_up_ms`, `tt_dn_ms`, `est_ms`, `up_is_a`
+- Legacy-Basisuebernahme aus dem alten Blob
+- Legacy-Key-Cleanup beim Speichern und Loeschen
+
+Zielstand nach dem Umbau:
+- gemeinsame Basis nur noch aus `node_basis_v1`
+- `net_zrl`-Zusatz nur noch aus `net_zrl_v1`
+- kein Altread, keine Altmigration, kein Einzelkey-Fallback
+
+4. Build- und Flash-Nachweis
+Build:
+- Kommando: `pio run -e net_zrl`
+- Ergebnis: erfolgreich
+
+Flash:
+- Kommando: `pio run -e net_zrl -t upload --upload-port COM6`
+- Zielport: `COM6`
+- Ergebnis: erfolgreich
+
+5. Assistierter Realtest
+Reale Beobachtungsquelle war ausschliesslich der Nutzerbericht.
+Der Test wurde nicht als selbst beobachteter Hardware-/Browser-Test ausgegeben.
+
+5.1 Grundtest nach Flash
+Nutzerbericht:
+- AP sichtbar
+- Setup-Seite erreichbar
+- ohne Aenderung gespeichert
+- AP danach sauber beendet
+
+Bewertung:
+- Grundpfad fuer Setup-AP, Webzugriff und Save-Neustart-Verhalten lief im Realtest plausibel
+- keine direkte Regression durch die Legacy-Entfernung in diesem Pfad sichtbar
+
+5.2 Reentry nach Save
+Nutzerbericht:
+- erneuter Setup-Einstieg erfolgreich
+- `master_mac` beim erneuten Oeffnen gesetzt
+
+Bewertung:
+- aktueller Persistenzpfad laedt Reentry-Daten weiterhin
+- der Nachweis ist gerade hier wichtig, weil die Legacy-Fallbacks vorher entfernt wurden
+
+5.3 Validierung negativer Eingabe
+Nutzerbericht:
+- eine falsche Eingabe liess sich nicht speichern
+- die Eingabevalidierung verhinderte den fehlerhaften Save
+
+Bewertung:
+- das ist kein Persistenznachweis, sondern ein Validierungsnachweis
+- der Schritt ist trotzdem positiv, weil ungueltige `master_mac` nicht durchrutscht
+
+5.4 Persistenztest mit neuem gueltigem Wert
+Anweisung:
+- andere gueltige `master_mac` setzen
+- speichern
+- neu in Setup gehen
+- Wert erneut pruefen
+
+Nutzerbericht:
+- neuer Wert blieb erhalten
+
+Bewertung:
+- neuer gueltiger Wert wurde gespeichert und beim erneuten Setup-Reentry wieder geladen
+- damit ist der aktuelle neue Persistenzpfad real belegt, ohne Legacy-Rettungspfad
+
+6. Ehrliche Gesamtbewertung
+Real belegt:
+- Build erfolgreich
+- Flash auf `COM6` erfolgreich
+- Setup-AP sichtbar
+- Setup-Seite erreichbar
+- Save beendet den AP sauber
+- Reentry funktioniert
+- bestehende `master_mac` wird nach Reentry wieder angezeigt
+- ungueltige Eingabe wird abgefangen
+- geaenderte gueltige `master_mac` bleibt nach Save und Reentry erhalten
+
+Nicht real belegt in diesem Lauf:
+- vollstaendiger Negativtest aller Web-Felder
+- kompletter Persistenznachweis fuer alle `net_zrl`-spezifischen Felder
+- kompletter Loesch-/Factory-Reset-Nachweis
+- UI-Bewertung fuer jede einzelne Save-/Fail-/Success-Seite
+
+7. Ergebnis
+Der Lauf ist fachlich sinnvoll erfolgreich:
+- Legacy-/Altbestandspfade wurden aus dem aktuellen Provisioning-/`net_zrl`-Pfad entfernt
+- der Code baut und laesst sich flashen
+- der neue reine Persistenzpfad ist im assistierten Realtest fuer den Basisfall und fuer `master_mac` real belegt
+
+Die ehrliche Grenze ist:
+- dieser Lauf beweist nicht den gesamten Provisioning-Pfad in allen Kanten
+- er beweist aber den wesentlichen Managementpunkt, dass der aktuelle Stand nicht mehr auf Legacy-Fallbacks angewiesen ist
+
+8. Naechster sinnvoller Schritt
+- wenn noetig gezielt noch einen engen Realtest fuer `net_zrl`-spezifische Persistenzfelder fahren
+- ansonsten den Stand committen und als bereinigte Basis fuer den naechsten Integrationsschritt verwenden
