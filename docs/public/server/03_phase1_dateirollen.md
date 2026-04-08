@@ -5,7 +5,8 @@
 ### Server-Basis
 
 - `server/.env.example`: minimale lokale Beispielwerte fuer Ports, Influx-Setup und SQLite-Pfad
-- `server/docker-compose.yml`: startet nur die benoetigten Basisdienste, baut die aktiven Flow-Dateien zu `flows.json` zusammen und stellt die Lib-Module als globale Node-RED-Bruecke bereit
+- `server/docker-compose.yml`: startet die benoetigten Basisdienste, initialisiert SQLite, baut die aktiven Flow-Dateien zu `flows.json` zusammen und stellt die Lib-Module als globale Node-RED-Bruecke bereit
+- `server/nodered/settings.js`: bleibt bewusst leer; die erweiterte Settings-Datei wird beim Start temporaer erzeugt
 
 ### Aktive Flows
 
@@ -14,6 +15,7 @@
 - `server/nodered/flows/active/20_device_store.json`: duenne Node-RED-Bruecken fuer Device-Handler aus `topic_handlers.js`
 - `server/nodered/flows/active/30_sqlite_persist.json`: fuehrt nur die zentral vorbereiteten SQLite-Batches gegen die Phase-1-Datenbank aus
 - `server/nodered/flows/active/40_command_minimal.json`: offizielle enge HTTP-Command-Eingaenge fuer `net_erl` Relay 1 und Cover-Commands
+- `server/nodered/flows/active/41_cover_automation_detail.json`: lokale Cover-Detailseite, lokaler Save-Pfad und kleiner Scheduler fuer zwei Zeit/Wert-Slots pro Geraet
 - `server/nodered/flows/active/90_master_diag.json`: duenne Node-RED-Bruecken fuer Master-Handler aus `topic_handlers.js`
 
 ### Kleine Hilfsmodule
@@ -23,6 +25,7 @@
 - `server/nodered/lib/topic_handlers.js`: exportiert die klar benannten Handlerfunktionen und die zentrale Zuordnung von Routing-Kontext zu Handlern
 - `server/nodered/lib/sqlite_writes.js`: leitet aus dem bereits aktualisierten Runtime-/Masterobjekt die einzigen Phase-1.2-SQLite-Writes ab
 - `server/nodered/lib/command_minimal.js`: validiert die engen Relay- und Cover-Commands, erzeugt die `request_id` und baut den MQTT-Payload
+- `server/nodered/lib/cover_automation.js`: rendert die lokale Cover-Detailseite, speichert lokale Slot-Konfigurationen und baut faellige Cover-Commands ueber denselben Command-Baustein
 - `server/nodered/lib/capability_helpers.js`: normalisiert und leitet Faehigkeiten ab
 - `server/nodered/lib/time_helpers.js`: kleine Helfer fuer Zeit- und Typnormalisierung
 
@@ -31,6 +34,9 @@
 - `server/sqlite/00_schema_phase1.sql`: minimales Schema fuer `devices`, `device_state_latest`, Event-/ACK-Logs und Masterdiagnose
 - `server/nodered/package.json`: pinnt den benoetigten `node-red-node-sqlite`-Baustein fuer die lokale Phase-1.2-Ausfuehrung
 - `server/docker-compose.yml`: initialisiert das SQLite-Schema vor dem Start und haengt die aktiven Flows mit dem generierten Node-RED-Settings-Kontext zusammen
+- `server/sqlite/smarthome_phase1.db`: lokale Laufzeitdatenbank
+- `server/nodered/flows.json`: lokal generierter Zusammenbau der aktiven Flow-Dateien
+- `server/nodered/cover_automation.json`: lokale Laufzeitkonfiguration der Cover-Detailseite
 - `tests/server/phase1_ingest_checkliste.md`: manueller Nachweis fuer Auto-Anlage, partielle State-Updates und getrennten Masterpfad
 
 ### Oeffentliche Doku
@@ -38,11 +44,14 @@
 - `docs/public/server/01_server_v1_ueberblick.md`: fachlicher Zuschnitt von Phase 1
 - `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`: Mapping-Regeln fuer MQTT-Ingest und Geraeteobjekt
 - `docs/public/server/03_phase1_dateirollen.md`: Rollen der umgesetzten Dateien
+- `docs/public/server/03_cover_command_und_positionssemantik.md`: obere Semantik des engen Cover-Pfads
+- `docs/public/server/04_master_dynamische_registry_und_cover_pfad.md`: Master-Ziellinie fuer dynamische Registry und Cover-Vertrag
 
 ## Bewusst noch nicht umgesetzt
 
 - Timeseries-Writes
-- UI-Ableitungen
+- breite UI-Ableitungen fuer alle Geraeteklassen
+- allgemeine Automationsplattform
 - jeder breitere Command-Pfad ausser `net_erl` Relay 1 und dem engen Cover-Pfad
 - weitere Logs- und MQTT-Console-Datenhaltung ausser den Phase-1.2-Append-Logs
 
@@ -50,5 +59,10 @@
 
 Die Flows sind absichtlich nicht mehr die fachliche Hauptquelle.
 Wenn wieder Coercion, Capability-Aliase, Device-Erzeugung, Topic-Mapping oder SQL-Fachregeln inline in Function-Nodes auftauchen, ist die Phase-1.1/1.2-Linie wieder gebrochen.
+
+Der lokale Cover-Detailpfad aendert daran nichts:
+- keine Zeitfelder im neutralen MQTT-Vertrag
+- keine zweite Command-Semantik
+- keine neue allgemeine Produktschicht
 
 Wenn diese Themen jetzt hineingezogen wuerden, waere das kein Fortschritt, sondern wieder Scope-Flucht.

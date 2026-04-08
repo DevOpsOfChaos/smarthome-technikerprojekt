@@ -1,76 +1,140 @@
 # Server Schnellstart Phase 1
 
 ## Ziel dieses Dokuments
-Diese Anleitung beschreibt den kleinsten sinnvollen öffentlichen Einstieg in den aktuellen Server-Phase-1-Stand.
 
-## Enthaltene Bausteine
-Der aktuelle Phase-1-Stand umfasst:
+Diese Datei ist der kleinste ehrliche Einstieg in den aktuellen Serverstand.
+
+Sie beschreibt nicht nur, wie der Stack startet, sondern auch:
+- was real laeuft
+- welche URLs und HTTP-Pfade wirklich vorhanden sind
+- was offizieller neutraler Minimalpfad ist
+- was bereits lokale Bedienflaeche ist
+- welche Laufzeitdateien dabei entstehen
+
+## Aktueller realer Serverstand
+
+Der aktuelle Stand besteht aus:
 - Mosquitto
 - Node-RED
-- InfluxDB
-- aktive Phase-1-Flows
-- minimales SQLite-Schema im Repo
-- einen engen offiziellen Minimal-Command-Pfad für `net_erl_01` Relay 1
-- einen engen offiziellen Minimal-Command-Pfad fuer Cover-Devices
+- InfluxDB als mitgestartetem Basisdienst
+- SQLite als lokaler Datei, nicht als eigenem Container
+- aktiven Flows `00_boot`, `10_mqtt_ingest`, `20_device_store`, `30_sqlite_persist`, `40_command_minimal`, `41_cover_automation_detail`, `90_master_diag`
 
-## Wichtige Einordnung
-Dieser Stand ist ein technischer Kernstart, kein vollständiger Produktivstand.
+Wichtige Einordnung:
+- das ist nicht nur ein nackter Ingest-Kern
+- es ist aber auch noch keine breite allgemeine Serveroberflaeche
+- real vorhanden ist ein kleiner, aufrufbarer Serverstand mit engem neutralem Command-Pfad und einer lokalen Cover-Detailseite
 
-Phase 1 soll vor allem zeigen:
-- MQTT-Ingest funktioniert strukturell
-- Geräte- und Masterdaten werden getrennt behandelt
-- der Zustandskern ist sauber vorbereitet
-- der enge Minimalpfad für Command, ACK und State ist nachvollziehbar aufgebaut
+## Was `docker-compose.yml` real macht
 
-## Relevante Dateien
-- `server/docker-compose.yml`
-- `server/.env.example`
-- `server/sqlite/00_schema_phase1.sql`
-- `server/nodered/flows/active/00_boot.json`
-- `server/nodered/flows/active/10_mqtt_ingest.json`
-- `server/nodered/flows/active/20_device_store.json`
-- `server/nodered/flows/active/30_sqlite_persist.json`
-- `server/nodered/flows/active/40_command_minimal.json`
-- `server/nodered/flows/active/90_master_diag.json`
-- `tests/server/phase1_ingest_checkliste.md`
+Beim Start werden nicht nur Container hochgezogen.
+
+Die Compose-Startlogik des Node-RED-Dienstes macht zusaetzlich:
+- Installation von `node-red-node-sqlite`, falls das Paket lokal noch fehlt
+- Initialisierung des SQLite-Schemas aus `server/sqlite/00_schema_phase1.sql`
+- Nachziehen kleiner Phase-1-Migrationen fuer `cover_direction` und `cover_calibrated`
+- Zusammenbau aller JSON-Dateien aus `server/nodered/flows/active/` zu `server/nodered/flows.json`
+- Generierung einer temporaeren Node-RED-Settings-Datei mit `functionGlobalContext` fuer:
+  - `topicRouter`
+  - `deviceStore`
+  - `topicHandlers`
+  - `capabilityHelpers`
+  - `timeHelpers`
+  - `commandMinimal`
+  - `coverAutomation`
+
+Damit ist der reale Startzustand enger und konkreter als ein bloes `docker compose up`.
+
+## Reale Einstiege und ihre Einordnung
+
+### 1. Technischer Grundeinstieg
+
+- `http://localhost:1880`
+
+Das ist der sichtbare Node-RED-Haupteinstieg.
+Hier startet der Stack real.
+
+### 2. Offizielle neutrale HTTP-Minimalpfade
+
+- `POST /api/phase1/net-erl/relay-1`
+- `POST /api/phase1/cover/command`
+
+Diese beiden Pfade sind der offizielle obere Minimalpfad.
+Sie bauen serverseitig `request_id`, publizieren auf `smarthome/device/<device_id>/command`
+und erwarten ACK/State ueber dieselbe Ingest-Kette zurueck.
+
+Fuer Cover gelten dabei real:
+- erlaubte Commands: `open`, `close`, `stop`, `set_position`
+- `set_position` nur bei bekanntem kalibrierten Cover-Zustand
+- bei `cover_calibrated=false` antwortet der Server mit `409 not_calibrated`
+
+### 3. Lokale Bedienflaeche
+
+- `GET /device/<device_id>`
+- `POST /api/phase1/cover/automation/<device_id>`
+
+Diese Pfade existieren real und sind aufrufbar.
+Sie gehoeren aber nicht zum neutralen oberen Vertrag.
+
+Sie bilden eine kleine lokale Cover-Detailseite mit:
+- Statusanzeige fuer ein bekanntes Cover-Geraet
+- genau zwei Zeit/Wert-Slots pro Tag
+- festen Zielwerten `0`, `25`, `50`, `75`, `100`
+- einem Minutentick, der intern denselben offiziellen Cover-Command-Baustein nutzt
+
+Wichtige Grenze:
+- die Detailseite funktioniert nur fuer Cover-Geraete, die bereits im Runtime-State bekannt sind
+- unbekannte oder nicht passende Geraete liefern hier bewusst `404`
+- das ist keine allgemeine Geraeteoberflaeche und keine breite Automationsplattform
+
+## Wichtige Laufzeitdateien
+
+Im aktuellen lokalen Stand entstehen oder werden aktiv benutzt:
+
+- `server/sqlite/smarthome_phase1.db`
+- `server/nodered/flows.json`
+- `server/nodered/cover_automation.json`
+- `server/nodered/node_modules/`
+
+Davon sind insbesondere lokal und nicht Teil des Repo-Inhalts:
+- `server/sqlite/smarthome_phase1.db`
+- `server/nodered/flows.json`
+- `server/nodered/cover_automation.json`
+- `server/nodered/node_modules/`
 
 ## Startablauf
+
 1. in den Ordner `server/` wechseln
-2. lokale Umgebungswerte aus `server/.env.example` übernehmen oder anpassen
-3. `docker compose up -d` ausführen
-4. Node-RED unter `http://localhost:1880` öffnen
-5. Ingest-Checkliste aus `tests/server/phase1_ingest_checkliste.md` verwenden
+2. bei Bedarf `server/.env.example` nach `.env` kopieren und lokale Werte anpassen
+3. `docker compose up -d` ausfuehren
+4. `http://localhost:1880` oeffnen
+5. fuer den neutralen Kern `tests/server/phase1_ingest_checkliste.md` verwenden
+6. fuer die lokale Cover-Detailseite sicherstellen, dass das Cover-Geraet bereits via `meta`, `availability` und `state` im Runtime-State sichtbar ist
 
-## Erwartung an diesen Stand
-Nach dem Start soll vor allem nachvollziehbar sein:
-- welche MQTT-Themen Phase 1 verarbeitet
-- wie Geräte intern modelliert werden
-- dass der Master getrennt vom normalen Gerätepfad geführt wird
-- wie die engen Minimalpfade fuer Relay und Cover aufgebaut sind
-- wie SQLite aus derselben fachlichen Handlerkette beschrieben wird
+## Was nach dem Start real nachvollziehbar sein soll
 
-## Bereits öffentlich belegter Minimalpfad
-Der öffentliche Stand enthält bereits einen real nachgewiesenen engen Bedienpfad für genau einen Fall:
-- HTTP `POST /api/phase1/net-erl/relay-1`
-- MQTT-Command auf dem offiziellen Device-Topic
-- Rücklauf von ACK und State über den realen Master-/Gerätepfad
-- passende SQLite-Belege im Server
+- welche MQTT-Themen Phase 1 wirklich verarbeitet
+- dass Geraete- und Masterpfad getrennt bleiben
+- dass der gemeinsame Runtime-State und die SQLite-Writes aus derselben Handlerkette kommen
+- dass die beiden neutralen HTTP-Minimalpfade real MQTT-Commands erzeugen
+- dass es zusaetzlich eine kleine lokale Cover-Detailseite gibt
 
-Dieser Pfad ist bewusst eng gehalten und dient als belastbare Phase-1-Basis, nicht als fertige allgemeine Command-Welt.
+## Was dieser Stand nicht ist
 
-Zusaetzlich gibt es jetzt einen engen neutralen Cover-Einstieg:
-- HTTP `POST /api/phase1/cover/command`
-- MQTT-Command `open`, `close`, `stop` oder `set_position` auf `smarthome/device/<device_id>/command`
-- serverseitige Respektierung von `cover_calibrated` fuer `set_position`
+Nicht erwarten:
+- breite allgemeine Geraeteoberflaeche
+- allgemeine UI fuer alle Geraeteklassen
+- allgemeine Automationsplattform
+- Wetter, Regeln oder Komfortwelten ueber den engen Cover-Lokalpfad hinaus
+- eine breite Command-Matrix ueber die beiden offiziellen Minimalpfade hinaus
 
-## Was noch nicht erwartet werden sollte
-- vollständige Serveroberfläche
-- komplette Verlaufs- und Logansichten
-- breite allgemeine Bedienpfade für alle Geräteklassen
-- umfassende Komfortfunktionen
+## Weiterfuehrende Dateien
 
-## Weiterführende Dateien
+- `server/README.md`
 - `docs/public/server/01_server_v1_ueberblick.md`
 - `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`
 - `docs/public/server/03_phase1_dateirollen.md`
-- `PROTOKOLL/` für die realen Roundtrip-, Restart- und Recovery-Nachweise
+- `docs/public/server/03_cover_command_und_positionssemantik.md`
+- `docs/public/server/04_master_dynamische_registry_und_cover_pfad.md`
+- `tests/server/phase1_ingest_checkliste.md`
+- `PROTOKOLL_2026-04-08_server_inventur_und_produktflaeche.txt`

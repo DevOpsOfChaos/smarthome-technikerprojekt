@@ -1,0 +1,146 @@
+PROTOKOLL 2026-04-08 - Server-Inventur und Produktflaeche
+
+Datum: 2026-04-08
+Ziel: den aktuellen realen Serverstand fachlich und praktisch sauber einordnen, statt weiter unscharf von "Phase 1" zu sprechen
+
+1. Gepruefte Quellen
+
+Pflichtlektuere privat:
+- docs/uebergaben/2026-04-08_chatwechsel_geraeteprioritaet_und_2_tage_fokus.md
+- ai/kontext/2026-04-08_prioritaeten_geraete_und_arbeitsmodus.md
+- docs/planung/2026-04-08_2_tage_fokusplan_vorzeigbares_system.md
+- ai/kontext/00_master_kurzfassung.md
+- ai/fehlerlernen/00_zusammenfassung_codex_fehlerlernen.md
+
+Pflichtlektuere oeffentlich:
+- README.md
+- server/README.md
+- docs/public/04_server_schnellstart_phase1.md
+- docs/public/server/01_server_v1_ueberblick.md
+- docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md
+- docs/public/server/03_phase1_dateirollen.md
+- server/docker-compose.yml
+- tests/server/phase1_ingest_checkliste.md
+
+Zusaetzlich geprueft:
+- docs/public/server/03_cover_command_und_positionssemantik.md
+- docs/public/server/04_master_dynamische_registry_und_cover_pfad.md
+- server/nodered/lib/*.js
+- server/nodered/flows/active/*.json
+- server/sqlite/00_schema_phase1.sql
+- die serverrelevanten Protokolle vom 2026-04-08
+- altes Referenzrepo gezielt: README.md, server/README.md, docs/20_systemneutrale_master_schnittstelle.md, docs/31_basiswert_semantik_und_oberer_konfigvertrag.md
+
+2. Reale Inventur
+
+2.1 Container und Dienste
+- mosquitto
+- nodered
+- influxdb
+- SQLite als lokale Datei, kein eigener Container
+
+2.2 Reale Startlogik in docker-compose.yml
+- installiert bei Bedarf node-red-node-sqlite
+- initialisiert das SQLite-Schema
+- zieht kleine Migrationen fuer cover_direction und cover_calibrated nach
+- baut alle aktiven Flow-Dateien zu server/nodered/flows.json zusammen
+- erzeugt einen Node-RED-Settings-Kontext mit topicRouter, deviceStore, topicHandlers, capabilityHelpers, timeHelpers, commandMinimal und coverAutomation
+
+2.3 Aktiv zusammengefuehrte Flows
+- 00_boot
+- 10_mqtt_ingest
+- 20_device_store
+- 30_sqlite_persist
+- 40_command_minimal
+- 41_cover_automation_detail
+- 90_master_diag
+
+2.4 Reale HTTP-Einstiege
+Offiziell neutral:
+- POST /api/phase1/net-erl/relay-1
+- POST /api/phase1/cover/command
+
+Lokal / projektpraktisch:
+- GET /device/:device_id
+- POST /api/phase1/cover/automation/:device_id
+
+2.5 Reale MQTT-Einstiege
+Geraete:
+- smarthome/device/+/meta
+- smarthome/device/+/availability
+- smarthome/device/+/state
+- smarthome/device/+/event
+- smarthome/device/+/ack
+
+Master:
+- smarthome/master/+/status
+- smarthome/master/+/event
+
+Command-Ausgabe:
+- smarthome/device/<device_id>/command
+
+2.6 Reale Laufzeitdateien
+- server/sqlite/smarthome_phase1.db
+- server/nodered/flows.json
+- server/nodered/cover_automation.json
+- server/nodered/node_modules/
+
+3. Lokale Realpruefung
+
+Der Stack lief lokal bereits real:
+- Node-RED auf http://localhost:1880
+- Mosquitto auf localhost:1883
+- InfluxDB auf localhost:8086
+
+Real geprueft:
+- GET http://localhost:1880 -> 200
+- GET http://localhost:1880/device/NET-ZRL-TEST-INVENTORY -> 200 nach retained meta/availability/state fuer ein Cover-Testgeraet
+- POST /api/phase1/cover/command mit set_position -> 202 und MQTT-Publish auf smarthome/device/NET-ZRL-TEST-INVENTORY/command
+- POST /api/phase1/net-erl/relay-1 -> 202 und MQTT-Publish auf smarthome/device/net_erl_test_inventory/command
+- POST /api/phase1/cover/command bei cover_calibrated=false -> 409 not_calibrated und kein MQTT-Publish
+- POST /api/phase1/cover/automation/NET-ZRL-TEST-INVENTORY -> 200 und lokales Schreiben in cover_automation.json
+
+Die lokalen Testartefakte wurden danach wieder entfernt bzw. zurueckgesetzt.
+
+4. Fachliche Einordnung
+
+Der aktuelle Serverstand ist nicht mehr ehrlich als "nur Kern" zu beschreiben.
+
+Das waere zu klein geredet.
+
+Gleichzeitig ist es falsch, ihn schon als breite Produktoberflaeche zu verkaufen.
+
+Die treffende Einordnung ist:
+- kleiner, real nutzbarer Serverstand
+- mit belastbarem technischem Kern
+- mit engen offiziellen neutralen Minimalpfaden
+- und mit einer zusaetzlichen lokalen Cover-Bedienflaeche
+
+5. Doku-Luecken vor diesem Lauf
+
+Vor diesem Lauf war oeffentlich nicht sauber genug sichtbar:
+- dass Flow 41 aktiv ist
+- dass /device/:device_id real existiert
+- dass /api/phase1/cover/automation/:device_id real existiert
+- dass cover_automation.json eine echte lokale Laufzeitdatei ist
+- dass der Stand zwar keine breite UI hat, aber eben auch nicht mehr nur "kein UI" ist
+
+6. Umgesetzte Korrektur
+
+Geaendert wurden:
+- server/README.md
+- docs/public/04_server_schnellstart_phase1.md
+- docs/public/server/01_server_v1_ueberblick.md
+- docs/public/server/03_phase1_dateirollen.md
+
+Neu angelegt:
+- PROTOKOLL_2026-04-08_server_inventur_und_produktflaeche.txt
+
+7. Ergebnis
+
+Der oeffentliche Stand ist jetzt ehrlicher lesbar:
+- technischer Kern klar benannt
+- offizielle neutrale Einstiege klar benannt
+- lokale Cover-Detailseite und lokaler Save-Pfad klar als solche benannt
+- Laufzeitdateien klar benannt
+- Grenze gegen breite UI und allgemeine Automationsplattform klar benannt

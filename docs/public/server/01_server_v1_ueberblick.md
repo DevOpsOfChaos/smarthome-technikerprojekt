@@ -11,7 +11,7 @@ Phase 1 zieht nur den fachlichen Kern hoch:
 - separater Masterzustand
 - minimales SQLite-Schema als spaetere Persistenzbasis
 
-Nicht Teil dieser Stufe sind breite UI, Diagramme, eine allgemeine Command-Welt, Wetter oder Automationen.
+Nicht Teil dieser Stufe sind breite UI, Diagramme, eine allgemeine Command-Welt, Wetter oder eine allgemeine Automationsplattform.
 
 ## Real bestaetigter Stand
 
@@ -26,6 +26,42 @@ Auf `main` ist dieser Zuschnitt nicht nur beschrieben, sondern auf dem realen Pf
 
 Die passenden Detailnachweise liegen in `PROTOKOLL/` und bauen auf derselben Phase-1-Linie auf. Diese Doku behauptet daher keinen Zukunftswunsch, sondern beschreibt den real bestaetigten Kern.
 
+## Aktueller realer Zuschnitt
+
+Der aktuelle Serverstand ist fachlich in vier Schichten zu lesen:
+
+### 1. Technischer Kern
+
+- MQTT-Ingest fuer `meta`, `availability`, `state`, `event`, `ack`
+- separater Masterpfad fuer `status` und `event`
+- gemeinsamer Runtime-State in Node-RED
+- zentrale SQLite-Writes aus derselben Handlerkette
+
+### 2. Offizieller neutraler Minimalpfad
+
+- `POST /api/phase1/net-erl/relay-1`
+- `POST /api/phase1/cover/command`
+
+Diese beiden Pfade sind der offizielle obere Server-Minimalpfad.
+Sie gehoeren zur neutralen Serverlinie.
+
+### 3. Lokale Bedienflaeche
+
+Zusaetzlich existiert real:
+- `GET /device/<device_id>`
+- `POST /api/phase1/cover/automation/<device_id>`
+
+Diese Pfade bilden eine kleine lokale Cover-Detailseite mit zwei Zeit/Wert-Slots.
+Sie sind real nutzbar, aber nicht Teil des neutralen oberen Vertrags.
+
+### 4. Lokale Laufzeitdateien
+
+- `server/sqlite/smarthome_phase1.db`
+- `server/nodered/flows.json`
+- `server/nodered/cover_automation.json`
+
+Diese Dateien sind Teil des lokalen Laufzeitstands, nicht der neutralen Serveroberflaeche.
+
 ## Minimale Bausteine
 
 ### Laufzeitbasis
@@ -33,6 +69,7 @@ Die passenden Detailnachweise liegen in `PROTOKOLL/` und bauen auf derselben Pha
 - `server/docker-compose.yml` startet nur Mosquitto, Node-RED und InfluxDB
 - `server/.env.example` haelt nur die noetigen Ports und Basiswerte
 - SQLite bleibt eine lokale Datei und braucht keinen eigenen Dienst
+- die Node-RED-Startlogik baut die aktiven Flows zu `flows.json` zusammen und zieht das SQLite-Schema samt kleiner Phase-1-Migrationen hoch
 
 ### Node-RED-Struktur
 
@@ -40,6 +77,7 @@ Die passenden Detailnachweise liegen in `PROTOKOLL/` und bauen auf derselben Pha
 - `10_mqtt_ingest` abonniert nur die Pflicht-Topics und verteilt sie weiter
 - `20_device_store` pflegt das Geraeteobjekt
 - `40_command_minimal` baut die engen offiziellen Command-Einstiege fuer `net_erl` Relay 1 und Cover
+- `41_cover_automation_detail` liefert die lokale Cover-Detailseite, den lokalen Save-Pfad und den kleinen Minutentick
 - `90_master_diag` haelt Masterstatus und Masterevents getrennt
 
 ### Fachliche Mitte
@@ -75,6 +113,17 @@ Masterdaten laufen bewusst ausserhalb dieser Geraeteobjekte.
 - Payload fuer `set_relay` auf `relay_1` oder fuer die Cover-Kommandos `open`, `close`, `stop`, `set_position`
 - `set_position` respektiert serverseitig den letzten bekannten Zustand `cover_calibrated`
 
+### Lokaler Cover-Bedienpfad
+
+- `GET /device/<device_id>`
+- `POST /api/phase1/cover/automation/<device_id>`
+- lokale Speicherung in `server/nodered/cover_automation.json`
+- Ausfuehrung ueber denselben Cover-Command-Baustein wie der offizielle Cover-Minimalpfad
+
+Wichtig:
+- dieser Pfad ist projektpraktisch und lokal
+- er erweitert nicht den neutralen MQTT-Vertrag um Zeitfelder oder Scheduling-Topics
+
 ### Master
 
 - `smarthome/master/+/status`
@@ -87,6 +136,7 @@ Der alte Fehler war nicht fehlende Features, sondern fehlende Disziplin. Phase 1
 - State bleibt Hauptwahrheit
 - Event und ACK ergaenzen nur
 - der Server erzeugt Commands nur ueber einen engen offiziellen Pfad
+- der zusaetzliche lokale Cover-Bedienpfad bleibt bewusst ausserhalb dieses neutralen oberen Vertrags
 - unbekannte Geraete duerfen bei validem Meta-, Availability- oder State-Pfad auto-angelegt werden
 - partielle State-Nachrichten duerfen keine vorhandenen Felder loeschen
 
@@ -94,9 +144,16 @@ Das ist klein genug, um testbar zu bleiben, und stabil genug, um spaeter Persist
 
 ## Bewusste Grenze dieser Stufe
 
-Real bestaetigt ist ein enger, belastbarer Kern.
+Real bestaetigt ist ein kleiner, belastbarer Serverstand.
+
+Er ist mehr als nur Kern, weil:
+- die offiziellen HTTP-Minimalpfade real aufrufbar sind
+- eine kleine lokale Cover-Detailseite real existiert
+
+Er ist aber noch keine breite Produktflaeche.
 Nicht bestaetigt ist damit automatisch schon:
 
 - eine breite Command-Matrix ueber die engen Relay- und Cover-Pfade hinaus
-- eine voll ausgebaute UI oder Bedienoberflaeche
+- eine voll ausgebaute UI fuer alle Geraeteklassen
+- eine allgemeine Automationsplattform
 - Timeseries- oder Komfortwelten ausserhalb des Phase-1-Kerns
