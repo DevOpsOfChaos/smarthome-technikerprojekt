@@ -1,20 +1,63 @@
 
 #include <Arduino.h>
 #include <ShNodeProvisioning.h>
+#include <WiFi.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#if __has_include(<esp_arduino_version.h>)
+  #include <esp_arduino_version.h>
+#endif
+
+#ifndef ESP_ARDUINO_VERSION_MAJOR
+  #define ESP_ARDUINO_VERSION_MAJOR 2
+#endif
+
 #include "../../../include/HardwarePinStandard.h"
+#include "../../../include/ProjectVersion.h"
+#include "../../../lib/sh_protocol/src/DeviceTypes.h"
+#include "../../../lib/sh_protocol/src/Protocol.h"
 
 namespace {
 
 constexpr char DATEI_GERAET[] = "NET-ZRL";
 constexpr char DATEI_VERSION[] = "0.4.0";
+const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+#ifndef NET_ZRL_DEVICE_ID
+#define NET_ZRL_DEVICE_ID "NET-ZRL-001"
+#endif
+
+#ifndef NET_ZRL_DEVICE_NAME
+#define NET_ZRL_DEVICE_NAME "NET-ZRL Cover"
+#endif
+
+#ifndef NET_ZRL_FW_VARIANT
+#define NET_ZRL_FW_VARIANT "net_zrl_base"
+#endif
 
 #ifndef NET_ZRL_DEBUG_ENABLED
 #define NET_ZRL_DEBUG_ENABLED 1
+#endif
+
+#ifndef NET_ZRL_WLAN_CHANNEL
+#define NET_ZRL_WLAN_CHANNEL 6
+#endif
+
+#ifndef NET_ZRL_HELLO_RETRY_INTERVAL_MS
+#define NET_ZRL_HELLO_RETRY_INTERVAL_MS 5000UL
+#endif
+
+#ifndef NET_ZRL_HEARTBEAT_INTERVAL_MS
+#define NET_ZRL_HEARTBEAT_INTERVAL_MS 20000UL
+#endif
+
+#ifndef NET_ZRL_BOOT_COUNTER
+#define NET_ZRL_BOOT_COUNTER 1U
 #endif
 
 #ifndef NET_ZRL_RELAY_UP_PIN
@@ -62,6 +105,19 @@ constexpr char DATEI_VERSION[] = "0.4.0";
 #endif
 
 constexpr bool DEBUG_AKTIV = NET_ZRL_DEBUG_ENABLED != 0;
+constexpr char DEVICE_ID[] = NET_ZRL_DEVICE_ID;
+constexpr char DEVICE_NAME[] = NET_ZRL_DEVICE_NAME;
+constexpr char FW_VARIANT[] = NET_ZRL_FW_VARIANT;
+constexpr uint16_t DEVICE_CAPS =
+    (uint16_t)(SH_CAP_RELAY | SH_CAP_RELAY2 | SH_CAP_COVER | SH_CAP_MULTIBUTTON);
+constexpr uint8_t DEVICE_META_SCHEMA_VERSION = SH_META_SCHEMA_VERSION_CURRENT;
+constexpr uint8_t DEVICE_CONTROL_MODE = SH_CONTROL_MODE_COVER;
+constexpr uint8_t DEVICE_CONFIG_PROFILE = SH_PROFILE_COVER_BASIC;
+constexpr uint8_t DEVICE_REPORTING_MODE = SH_REPORTING_HYBRID;
+constexpr int WLAN_KANAL = NET_ZRL_WLAN_CHANNEL;
+constexpr unsigned long HELLO_RETRY_INTERVAL_MS = NET_ZRL_HELLO_RETRY_INTERVAL_MS;
+constexpr unsigned long HEARTBEAT_INTERVAL_MS = NET_ZRL_HEARTBEAT_INTERVAL_MS;
+constexpr uint32_t DEVICE_BOOT_COUNTER = NET_ZRL_BOOT_COUNTER;
 constexpr int PIN_RELAY_A = NET_ZRL_RELAY_UP_PIN;
 constexpr int PIN_RELAY_B = NET_ZRL_RELAY_DOWN_PIN;
 constexpr bool RELAY_A_ACTIVE_HIGH = NET_ZRL_RELAY_UP_ACTIVE_HIGH != 0;
@@ -147,7 +203,12 @@ struct RuntimeState {
     bool isCalibrated;
     bool setupApActive;
     bool restartPending;
+    bool funkBereit;
+    bool masterBound;
+    bool stateReportOffen;
+    bool movementTargetsIntermediatePosition;
     int16_t coverPosition;
+    int16_t movementTargetPosition;
     uint32_t travelTimeUpMs;
     uint32_t travelTimeDownMs;
     uint32_t candidateTravelTimeUpMs;
@@ -159,8 +220,18 @@ struct RuntimeState {
     unsigned long movementStartedAtMs;
     unsigned long movementDeadlineAtMs;
     unsigned long restartRequestedAtMs;
+    unsigned long letztesHelloMs;
+    unsigned long letzterHeartbeatMs;
+    unsigned long letzterStateMs;
     int16_t movementStartPosition;
     bool movementTargetsEndPosition;
+    uint8_t naechsteSeq;
+    bool lastCmdAckValid;
+    bool lastCfgAckValid;
+    uint8_t lastCmdSeq;
+    uint8_t lastCfgSeq;
+    uint8_t lastCmdAckStatus;
+    uint8_t lastCfgAckStatus;
 
     unsigned long lastButtonPollMs;
     bool upButtonStableActive;
@@ -306,6 +377,132 @@ void formatMacText(const uint8_t mac[6], bool isValid, char* buffer, size_t buff
 
 bool parseMacText(const char* text, uint8_t outMac[6]) {
     return SmartHome::ShNodeProvisioning::NodeProvisioningController::parseMacText(text, outMac);
+}
+
+void copyText(char* target, size_t targetSize, const char* source) {
+    if (!target || targetSize == 0U) return;
+    if (!source) {
+        target[0] = '\0';
+        return;
+    }
+    strncpy(target, source, targetSize - 1U);
+    target[targetSize - 1U] = '\0';
+}
+
+bool istBroadcastMac(const uint8_t* mac) {
+    return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
+}
+
+int16_t begrenzePosition(int32_t position) {
+    if (position < 0) return 0;
+    if (position > 100) return 100;
+    return (int16_t)position;
+}
+
+uint8_t coverStateCodeAusRuntime() {
+    if (runtime.coverState != CoverState::Moving) return SH_COVER_STATE_STOPPED;
+    if (runtime.coverDirection == CoverDirection::Up) return SH_COVER_STATE_MOVING_UP;
+    if (runtime.coverDirection == CoverDirection::Down) return SH_COVER_STATE_MOVING_DOWN;
+    return SH_COVER_STATE_STOPPED;
+}
+
+bool darfFunkAktivSein() {
+    return !runtime.setupMode;
+}
+
+unsigned long stateIntervalMs() {
+    return (unsigned long)sanitizeStatusSendInterval(runtime.statusSendIntervalS) * 1000UL;
+}
+
+void setzeStateReportOffen() {
+    runtime.stateReportOffen = true;
+}
+
+void baueSensorMask(char* target, size_t targetSize) {
+    if (!target || targetSize == 0U) return;
+    SmartHome::safeCopyMask("XXXXXXXXXX", target, targetSize, 'X');
+}
+
+void baueInputMask(char* target, size_t targetSize) {
+    if (!target || targetSize == 0U) return;
+    SmartHome::safeCopyMask("BTN3X", target, targetSize, 'X');
+}
+
+const uint8_t* holeHelloZielMac() {
+    return runtime.masterMacValid ? runtime.masterMac : BROADCAST_MAC;
+}
+
+bool stellePeerSicher(const uint8_t* mac) {
+    if (mac == nullptr) return false;
+    if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
+    if (esp_now_is_peer_exist(mac)) return true;
+
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, mac, 6);
+    peerInfo.channel = (uint8_t)WLAN_KANAL;
+    peerInfo.encrypt = false;
+
+    const esp_err_t err = esp_now_add_peer(&peerInfo);
+    if (err != ESP_OK) {
+        logf("WARN", "Peer konnte nicht angelegt werden (err=%d)", (int)err);
+        return false;
+    }
+    return true;
+}
+
+bool sendePaketMitOptionen(
+    const uint8_t* zielMac,
+    uint8_t msgType,
+    const void* payload,
+    size_t payloadLen,
+    const char* label,
+    uint8_t flags,
+    uint8_t* verwendeteSeq)
+{
+    if (!runtime.funkBereit || zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
+    if (!stellePeerSicher(zielMac)) return false;
+
+    uint8_t packet[SH_ESPNOW_MAX_BYTES] = {0};
+    SmartHome::MsgHeader header = {};
+    const uint8_t seq = runtime.naechsteSeq++;
+    SmartHome::fillHeader(header, msgType, seq, flags, (uint16_t)payloadLen);
+
+    uint8_t* payloadBuffer = packet + SH_HEADER_SIZE;
+    if (payloadLen > 0U && payload != nullptr) {
+        memcpy(payloadBuffer, payload, payloadLen);
+    }
+
+    SmartHome::finalizePacketCrc(header, payloadBuffer);
+    memcpy(packet, &header, sizeof(header));
+
+    const esp_err_t err = esp_now_send(zielMac, packet, SH_HEADER_SIZE + payloadLen);
+    if (err != ESP_OK) {
+        logf("WARN", "%s konnte nicht gesendet werden (err=%d)", label ? label : "ESP-NOW", (int)err);
+        return false;
+    }
+
+    if (verwendeteSeq != nullptr) {
+        *verwendeteSeq = seq;
+    }
+    return true;
+}
+
+bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
+    return sendePaketMitOptionen(zielMac, msgType, payload, payloadLen, label, 0U, nullptr);
+}
+
+bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
+    SmartHome::AckPayload payload = {};
+    payload.ack_seq = ackSeq;
+    payload.ack_msg_type = ackMsgType;
+    payload.status = status;
+    return sendePaket(zielMac, SH_MSG_ACK, &payload, sizeof(payload), "ACK");
+}
+
+bool senderIstBekannterMaster(const uint8_t* senderMac) {
+    return runtime.masterMacValid &&
+           senderMac != nullptr &&
+           memcmp(senderMac, runtime.masterMac, sizeof(runtime.masterMac)) == 0;
 }
 
 String htmlEscapeLocal(const String& text) {
@@ -766,6 +963,112 @@ bool speicherePersistenzMitRollback(
     return false;
 }
 
+bool speichereRuntimeStandMitRollback() {
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+    NetZrlSetupSnapshot deviceSnapshot = {};
+    holeSetupSnapshot(basisSnapshot, deviceSnapshot);
+    return speicherePersistenzMitRollback(basisSnapshot, deviceSnapshot);
+}
+
+bool uebernehmeMasterMacNachHelloAck(const uint8_t senderMac[6]) {
+    if (senderMac == nullptr || !SmartHome::isValidMac(senderMac)) return false;
+
+    const bool geaendert = !runtime.masterMacValid ||
+                           memcmp(runtime.masterMac, senderMac, sizeof(runtime.masterMac)) != 0;
+    setStoredMasterMac(senderMac);
+    runtime.masterBound = true;
+
+    if (!geaendert) {
+        return true;
+    }
+
+    if (!speichereRuntimeStandMitRollback()) {
+        logf("WARN", "Master-MAC aus HELLO_ACK konnte nicht persistiert werden");
+        return false;
+    }
+
+    return true;
+}
+
+bool sendeHello() {
+    if (!darfFunkAktivSein()) return false;
+
+    SmartHome::HelloPayload payload = {};
+    char sensorMask[SH_SENSOR_MASK_LEN] = {0};
+    char inputMask[SH_INPUT_MASK_LEN] = {0};
+
+    baueSensorMask(sensorMask, sizeof(sensorMask));
+    baueInputMask(inputMask, sizeof(inputMask));
+
+    copyText(payload.device_id, sizeof(payload.device_id), DEVICE_ID);
+    copyText(payload.device_name, sizeof(payload.device_name), DEVICE_NAME);
+    payload.device_class = SH_CLASS_NET_ZRL;
+    payload.caps_hi = (uint8_t)((DEVICE_CAPS >> 8) & 0xFFU);
+    payload.caps_lo = (uint8_t)(DEVICE_CAPS & 0xFFU);
+    payload.power_type = SH_POWER_MAINS;
+    payload.fw_version = 1U;
+    payload.boot_counter = DEVICE_BOOT_COUNTER;
+    payload.meta_schema_version = DEVICE_META_SCHEMA_VERSION;
+    payload.control_mode = DEVICE_CONTROL_MODE;
+    payload.config_profile = DEVICE_CONFIG_PROFILE;
+    payload.reporting_mode = DEVICE_REPORTING_MODE;
+    copyText(payload.sensor_mask, sizeof(payload.sensor_mask), sensorMask);
+    copyText(payload.input_mask, sizeof(payload.input_mask), inputMask);
+
+    runtime.letztesHelloMs = millis();
+    return sendePaket(holeHelloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
+}
+
+bool sendeHeartbeat() {
+    if (!runtime.masterBound || !darfFunkAktivSein()) return false;
+
+    SmartHome::HeartbeatPayload payload = {};
+    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+    payload.uptime_s = millis() / 1000UL;
+
+    if (!sendePaket(runtime.masterMac, SH_MSG_HEARTBEAT, &payload, sizeof(payload), "HEARTBEAT")) {
+        return false;
+    }
+
+    runtime.letzterHeartbeatMs = millis();
+    return true;
+}
+
+bool sendeState() {
+    if (!runtime.masterBound || !darfFunkAktivSein()) return false;
+
+    SmartHome::ZrlConfigStateReportPayload payload = {};
+    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+    payload.relay_1 = runtime.relayAActive ? 1U : 0U;
+    payload.relay_2 = runtime.relayBActive ? 1U : 0U;
+    payload.cover_mode = 1U;
+    payload.cover_state = coverStateCodeAusRuntime();
+    payload.cover_position = (uint8_t)begrenzePosition(runtime.coverPosition);
+    payload.cover_calibrated = runtime.isCalibrated ? 1U : 0U;
+    payload.fault = 0U;
+    payload.report_interval_s = (uint16_t)sanitizeStatusSendInterval(runtime.statusSendIntervalS);
+
+    if (!sendePaket(runtime.masterMac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
+        return false;
+    }
+
+    runtime.stateReportOffen = false;
+    runtime.letzterStateMs = millis();
+    return true;
+}
+
+bool sendeCoverEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16_t param2) {
+    if (!runtime.masterBound || !darfFunkAktivSein()) return false;
+
+    SmartHome::EventReportPayload payload = {};
+    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+    payload.event_type = eventType;
+    payload.trigger = trigger;
+    payload.param1 = param1;
+    payload.param2 = param2;
+    return sendePaket(runtime.masterMac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
+}
+
 void setzeRelaisNeutral(const char* grund) {
     schreibePin(PIN_RELAY_A, false, RELAY_A_ACTIVE_HIGH);
     schreibePin(PIN_RELAY_B, false, RELAY_B_ACTIVE_HIGH);
@@ -824,10 +1127,14 @@ void stoppeFahrt(const char* grund) {
     aktualisierePositionsschaetzung(millis());
     setzeRelaisNeutral(grund);
     runtime.coverState = CoverState::Stopped;
+    runtime.coverDirection = CoverDirection::None;
     runtime.movementStartedAtMs = 0UL;
     runtime.movementDeadlineAtMs = 0UL;
     runtime.movementStartPosition = runtime.coverPosition;
     runtime.movementTargetsEndPosition = false;
+    runtime.movementTargetsIntermediatePosition = false;
+    runtime.movementTargetPosition = runtime.coverPosition;
+    setzeStateReportOffen();
 }
 
 void setzePositionAufEndlage(CoverDirection direction) {
@@ -843,8 +1150,46 @@ bool starteFahrt(CoverDirection direction, const char* grund, unsigned long auto
     runtime.movementDeadlineAtMs = autoStopMs > 0UL ? runtime.movementStartedAtMs + autoStopMs : 0UL;
     runtime.movementStartPosition = runtime.isCalibrated ? runtime.coverPosition : 0;
     runtime.movementTargetsEndPosition = targetsEnd;
+    runtime.movementTargetsIntermediatePosition = false;
+    runtime.movementTargetPosition = runtime.coverPosition;
     setzeRelaisFuerRichtung(direction, grund);
+    setzeStateReportOffen();
     return true;
+}
+
+bool startePositionsfahrt(int16_t zielPosition, const char* grund) {
+    if (!runtime.isCalibrated) return false;
+    if (runtime.coverState == CoverState::Moving) return false;
+
+    aktualisierePositionsschaetzung(millis());
+    const int16_t aktuellePosition = begrenzePosition(runtime.coverPosition);
+    const int16_t gekapptesZiel = begrenzePosition(zielPosition);
+    if (gekapptesZiel == aktuellePosition) {
+        runtime.coverPosition = gekapptesZiel;
+        setzeStateReportOffen();
+        return true;
+    }
+
+    const CoverDirection richtung =
+        gekapptesZiel > aktuellePosition ? CoverDirection::Up : CoverDirection::Down;
+    const uint32_t fahrzeitMs = fahrzeitFuerRichtung(richtung);
+    if (!isTravelTimeValid(fahrzeitMs)) return false;
+
+    const uint32_t deltaProzent = (uint32_t)abs((int)(gekapptesZiel - aktuellePosition));
+    unsigned long segmentMs = (unsigned long)((fahrzeitMs * deltaProzent) / 100UL);
+    if (segmentMs == 0UL) segmentMs = 1UL;
+
+    if (!starteFahrt(richtung, grund, segmentMs, false)) return false;
+
+    runtime.movementTargetsIntermediatePosition = true;
+    runtime.movementTargetPosition = gekapptesZiel;
+    return true;
+}
+
+void stoppeFahrtMitEvent(const char* grund, uint8_t trigger) {
+    if (runtime.coverState != CoverState::Moving) return;
+    stoppeFahrt(grund);
+    sendeCoverEvent(SH_EVENT_COVER_STOP, trigger, (uint8_t)begrenzePosition(runtime.coverPosition), 0U);
 }
 
 void setzeKalibrierungUngueltig() {
@@ -853,6 +1198,7 @@ void setzeKalibrierungUngueltig() {
     holeSetupSnapshot(previousBasisSnapshot, previousDeviceSnapshot);
 
     loescheKalibrierungszustandImRuntime();
+    setzeStateReportOffen();
 
     if (!speicherePersistenzMitRollback(previousBasisSnapshot, previousDeviceSnapshot)) {
         logf("WARN", "Kalibrierung konnte nicht geloescht werden, Vorzustand wiederhergestellt");
@@ -863,6 +1209,11 @@ void enterSetupMode() {
     if (runtime.setupMode || runtime.coverState == CoverState::Moving) return;
     setzeLedMode(LedMode::Off);
     setzeLedPins(false, false);
+    runtime.masterBound = false;
+    if (runtime.funkBereit) {
+        esp_now_deinit();
+        runtime.funkBereit = false;
+    }
     nodeProvisioning.enterSetupMode();
     if (runtime.setupMode && runtime.setupApActive) {
         logf("INFO", "Setup-Modus aktiviert");
@@ -873,10 +1224,15 @@ void enterSetupMode() {
 
 void exitSetupMode(const char* grund) {
     nodeProvisioning.exitSetupMode(grund);
+    runtime.masterBound = false;
+    runtime.funkBereit = false;
+    runtime.letztesHelloMs = 0UL;
+    runtime.letzterHeartbeatMs = 0UL;
     if (!runtime.calibrationMode && !hatAusstehendeAktion()) {
         setzeLedMode(LedMode::Off);
         setzeLedPins(false, false);
     }
+    setzeStateReportOffen();
     logf("INFO", "Setup-Modus beendet (%s)", grund ? grund : "ohne grund");
 }
 
@@ -900,6 +1256,7 @@ void beendeKalibriermodus(const char* grund, bool messwerteUebernehmen) {
     runtime.calibrationMode = false;
     runtime.calibrationPhase = CalibrationPhase::Idle;
     berechneKalibrierstatus();
+    setzeStateReportOffen();
     if (!speicherePersistenzMitRollback(previousBasisSnapshot, previousDeviceSnapshot)) {
         runtime.calibrationMode = false;
         runtime.calibrationPhase = CalibrationPhase::Idle;
@@ -908,6 +1265,10 @@ void beendeKalibriermodus(const char* grund, bool messwerteUebernehmen) {
 
     if (!runtime.setupMode && !hatAusstehendeAktion()) {
         setzeLedMode(LedMode::Off);
+    }
+
+    if (messwerteUebernehmen && runtime.isCalibrated) {
+        sendeCoverEvent(SH_EVENT_COVER_CALIB_DONE, SH_TRIGGER_MANUAL_BUTTON, 100U, 0U);
     }
 }
 
@@ -926,6 +1287,8 @@ void fuehreFactoryResetAus() {
     runtime.coverDirection = CoverDirection::None;
     runtime.coverPosition = 0;
     runtime.isCalibrated = false;
+    runtime.masterBound = false;
+    setzeStateReportOffen();
 
     if (!nodeProvisioning.clearStoredSettings()) {
         wendeSetupSnapshotAn(previousBasisSnapshot, previousDeviceSnapshot);
@@ -947,6 +1310,8 @@ void starteKalibriermodus() {
     runtime.candidateTravelTimeUpMs = 0UL;
     runtime.candidateTravelTimeDownMs = 0UL;
     setzeLedMode(LedMode::BothBlink);
+    setzeStateReportOffen();
+    sendeCoverEvent(SH_EVENT_COVER_CALIB_START, SH_TRIGGER_MANUAL_BUTTON, 0U, 0U);
 
     if (!starteFahrt(
             CoverDirection::Up,
@@ -1073,28 +1438,34 @@ void tickLeds() {
     setzeLedPins(upOn, downOn);
 }
 
-void starteNormaleFahrtNachOben(const char* grund) {
+bool starteNormaleFahrtNachOben(const char* grund, uint8_t trigger = SH_TRIGGER_MANUAL_BUTTON) {
     unsigned long autoStopMs = 0UL;
     if (runtime.isCalibrated && isTravelTimeValid(runtime.travelTimeUpMs)) {
         autoStopMs = (runtime.travelTimeUpMs * 12UL) / 10UL;
     }
 
-    if (starteFahrt(CoverDirection::Up, grund, autoStopMs, autoStopMs > 0UL) &&
-        !runtime.setupMode && !runtime.calibrationMode) {
+    const bool gestartet =
+        starteFahrt(CoverDirection::Up, grund, autoStopMs, autoStopMs > 0UL);
+    if (gestartet && !runtime.setupMode && !runtime.calibrationMode) {
         setzeLedMode(LedMode::UpOn);
+        sendeCoverEvent(SH_EVENT_COVER_UP, trigger, (uint8_t)begrenzePosition(runtime.coverPosition), 100U);
     }
+    return gestartet;
 }
 
-void starteNormaleFahrtNachUnten(const char* grund) {
+bool starteNormaleFahrtNachUnten(const char* grund, uint8_t trigger = SH_TRIGGER_MANUAL_BUTTON) {
     unsigned long autoStopMs = 0UL;
     if (runtime.isCalibrated && isTravelTimeValid(runtime.travelTimeDownMs)) {
         autoStopMs = (runtime.travelTimeDownMs * 12UL) / 10UL;
     }
 
-    if (starteFahrt(CoverDirection::Down, grund, autoStopMs, autoStopMs > 0UL) &&
-        !runtime.setupMode && !runtime.calibrationMode) {
+    const bool gestartet =
+        starteFahrt(CoverDirection::Down, grund, autoStopMs, autoStopMs > 0UL);
+    if (gestartet && !runtime.setupMode && !runtime.calibrationMode) {
         setzeLedMode(LedMode::DownOn);
+        sendeCoverEvent(SH_EVENT_COVER_DOWN, trigger, (uint8_t)begrenzePosition(runtime.coverPosition), 0U);
     }
+    return gestartet;
 }
 
 bool parseUIntValue(const char* text, uint32_t& outValue) {
@@ -1195,6 +1566,7 @@ void verarbeiteSetupSet(const char* commandPrefix, const char* valueText) {
             return;
         }
         setStoredMasterMac(parsedMac);
+        runtime.masterBound = false;
         if (!speicherePersistenzMitRollback(previousBasisSnapshot, previousDeviceSnapshot)) {
             Serial.println("Speichern fehlgeschlagen, Vorzustand wiederhergestellt.");
             return;
@@ -1244,6 +1616,7 @@ void verarbeiteSetupSet(const char* commandPrefix, const char* valueText) {
     }
 
     berechneKalibrierstatus();
+    setzeStateReportOffen();
     if (!speicherePersistenzMitRollback(previousBasisSnapshot, previousDeviceSnapshot)) {
         Serial.println("Speichern fehlgeschlagen, Vorzustand wiederhergestellt.");
         return;
@@ -1275,7 +1648,7 @@ void verarbeiteBefehl(char* line) {
         } else if (runtime.calibrationMode) {
             beendeKalibriermodus("serieller kalibrierabbruch", false);
         } else {
-            stoppeFahrt("serieller stop");
+            stoppeFahrtMitEvent("serieller stop", SH_TRIGGER_CONFIG);
             if (!runtime.setupMode && !hatAusstehendeAktion()) setzeLedMode(LedMode::Off);
         }
         return;
@@ -1287,7 +1660,7 @@ void verarbeiteBefehl(char* line) {
             starteFahrt(CoverDirection::Up, "kalibrierung messfahrt up", MAX_TRAVEL_TIME_MS, false);
             return;
         }
-        starteNormaleFahrtNachOben("serieller up");
+        starteNormaleFahrtNachOben("serieller up", SH_TRIGGER_CONFIG);
         return;
     }
     if (strcmp(line, "down") == 0) {
@@ -1297,7 +1670,7 @@ void verarbeiteBefehl(char* line) {
             starteFahrt(CoverDirection::Down, "kalibrierung messfahrt down", MAX_TRAVEL_TIME_MS, false);
             return;
         }
-        starteNormaleFahrtNachUnten("serieller down");
+        starteNormaleFahrtNachUnten("serieller down", SH_TRIGGER_CONFIG);
         return;
     }
     if (strcmp(line, "cal abort") == 0) {
@@ -1394,6 +1767,9 @@ void verarbeiteBewegungsTimeouts() {
         return;
     }
 
+    if (runtime.movementTargetsIntermediatePosition) {
+        runtime.coverPosition = begrenzePosition(runtime.movementTargetPosition);
+    }
     if (runtime.movementTargetsEndPosition) {
         setzePositionAufEndlage(runtime.coverDirection);
     }
@@ -1418,7 +1794,7 @@ void behandleStopButton(bool stopActive, unsigned long jetztMs) {
                  runtime.calibrationPhase == CalibrationPhase::MeasuringUp)) {
                 uebernehmeKalibrierMessung(runtime.coverDirection);
             } else {
-                stoppeFahrt("lokaler taster stop");
+                stoppeFahrtMitEvent("lokaler taster stop", SH_TRIGGER_MANUAL_BUTTON);
                 if (!runtime.setupMode && !hatAusstehendeAktion()) setzeLedMode(LedMode::Off);
             }
             runtime.stopHoldConsumed = true;
@@ -1589,6 +1965,255 @@ void pollButtons() {
     behandleDownButton(runtime.downButtonStableActive, jetztMs);
 }
 
+bool uebernehmeReportIntervalAusCfg(uint16_t value) {
+    if (!isSendIntervalValid(value)) return false;
+
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot previousBasisSnapshot = {};
+    NetZrlSetupSnapshot previousDeviceSnapshot = {};
+    holeSetupSnapshot(previousBasisSnapshot, previousDeviceSnapshot);
+
+    runtime.statusSendIntervalS = value;
+    setzeStateReportOffen();
+    if (!speicherePersistenzMitRollback(previousBasisSnapshot, previousDeviceSnapshot)) {
+        logf("WARN", "report_interval_s konnte nicht persistiert werden");
+        return false;
+    }
+
+    return true;
+}
+
+void merkeCmdAck(uint8_t seq, uint8_t status) {
+    runtime.lastCmdAckValid = true;
+    runtime.lastCmdSeq = seq;
+    runtime.lastCmdAckStatus = status;
+}
+
+void merkeCfgAck(uint8_t seq, uint8_t status) {
+    runtime.lastCfgAckValid = true;
+    runtime.lastCfgSeq = seq;
+    runtime.lastCfgAckStatus = status;
+}
+
+void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
+    if (payload.ack_status != SH_ACK_OK) {
+        logf("WARN", "HELLO_ACK abgelehnt");
+        return;
+    }
+
+    if (!uebernehmeMasterMacNachHelloAck(senderMac)) {
+        logf("WARN", "Master-MAC aus HELLO_ACK konnte nicht uebernommen werden");
+        return;
+    }
+
+    stellePeerSicher(runtime.masterMac);
+    setzeStateReportOffen();
+    sendeState();
+    logf("INFO", "HELLO_ACK empfangen");
+}
+
+void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
+    if (!senderIstBekannterMaster(senderMac)) {
+        logf("WARN", "CMD ignoriert: Sender ist nicht der bekannte Master");
+        return;
+    }
+
+    if ((header.flags & SH_FLAG_ACK_REQUEST) &&
+        runtime.lastCmdAckValid &&
+        header.seq == runtime.lastCmdSeq) {
+        sendeAck(senderMac, header.seq, header.msg_type, runtime.lastCmdAckStatus);
+        return;
+    }
+
+    uint8_t ackStatus = SH_ACK_REJECTED;
+
+    if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
+        setzeStateReportOffen();
+        sendeState();
+        ackStatus = SH_ACK_OK;
+    } else if (payload.cmd_type == SH_CMD_COVER) {
+        if (runtime.setupMode || runtime.calibrationMode || hatAusstehendeAktion()) {
+            ackStatus = SH_ACK_REJECTED;
+        } else {
+            switch (payload.param1) {
+                case SH_COVER_CMD_OPEN:
+                    ackStatus = starteNormaleFahrtNachOben("master open", SH_TRIGGER_MASTER_CMD)
+                                    ? SH_ACK_OK
+                                    : SH_ACK_REJECTED;
+                    break;
+
+                case SH_COVER_CMD_CLOSE:
+                    ackStatus = starteNormaleFahrtNachUnten("master close", SH_TRIGGER_MASTER_CMD)
+                                    ? SH_ACK_OK
+                                    : SH_ACK_REJECTED;
+                    break;
+
+                case SH_COVER_CMD_STOP:
+                    stoppeFahrtMitEvent("master stop", SH_TRIGGER_MASTER_CMD);
+                    ackStatus = SH_ACK_OK;
+                    break;
+
+                case SH_COVER_CMD_SET_POSITION:
+                    if (!runtime.isCalibrated) {
+                        ackStatus = SH_ACK_REJECTED;
+                    } else if (startePositionsfahrt((int16_t)payload.param2, "master set_position")) {
+                        if (runtime.coverState == CoverState::Moving) {
+                            sendeCoverEvent(
+                                runtime.coverDirection == CoverDirection::Up ? SH_EVENT_COVER_UP : SH_EVENT_COVER_DOWN,
+                                SH_TRIGGER_MASTER_CMD,
+                                (uint8_t)begrenzePosition(runtime.coverPosition),
+                                (uint16_t)payload.param2);
+                        }
+                        ackStatus = SH_ACK_OK;
+                    } else {
+                        ackStatus = SH_ACK_REJECTED;
+                    }
+                    break;
+
+                default:
+                    ackStatus = SH_ACK_REJECTED;
+                    break;
+            }
+        }
+    }
+
+    if (header.flags & SH_FLAG_ACK_REQUEST) {
+        sendeAck(senderMac, header.seq, header.msg_type, ackStatus);
+        merkeCmdAck(header.seq, ackStatus);
+    }
+}
+
+void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    if (!senderIstBekannterMaster(senderMac)) {
+        logf("WARN", "CFG ignoriert: Sender ist nicht der bekannte Master");
+        return;
+    }
+
+    if ((header.flags & SH_FLAG_ACK_REQUEST) &&
+        runtime.lastCfgAckValid &&
+        header.seq == runtime.lastCfgSeq) {
+        sendeAck(senderMac, header.seq, header.msg_type, runtime.lastCfgAckStatus);
+        return;
+    }
+
+    uint8_t ackStatus = SH_ACK_ERROR;
+    if (payload.param_id == SH_CFG_REPORT_INTERVAL_S && uebernehmeReportIntervalAusCfg(payload.value)) {
+        ackStatus = SH_ACK_OK;
+        sendeState();
+    } else {
+        ackStatus = SH_ACK_REJECTED;
+    }
+
+    if (header.flags & SH_FLAG_ACK_REQUEST) {
+        sendeAck(senderMac, header.seq, header.msg_type, ackStatus);
+        merkeCfgAck(header.seq, ackStatus);
+    }
+}
+
+void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int len) {
+    if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
+    if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) {
+        logf("WARN", "ESP-NOW Paket verworfen: CRC/Header ungueltig");
+        return;
+    }
+
+    const SmartHome::MsgHeader* header = reinterpret_cast<const SmartHome::MsgHeader*>(data);
+    const uint8_t* payload = data + SH_HEADER_SIZE;
+
+    switch (header->msg_type) {
+        case SH_MSG_HELLO_ACK:
+            if (header->payload_len == sizeof(SmartHome::HelloAckPayload)) {
+                verarbeiteHelloAck(senderMac, *reinterpret_cast<const SmartHome::HelloAckPayload*>(payload));
+            }
+            break;
+
+        case SH_MSG_CMD:
+            if (header->payload_len == sizeof(SmartHome::CmdPayload)) {
+                verarbeiteCmd(senderMac, *header, *reinterpret_cast<const SmartHome::CmdPayload*>(payload));
+            }
+            break;
+
+        case SH_MSG_CFG:
+            if (header->payload_len == sizeof(SmartHome::CfgPayload)) {
+                verarbeiteCfg(senderMac, *header, *reinterpret_cast<const SmartHome::CfgPayload*>(payload));
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+void onEspNowReceive(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+    if (!info) return;
+    verarbeiteEspNowPaket(info->src_addr, data, len);
+}
+#else
+void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
+    verarbeiteEspNowPaket(senderMac, data, len);
+}
+#endif
+
+void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+    if (status != ESP_NOW_SEND_SUCCESS) {
+        logf("WARN", "ESP-NOW Versand fehlgeschlagen");
+    }
+}
+
+void initialisiereFunk() {
+    if (runtime.funkBereit || runtime.setupMode) return;
+
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    WiFi.setSleep(false);
+
+    const esp_err_t kanalErr = esp_wifi_set_channel((uint8_t)WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
+    if (kanalErr != ESP_OK) {
+        logf("WARN", "WLAN-Kanal %d konnte nicht gesetzt werden (err=%d)", WLAN_KANAL, (int)kanalErr);
+    }
+
+    if (esp_now_init() != ESP_OK) {
+        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen");
+        return;
+    }
+
+    esp_now_register_send_cb(onEspNowSend);
+    esp_now_register_recv_cb(onEspNowReceive);
+    stellePeerSicher(BROADCAST_MAC);
+    if (runtime.masterMacValid) {
+        stellePeerSicher(runtime.masterMac);
+    }
+    runtime.funkBereit = true;
+}
+
+void tickKommunikation() {
+    if (runtime.setupMode) return;
+
+    if (!runtime.funkBereit) {
+        initialisiereFunk();
+        if (!runtime.funkBereit) return;
+    }
+
+    const unsigned long jetztMs = millis();
+    if (!runtime.masterBound) {
+        if (runtime.letztesHelloMs == 0UL || (jetztMs - runtime.letztesHelloMs) >= HELLO_RETRY_INTERVAL_MS) {
+            sendeHello();
+        }
+        return;
+    }
+
+    if (runtime.letzterHeartbeatMs == 0UL || (jetztMs - runtime.letzterHeartbeatMs) >= HEARTBEAT_INTERVAL_MS) {
+        sendeHeartbeat();
+    }
+
+    const unsigned long reportInterval = stateIntervalMs();
+    if (runtime.stateReportOffen ||
+        runtime.letzterStateMs == 0UL ||
+        (reportInterval > 0UL && (jetztMs - runtime.letzterStateMs) >= reportInterval)) {
+        sendeState();
+    }
+}
+
 void initialisierePin(int pin, uint8_t mode) {
     if (pin >= 0) pinMode(pin, mode);
 }
@@ -1610,6 +2235,8 @@ void setup() {
     runtime.relayUpUsesRelayA = true;
     runtime.statusSendIntervalS = DEFAULT_STATUS_SEND_INTERVAL_S;
     runtime.sensorSendIntervalS = DEFAULT_SENSOR_SEND_INTERVAL_S;
+    runtime.stateReportOffen = true;
+    runtime.movementTargetPosition = 0;
 
     initialisierePin(PIN_RELAY_A, OUTPUT);
     initialisierePin(PIN_RELAY_B, OUTPUT);
@@ -1652,7 +2279,15 @@ void setup() {
         logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
     }
 
-    logf("INFO", "%s v%s startet", DATEI_GERAET, DATEI_VERSION);
+    runtime.statusSendIntervalS = sanitizeStatusSendInterval(runtime.statusSendIntervalS);
+    runtime.sensorSendIntervalS = sanitizeSensorSendInterval(runtime.sensorSendIntervalS);
+    runtime.masterBound = false;
+    runtime.funkBereit = false;
+    runtime.naechsteSeq = 1U;
+    initialisiereFunk();
+
+    logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
+    logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
     logf("INFO",
          "Pins relay_a=%d relay_b=%d button_up=%d button_down=%d button_stop=%d led_up=%d led_down=%d button_active_low=%s",
          PIN_RELAY_A,
@@ -1678,6 +2313,7 @@ void loop() {
     }
 
     nodeProvisioning.update();
+    tickKommunikation();
     tickLeds();
     delay(LOOP_DELAY_MS);
 }
