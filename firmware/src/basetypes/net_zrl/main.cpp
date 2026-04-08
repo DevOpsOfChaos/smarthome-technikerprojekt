@@ -117,6 +117,7 @@ constexpr uint8_t DEVICE_REPORTING_MODE = SH_REPORTING_HYBRID;
 constexpr int WLAN_KANAL = NET_ZRL_WLAN_CHANNEL;
 constexpr unsigned long HELLO_RETRY_INTERVAL_MS = NET_ZRL_HELLO_RETRY_INTERVAL_MS;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = NET_ZRL_HEARTBEAT_INTERVAL_MS;
+constexpr unsigned long HELLO_REANNOUNCE_INTERVAL_MS = NET_ZRL_HELLO_RETRY_INTERVAL_MS;
 constexpr uint32_t DEVICE_BOOT_COUNTER = NET_ZRL_BOOT_COUNTER;
 constexpr int PIN_RELAY_A = NET_ZRL_RELAY_UP_PIN;
 constexpr int PIN_RELAY_B = NET_ZRL_RELAY_DOWN_PIN;
@@ -2200,6 +2201,10 @@ void tickKommunikation() {
             sendeHello();
         }
         return;
+    }
+
+    if (runtime.letztesHelloMs == 0UL || (jetztMs - runtime.letztesHelloMs) >= HELLO_REANNOUNCE_INTERVAL_MS) {
+        sendeHello();
     }
 
     if (runtime.letzterHeartbeatMs == 0UL || (jetztMs - runtime.letzterHeartbeatMs) >= HEARTBEAT_INTERVAL_MS) {

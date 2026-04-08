@@ -1,0 +1,171 @@
+Titel: Master-NET-ZRL Flash-, Recovery- und set_position-Realtest
+Datum: 2026-04-08
+Thema: Echter Cover-Pfad fuer `net_zrl` mit Flash auf reale Hardware, Bind-Nachweis, `set_position`-Test und Negativfall unkalibriert
+
+1) Ziel
+Dieser Lauf sollte nicht Provisioning oder UI weiterpolieren, sondern den echten Pfad zwischen `master` und `net_zrl` auf realer Hardware pruefen:
+- beide Targets bauen
+- beide Targets auf die vorgesehenen Ports flashen
+- echten seriellen Bind-Pfad beobachten
+- `open` / `close` / `stop` real bestaetigen
+- `set_position` ueber MQTT gegen den echten Cover-Vertrag pruefen
+- Verhalten bei unkalibriertem `set_position` real nachweisen
+
+2) Aufbau
+Realer Aufbau in diesem Lauf:
+- `master` an `COM3`
+- `net_zrl` an `COM6`
+- lokaler Docker-Server mit `mosquitto` auf `1883`
+- MQTT-Kommandopfad ueber `smarthome/device/NET-ZRL-001/command`
+
+3) Build und Flash
+Erfolgreich ausgefuehrt wurden:
+- `pio run -e master`
+- `pio run -e net_zrl`
+- `pio run -e master -t upload --upload-port COM3`
+- `pio run -e net_zrl -t upload --upload-port COM6`
+
+Ergebnis:
+- beide Builds erfolgreich
+- beide Flash-Vorgaenge erfolgreich
+
+4) Reeller Bind-Nachweis
+Nach dem Flash und einem gezielten Reboot beider Boards wurde seriell beobachtet:
+- `net_zrl` bootet sauber
+- `net_zrl` ist nicht im Setup-Modus
+- `net_zrl` hat eine gueltige Master-MAC `20:6E:F1:6D:92:C0`
+- der Master registriert `NET-ZRL-001` dynamisch
+- `HELLO`, `HELLO_ACK`, `HEARTBEAT` und `STATE_REPORT` laufen real
+
+Beleg im seriellen Mitschnitt:
+- Master:
+  - `Node dynamisch registriert: NET-ZRL-001 (net_zrl)`
+  - `HELLO von NET-ZRL-001 (NET-ZRL Cover)`
+  - `STATE_REPORT von NET-ZRL-001 verarbeitet`
+  - `HEARTBEAT von NET-ZRL-001`
+- Node:
+  - `HELLO_ACK empfangen`
+  - Statusausgabe mit `setup_mode=false`
+
+5) Reale Grundfunktionen
+Vom Nutzer real bestaetigt:
+- `open` funktioniert
+- `close` funktioniert
+- `stop` waehrend der Fahrt funktioniert
+
+Damit war der enge Bewegungsgrundpfad vor dem MQTT-Positionslauf bereits real positiv.
+
+6) Echter Fehler im MQTT-/Recovery-Pfad
+Der erste direkte `set_position`-Test war nicht gruener als er aussah.
+Der Testbefehl war:
+- `{"command":"set_position","position":50,"request_id":"codex-setpos-50"}`
+
+Der Master antwortete dabei mit:
+- `status":"unknown_device"`
+
+Gleichzeitig zeigte der serielle Mitschnitt:
+- der Master sah `HEARTBEAT`
+- aber `HEARTBEAT` wurde mit `unbekannte node_id=NET-ZRL-001` verworfen
+
+Das ist ein echter Pfadfehler:
+- nach Master-Recovery kann der Master seine dynamische Registry verlieren
+- `net_zrl` blieb gebunden und sendete weiter Heartbeats
+- `net_zrl` kuendigte sich aber nicht erneut an
+- dadurch waren MQTT-Kommandos nach Master-Recovery gegen das reale Geraet blockiert
+
+7) Minimaler Fix
+Es wurde genau ein kleiner technischer Fix eingebracht:
+- Datei: `firmware/src/basetypes/net_zrl/main.cpp`
+- Aenderung: `net_zrl` sendet auch im bereits gebundenen Zustand periodisch erneut `HELLO`
+
+Ziel des Fixes:
+- der Master kann `NET-ZRL-001` nach Recovery oder Rebind wieder in die dynamische Registry aufnehmen
+- kein Umbau am Master
+- keine Nebenbaustellen
+
+8) Re-Test nach Fix
+Der Fix wurde gebaut und erneut auf `COM6` geflasht.
+
+Danach wurde bewusst der kritische Recovery-Fall gefahren:
+- `master` wurde neu gestartet
+- `net_zrl` blieb im Betrieb
+- `net_zrl` kuendigte sich erneut per `HELLO` an
+- der Master registrierte `NET-ZRL-001` wieder dynamisch
+- danach wurde `set_position` erneut ueber MQTT gesendet
+
+Testbefehl:
+- `{"command":"set_position","position":50,"request_id":"codex-setpos-50-after-master-reset"}`
+
+Beobachteter Verlauf:
+- `MQTT verbunden`
+- `Node dynamisch registriert: NET-ZRL-001 (net_zrl)`
+- `HELLO von NET-ZRL-001`
+- `COMMAND_COVER gesendet an 8C:D0:B2:A8:80:BB`
+- MQTT-ACK mit `status":"ok"`
+- `cover_state":"opening"`
+- Positionsfortschritt ueber MQTT-State
+- Endzustand `cover_state":"stopped"` mit `cover_position":49`
+
+Bewertung:
+- `set_position` funktioniert real ueber den echten Pfad MQTT -> Master -> ESP-NOW -> Node -> ACK/State -> MQTT
+- der kritische Recovery-Fall ist mit dem Minimalfix real geschlossen
+
+9) Negativtest unkalibriert
+Danach wurde der Negativfall bewusst real geprueft:
+- `net_zrl` in den Setup-Modus gebracht
+- Kalibrierung mit `setup reset_calibration` geloescht
+- Setup beendet
+- Rebind an den Master abgewartet
+- danach erneut `set_position` ueber MQTT gesendet
+
+Beobachteter Zustand:
+- Node-Status seriell: `is_calibrated=false`
+- Master-State ueber MQTT: `cover_calibrated":false`
+
+Testbefehl:
+- `{"command":"set_position","position":30,"request_id":"codex-setpos-30-uncal"}`
+
+Ergebnis:
+- MQTT-ACK mit `status":"not_calibrated"` und `status_code":-5`
+- keine Fahrt ausgeloest
+
+Bewertung:
+- der Negativfall fuer unkalibriertes `set_position` ist real korrekt umgesetzt
+- der obere Cover-Vertrag wird eingehalten
+
+10) Wiederherstellung des Geraetezustands
+Nach dem Negativtest wurde der Zustand wiederhergestellt:
+- `setup set tt_up_ms 33333`
+- `setup set tt_down_ms 22222`
+- Setup beendet
+
+Danach zeigte der reale Ruecklauf wieder:
+- `cover_calibrated":true`
+- `cover_position":0`
+
+Das Geraet wurde also nicht in einem absichtlich kaputten Zustand liegen gelassen.
+
+11) Ergebnis
+Der Lauf ist fachlich erfolgreich.
+
+Real belegt:
+- beide Targets bauen erfolgreich
+- beide Targets flashen erfolgreich
+- echter Bind zwischen `master` und `net_zrl`
+- `net_zrl` bleibt ausserhalb des Setup-Modus
+- `open` / `close` / `stop` funktionieren real
+- echter Pfadfehler nach Master-Recovery gefunden
+- kleiner gezielter Fix im `net_zrl` eingebracht
+- `set_position` nach Recovery real positiv bestaetigt
+- Negativfall unkalibriert mit `not_calibrated` real bestaetigt
+- Zustand danach wieder sauberhergestellt
+
+12) Grenzen
+Dieser Lauf prueft nicht:
+- Langzeitstabilitaet
+- Komfortlogik
+- jede moegliche Timing-Kante
+- Server-UI im Detail
+
+Genau das ist hier auch nicht der Punkt.
+Der Wert dieses Laufs ist der reale Nachweis, dass der aktuelle Cover-Pfad inklusive Recovery und Vertrags-Negativfall auf echter Hardware funktioniert.
