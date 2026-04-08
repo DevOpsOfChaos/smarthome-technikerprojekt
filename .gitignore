@@ -27,6 +27,7 @@ server/nodered/.npm/
 server/nodered/flows.json
 server/nodered/node_modules/
 server/sqlite/*.db
+server/sqlite/*.db-journal
 
 # Local archives
 *.zip
