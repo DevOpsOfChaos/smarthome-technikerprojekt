@@ -1,0 +1,142 @@
+PROTOKOLL 2026-04-08 - NET-ZRL unkalibrierter Auto-Stopp Realnachweis
+
+Datum: 2026-04-08
+Ziel: den noch offenen echten Nachweis sauber erbringen, dass normale Fahrten des realen `NET-ZRL` im unkalibrierten Zustand nicht endlos laufen, sondern nach der wirksamen `default_estimated_travel_time_ms` selbststaendig stoppen
+
+1. Ausgangslage
+- Arbeitsrepo: aktueller Stand von `smarthome-technikerprojekt`
+- reales Geraet:
+  - `NET-ZRL` auf `COM6`
+- der Firmware-Fix fuer unkalibrierten Auto-Stopp war bereits implementiert, gebaut und zuvor auf `COM6` geflasht
+- offener Punkt war nur noch der echte reale Nachweis am Geraet
+
+2. Relevante Soll-Logik im Code
+Betroffen:
+- `firmware/src/basetypes/net_zrl/main.cpp`
+
+Relevante Stellen:
+- `starteNormaleFahrtNachOben(...)`
+- `starteNormaleFahrtNachUnten(...)`
+- `verarbeiteBewegungsTimeouts()`
+
+Fachlich wirksame Logik:
+- wenn `runtime.isCalibrated == true`, wird die normale Fahrt ueber `travelTimeUpMs` bzw. `travelTimeDownMs` begrenzt
+- wenn `runtime.isCalibrated == false`, wird die normale Fahrt ueber `runtime.defaultEstimatedTravelTimeMs` begrenzt
+- bei Erreichen der Deadline wird `stoppeFahrt("fahrzeit erreicht")` ausgefuehrt
+
+3. Vorgehen fuer den Realnachweis
+Der Nachweis wurde ueber den echten seriellen Zugriff auf `COM6` mit hostseitig gestempeltem Log gefahren.
+
+Warum so:
+- der unkalibrierte Zustand laesst sich direkt am realen Geraet belegen
+- Start und Ende der Fahrt sind ueber echte Geraetelogs sichtbar
+- der Auto-Stopp wird direkt durch den echten Firmwarepfad belegt
+
+Wichtig:
+- fuer den Nachweis wurde die wirksame `default_estimated_travel_time_ms` im Setup-Modus temporaer von `100000` ms auf `5000` ms gesetzt
+- das war kein Feature-Eingriff, sondern eine Testkonfiguration, damit der Realnachweis in kurzer Zeit sauber beobachtbar ist
+- nach dem Nachweis wurde der Wert wieder auf `100000` ms zurueckgesetzt
+
+4. Teil A - realen Ausgangszustand gesichert
+
+4.1 Vor dem Test
+Serieller Status vor der Testfahrt:
+- `state=stopped`
+- `is_calibrated=false`
+- `travel_time_up_ms=0`
+- `travel_time_down_ms=0`
+- `default_estimated_travel_time_ms=100000`
+
+Beleg aus dem echten Seriellog:
+- `2026-04-08 20:23:52.328 state=stopped ... is_calibrated=false ... travel_time_up_ms=0 travel_time_down_ms=0 default_estimated_travel_time_ms=100000 ...`
+
+Bewertung:
+- das reale Geraet war vor dem Test nachweisbar unkalibriert
+- die urspruenglich wirksame Default-Fahrzeit war real mit `100000` ms sichtbar
+
+4.2 Testkonfiguration fuer beobachtbaren Realnachweis
+Im Setup-Modus real ausgefuehrt:
+- `setup reset_calibration`
+- `setup set default_ms 5000`
+
+Danach erneut real belegt:
+- `is_calibrated=false`
+- `travel_time_up_ms=0`
+- `travel_time_down_ms=0`
+- `default_estimated_travel_time_ms=5000`
+
+Beleg aus dem echten Seriellog:
+- `2026-04-08 20:24:00.040 state=stopped ... is_calibrated=false ... travel_time_up_ms=0 travel_time_down_ms=0 default_estimated_travel_time_ms=5000 ...`
+
+Bewertung:
+- der unkalibrierte Zustand blieb erhalten
+- die fuer den Test wirksame Default-Fahrzeit war real auf `5000` ms gesetzt und im Geraetelog sichtbar
+
+5. Teil B - echter Auto-Stopp-Nachweis
+
+5.1 Richtung `up`
+Realer Start:
+- serieller Befehl: `up`
+- Geraetelog: `2026-04-08 20:24:01.453 [INFO] Relais fuer up aktiv (serieller up)`
+
+Realer Auto-Stopp:
+- Geraetelog: `2026-04-08 20:24:06.299 [INFO] Relais neutral (fahrzeit erreicht)`
+
+Realer Zustand danach:
+- `2026-04-08 20:24:10.673 state=stopped ... is_calibrated=false ... default_estimated_travel_time_ms=5000 ...`
+
+Bewertung:
+- die normale Fahrt wurde real gestartet
+- das Geraet blieb unkalibriert
+- die Fahrt lief nicht endlos
+- der Auto-Stopp griff selbststaendig nach der wirksamen Default-Fahrzeit von ca. 5 s
+
+5.2 Richtung `down`
+Realer Start:
+- serieller Befehl: `down`
+- Geraetelog: `2026-04-08 20:24:30.684 [INFO] Relais fuer down aktiv (serieller down)`
+
+Realer Auto-Stopp:
+- Geraetelog: `2026-04-08 20:24:35.536 [INFO] Relais neutral (fahrzeit erreicht)`
+
+Realer Zustand danach:
+- `2026-04-08 20:24:39.866 state=stopped ... is_calibrated=false ... default_estimated_travel_time_ms=5000 ...`
+
+Bewertung:
+- auch die Gegenrichtung wurde real gestartet
+- auch hier blieb das Geraet unkalibriert
+- auch hier lief die Fahrt nicht endlos
+- auch hier griff der Auto-Stopp selbststaendig nach der wirksamen Default-Fahrzeit von ca. 5 s
+
+6. Teil C - Fehlerregel
+- in diesem Lauf trat kein Bruch mehr auf
+- ein weiterer Fix war nicht noetig
+- Build und Reflash waren fuer diesen Lauf nicht erneut noetig, weil der reale Test mit der bereits geflashten Fix-Firmware positiv war
+
+7. Rueckbau der Testkonfiguration
+Nach dem Nachweis real ausgefuehrt:
+- `setup set default_ms 100000`
+
+Danach real belegt:
+- `2026-04-08 20:25:03.085 state=stopped ... is_calibrated=false ... travel_time_up_ms=0 travel_time_down_ms=0 default_estimated_travel_time_ms=100000 ...`
+
+Bewertung:
+- das reale Geraet wurde nach dem Test wieder auf die urspruengliche Default-Fahrzeit zurueckgesetzt
+- der unkalibrierte Zustand blieb bewusst bestehen
+
+8. Ergebnis
+Der offene reale Nachweis ist jetzt erbracht.
+
+Real belegt ist:
+- `NET-ZRL` war waehrend des Tests unkalibriert
+- normale Fahrten `up` und `down` wurden real gestartet
+- die Fahrt lief in keiner Richtung endlos
+- der Auto-Stopp griff in beiden Richtungen selbststaendig mit `fahrzeit erreicht`
+- damit ist fachlich belegt, dass der Fix fuer den unkalibrierten Auto-Stopp auf dem realen Geraet wirksam ist
+
+9. Dateien in diesem Lauf
+- neu:
+  - `PROTOKOLL_2026-04-08_net_zrl_uncalibrated_autostop_realnachweis.txt`
+
+10. Commit-Status
+- in diesem Protokollschritt noch kein Commit
