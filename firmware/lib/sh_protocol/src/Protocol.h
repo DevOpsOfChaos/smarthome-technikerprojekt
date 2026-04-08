@@ -6,7 +6,7 @@
  Datei     : Protocol.h
  Modul     : ShProtocol
  Version   : 0.3.0
- Stand     : 2026-03-25
+ Stand     : 2026-04-08
 
  Funktion:
  Vollständige Protokolldefinition für die ESP-NOW-Kommunikation
@@ -33,10 +33,6 @@
 
 #include "DeviceTypes.h"
 
-// ============================================================
-// Protokollkonstanten
-// ============================================================
-
 #define SH_PROTO_MAGIC         0xA5U
 #define SH_PROTO_VERSION       1U
 
@@ -46,13 +42,9 @@
 
 #define SH_DEVICE_ID_LEN       16U
 #define SH_DEVICE_NAME_LEN     32U
-#define SH_SENSOR_MASK_LEN     11U   // 10 Zeichen + '\0'
-#define SH_INPUT_MASK_LEN      6U    // 5 Zeichen + '\0'
+#define SH_SENSOR_MASK_LEN     11U
+#define SH_INPUT_MASK_LEN      6U
 #define SH_MAX_DEVICES         32U
-
-// ============================================================
-// Nachrichtentypen
-// ============================================================
 
 #define SH_MSG_HELLO           0x01U
 #define SH_MSG_HELLO_ACK       0x02U
@@ -64,25 +56,13 @@
 #define SH_MSG_TIME            0x08U
 #define SH_MSG_HEARTBEAT       0x09U
 
-// ============================================================
-// Header-Flags
-// ============================================================
-
 #define SH_FLAG_ACK_REQUEST    0x01U
 #define SH_FLAG_RETRANSMIT     0x02U
 #define SH_FLAG_ENCRYPTED      0x04U
 
-// ============================================================
-// ACK-Status
-// ============================================================
-
 #define SH_ACK_OK              0x00U
 #define SH_ACK_ERROR           0x01U
 #define SH_ACK_REJECTED        0x02U
-
-// ============================================================
-// CMD-Subtypen
-// ============================================================
 
 #define SH_CMD_RELAY           0x01U
 #define SH_CMD_COVER           0x02U
@@ -91,9 +71,10 @@
 
 #define SH_CMD_SET_RELAY       SH_CMD_RELAY
 
-// ============================================================
-// CFG-Parameter-IDs
-// ============================================================
+#define SH_COVER_CMD_OPEN          0x01U
+#define SH_COVER_CMD_CLOSE         0x02U
+#define SH_COVER_CMD_STOP          0x03U
+#define SH_COVER_CMD_SET_POSITION  0x04U
 
 #define SH_CFG_DEVICE_NAME            0x01U
 #define SH_CFG_REPORT_INTERVAL_S      0x02U
@@ -127,10 +108,6 @@
 #define SH_CFG_RING_BRIGHTNESS        0x51U
 #define SH_CFG_RING_MODE              0x52U
 
-// ============================================================
-// TLV-Feld-IDs für STATE
-// ============================================================
-
 #define SH_TLV_STATE_TIMESTAMP        0x01U
 #define SH_TLV_STATE_LAST_TRIGGER     0x02U
 #define SH_TLV_STATE_ERROR            0x03U
@@ -157,10 +134,6 @@
 #define SH_TLV_STATE_RSSI_DBM         0x60U
 #define SH_TLV_STATE_BOOT_COUNTER     0x61U
 
-// ============================================================
-// TLV-Feld-IDs für EVENT
-// ============================================================
-
 #define SH_TLV_EVENT_TYPE             0x01U
 #define SH_TLV_EVENT_TIMESTAMP        0x02U
 #define SH_TLV_EVENT_RELAY_INDEX      0x03U
@@ -171,10 +144,6 @@
 #define SH_TLV_EVENT_COVER_TARGET     0x08U
 #define SH_TLV_EVENT_COVER_STATE      0x09U
 #define SH_TLV_EVENT_SENSOR_ERROR     0x0AU
-
-// ============================================================
-// EVENT-Typen
-// ============================================================
 
 #define SH_EVENT_BUTTON_PRESS         0x01U
 #define SH_EVENT_MOTION_DETECTED      0x02U
@@ -195,10 +164,6 @@
 #define SH_EVENT_BUTTON_RELEASE       0x11U
 #define SH_EVENT_BUTTON_LONG_PRESS    0x12U
 
-// ============================================================
-// Auslöserquellen / Schaltgründe
-// ============================================================
-
 #define SH_TRIGGER_UNKNOWN            0x00U
 #define SH_TRIGGER_MANUAL_BUTTON      0x01U
 #define SH_TRIGGER_MASTER_CMD         0x02U
@@ -206,27 +171,15 @@
 #define SH_TRIGGER_AUTO_OFF_TIMER     0x04U
 #define SH_TRIGGER_CONFIG             0x05U
 
-// ============================================================
-// Rolladen-Fahrzustände
-// ============================================================
-
 #define SH_COVER_STATE_STOPPED        0x00U
 #define SH_COVER_STATE_MOVING_UP      0x01U
 #define SH_COVER_STATE_MOVING_DOWN    0x02U
-
-// ============================================================
-// Fehlercodes
-// ============================================================
 
 #define SH_ERROR_NONE                 0x00U
 #define SH_ERROR_SENSOR_INIT          0x01U
 #define SH_ERROR_SENSOR_READ          0x02U
 #define SH_ERROR_ACK_TIMEOUT          0x03U
 #define SH_ERROR_COVER_CALIB          0x04U
-
-// ============================================================
-// NET-ERL Komfort-Flags
-// ============================================================
 
 #define SH_RELAY_COMFORT_FLAG_AUTO_REQUEST_ON           0x01U
 #define SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED          0x02U
@@ -253,9 +206,6 @@ typedef struct __attribute__((packed)) {
 static_assert(sizeof(MsgHeader) == SH_HEADER_SIZE,
     "MsgHeader muss exakt SH_HEADER_SIZE Bytes groß sein");
 
-// HELLO trägt jetzt zusätzlich den oberen Gerätevertrag:
-// meta_schema_version, control_mode, config_profile,
-// reporting_mode, sensor_mask und input_mask.
 typedef struct __attribute__((packed)) {
     char     device_id[SH_DEVICE_ID_LEN];
     char     device_name[SH_DEVICE_NAME_LEN];
@@ -474,11 +424,12 @@ typedef struct __attribute__((packed)) {
     uint8_t  cover_mode;
     uint8_t  cover_state;
     uint8_t  cover_position;
+    uint8_t  cover_calibrated;
     uint8_t  fault;
 } ZrlStateReportPayload;
 
-static_assert(sizeof(ZrlStateReportPayload) == 22,
-    "ZrlStateReportPayload muss 22 Bytes groß sein");
+static_assert(sizeof(ZrlStateReportPayload) == 23,
+    "ZrlStateReportPayload muss 23 Bytes gross sein");
 
 typedef struct __attribute__((packed)) {
     char     node_id[SH_DEVICE_ID_LEN];
@@ -487,12 +438,13 @@ typedef struct __attribute__((packed)) {
     uint8_t  cover_mode;
     uint8_t  cover_state;
     uint8_t  cover_position;
+    uint8_t  cover_calibrated;
     uint8_t  fault;
     uint16_t report_interval_s;
 } ZrlConfigStateReportPayload;
 
-static_assert(sizeof(ZrlConfigStateReportPayload) == 24,
-    "ZrlConfigStateReportPayload muss 24 Bytes gross sein");
+static_assert(sizeof(ZrlConfigStateReportPayload) == 25,
+    "ZrlConfigStateReportPayload muss 25 Bytes gross sein");
 
 typedef struct __attribute__((packed)) {
     char     node_id[SH_DEVICE_ID_LEN];

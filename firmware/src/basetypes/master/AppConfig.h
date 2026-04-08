@@ -51,8 +51,20 @@
 #define MASTER_COMMAND_ACK_TIMEOUT_MS 800UL
 #endif
 
+#ifndef MASTER_COMMAND_MAX_RETRIES
+#define MASTER_COMMAND_MAX_RETRIES 2U
+#endif
+
 #ifndef MASTER_NODE_OFFLINE_TIMEOUT_MS
 #define MASTER_NODE_OFFLINE_TIMEOUT_MS 75000UL
+#endif
+
+#ifndef MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS
+#define MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS 600000UL
+#endif
+
+#ifndef MASTER_MAX_DYNAMIC_NODES
+#define MASTER_MAX_DYNAMIC_NODES 16U
 #endif
 
 #ifndef MASTER_MQTT_BUFFER_BYTES
@@ -74,36 +86,17 @@
 // Vorlage: firmware/include/Secrets.example.h
 // ============================================================
 
-// Geraete-ID des Masters.
-// Format: MASTER-001 (keine Sensorbestueckung in der ID)
 constexpr char DEVICE_ID[]    = MASTER_PROFILE_DEVICE_ID;
-
-// Anzeigename fuer MQTT-meta und Node-RED-Dashboard.
-// Darf nach Inbetriebnahme ueber CFG geaendert werden.
 constexpr char DEVICE_NAME[]  = MASTER_PROFILE_DEVICE_NAME;
-
-// Firmware-Variante fuer serielle Diagnose und spaetere Profiltrennung.
 constexpr char FW_VARIANT[]   = MASTER_PROFILE_FW_VARIANT;
-
-// Debug-Stand: in fruehen Teststaenden aktiv lassen.
-// Fuer Produktionseinsatz auf false setzen.
 constexpr bool DEVICE_DEBUG_AKTIV = MASTER_DEBUG_ENABLED != 0;
-
-// Fester WLAN-/ESP-NOW-Kanal.
-// Muss mit dem Heimnetz-Kanal uebereinstimmen.
-// Kanal 1, 6 oder 11 bevorzugen (keine Kanalueberlappung).
 constexpr int WLAN_KANAL = MASTER_WLAN_CHANNEL;
-
-// Reconnect-Takt fuer WLAN und MQTT.
 constexpr unsigned long WIFI_RECONNECT_INTERVAL_MS = MASTER_WIFI_RECONNECT_INTERVAL_MS;
 constexpr unsigned long MQTT_RECONNECT_INTERVAL_MS = MASTER_MQTT_RECONNECT_INTERVAL_MS;
-
-// Minimaler ACK-Timeout fuer den kleinen Pending-Slot.
 constexpr unsigned long COMMAND_ACK_TIMEOUT_MS = MASTER_COMMAND_ACK_TIMEOUT_MS;
-
-// Einfaches Availability-Timeout fuer bekannte Nodes.
+constexpr unsigned int COMMAND_MAX_RETRIES = MASTER_COMMAND_MAX_RETRIES;
 constexpr unsigned long NODE_OFFLINE_TIMEOUT_MS = MASTER_NODE_OFFLINE_TIMEOUT_MS;
+constexpr unsigned long BATTERY_NODE_OFFLINE_TIMEOUT_MS = MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS;
+constexpr unsigned int MAX_DYNAMIC_NODES = MASTER_MAX_DYNAMIC_NODES;
 constexpr unsigned int MQTT_BUFFER_BYTES = MASTER_MQTT_BUFFER_BYTES;
-
-// Takt der Hauptschleife.
 constexpr unsigned long LOOP_INTERVAL_MS = MASTER_LOOP_INTERVAL_MS;

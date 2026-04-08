@@ -3,20 +3,19 @@
  Projekt   : SmartHome ESP32
  Geraet    : Master (ESP32-C3)
  Datei     : main.cpp
- Version   : 0.3.0
- Stand     : 2026-03-25
+ Version   : 0.4.0
+ Stand     : 2026-04-08
 
  Funktion:
- Vereinfachter Master-MVP als Funk- und MQTT-Bruecke.
+ Dynamischer Master als Funk- und MQTT-Bruecke.
 
  Ziel dieses Stands:
  - HELLO / HELLO_ACK / HEARTBEAT / STATE / EVENT / ACK
- - einfache Node-Registry
- - einfache Availability
+ - dynamische Node-Registry statt fester Geraeteliste
+ - einfache Availability auf Basis der Registry
  - set_relay / get_state / minimales set_config
- - keine profileHint-Logik ueber node_id
- - kein config_schema / kein config_state im Master
- - keine Config-Queue / kein Wake-Orchester / kein ACK-Cache-Komfort
+ - Cover-Befehle open / close / stop / set_position
+ - Pending-/ACK-Modell pro Geraet
 
  Wichtige Architekturgrenze:
  Der Master ist Bruecke und einfache Projektion,
@@ -71,10 +70,11 @@
   #define MQTT_PASSWORD ""
 #endif
 
+namespace {
 
 constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "MASTER";
-constexpr char DATEI_VERSION[] = "0.3.0";
+constexpr char DATEI_VERSION[] = "0.4.0";
 constexpr char MQTT_TOPIC_COMMAND_SUB[] = "smarthome/device/+/command";
 constexpr size_t REQUEST_ID_LEN = 96U;
 constexpr long CFG_REPORT_INTERVAL_MIN = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MIN_S;
@@ -82,15 +82,39 @@ constexpr long CFG_REPORT_INTERVAL_MAX = (long)SmartHome::ShStorage::SH_STORED_R
 constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
+constexpr uint8_t BATTERY_PCT_UNGUELTIG = 0xFFU;
+constexpr uint16_t BATTERY_MV_UNGUELTIG = 0U;
+constexpr uint8_t WINDOW_STATE_UNGUELTIG = 0xFFU;
+constexpr uint16_t RAIN_RAW_UNGUELTIG = 0xFFFFU;
+constexpr int STATUS_CODE_NOT_CALIBRATED = -5;
+constexpr int STATUS_CODE_UNKNOWN_DEVICE = -6;
+constexpr int STATUS_CODE_REGISTRY_FULL = -7;
 
-struct NodeDefinition {
-    const char* node_id;
-    uint8_t device_class;
-    uint8_t power_type;
-    unsigned long offline_timeout_ms;
+struct PendingCmdRequest {
+    bool aktiv;
+    uint8_t seq;
+    uint8_t retries;
+    uint8_t cmd_type;
+    uint8_t param1;
+    uint8_t param2;
+    unsigned long letztes_senden_ms;
+    char request_id[REQUEST_ID_LEN];
+    char command_channel[24];
+};
+
+struct PendingConfigRequest {
+    bool aktiv;
+    uint8_t seq;
+    uint8_t retries;
+    uint8_t param_id;
+    uint16_t value;
+    unsigned long letztes_senden_ms;
+    char request_id[REQUEST_ID_LEN];
+    char command_channel[24];
 };
 
 struct NodeRuntime {
+    bool belegt;
     bool meta_bekannt;
     bool online;
     bool state_bekannt;
@@ -99,6 +123,7 @@ struct NodeRuntime {
     bool relay_1;
     bool relay_2;
     bool cover_mode;
+    bool cover_calibrated;
     uint8_t cover_state;
     uint8_t cover_position;
     int16_t temp_01c;
@@ -110,18 +135,28 @@ struct NodeRuntime {
     uint16_t tvoc_ppb;
     uint16_t eco2_ppm;
     bool motion;
+    uint8_t battery_pct;
+    uint16_t battery_mv;
+    uint8_t window_open;
+    uint16_t rain_raw;
+    uint8_t button_flags;
     uint32_t uptime_s;
     uint16_t caps;
     uint16_t fw_version;
+    uint8_t device_class;
+    uint8_t power_type;
     uint8_t meta_schema_version;
     uint8_t control_mode;
     uint8_t config_profile;
     uint8_t reporting_mode;
+    char device_id[SH_DEVICE_ID_LEN];
     char sensor_mask[SH_SENSOR_MASK_LEN];
     char input_mask[SH_INPUT_MASK_LEN];
     char device_name[SH_DEVICE_NAME_LEN];
     uint8_t mac[6];
     unsigned long letzter_kontakt_ms;
+    PendingCmdRequest pending_cmd;
+    PendingConfigRequest pending_cfg;
 };
 
 struct MasterState {
@@ -133,44 +168,16 @@ struct MasterState {
     uint8_t naechste_seq;
 };
 
-struct PendingRelayCommand {
-    bool aktiv;
-    size_t node_index;
-    uint8_t seq;
-    unsigned long letztes_senden_ms;
-    char request_id[REQUEST_ID_LEN];
-    char command_channel[24];
-};
-
-struct PendingConfigCommand {
-    bool aktiv;
-    size_t node_index;
-    uint8_t seq;
-    unsigned long letztes_senden_ms;
-    char request_id[REQUEST_ID_LEN];
-    char command_channel[24];
-};
-
-constexpr NodeDefinition NODE_DEFINITIONS[] = {
-    {"net_erl_01",      SH_CLASS_NET_ERL, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
-    {"net_zrl_01",      SH_CLASS_NET_ZRL, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
-    {"net_sen_01",      SH_CLASS_NET_SEN, SH_POWER_MAINS,   NODE_OFFLINE_TIMEOUT_MS},
-};
-
-constexpr size_t NODE_COUNT = sizeof(NODE_DEFINITIONS) / sizeof(NODE_DEFINITIONS[0]);
-
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 IPAddress mqttBrokerIp;
 bool mqttBrokerNutzeDirekteIp = false;
 MasterState masterStatus = {};
-NodeRuntime nodeStates[NODE_COUNT] = {};
-PendingRelayCommand pendingRelayCommand = {};
-PendingConfigCommand pendingConfigCommand = {};
+NodeRuntime nodeStates[MAX_DYNAMIC_NODES] = {};
 
 void logf(const char* level, const char* format, ...) {
     if (!DEBUG_LOKAL_AKTIV) return;
-    char message[224];
+    char message[256];
     va_list args;
     va_start(args, format);
     vsnprintf(message, sizeof(message), format, args);
@@ -254,19 +261,78 @@ const char* reportingModeText(uint8_t reportingMode) {
     }
 }
 
+const char* coverStateText(uint8_t coverStateCode, bool calibrated, uint8_t position) {
+    switch (coverStateCode) {
+        case SH_COVER_STATE_MOVING_UP: return "opening";
+        case SH_COVER_STATE_MOVING_DOWN: return "closing";
+        case SH_COVER_STATE_STOPPED:
+        default:
+            if (calibrated && position == 100U) return "open";
+            if (calibrated && position == 0U) return "closed";
+            return "stopped";
+    }
+}
+
+bool istDeviceClassGueltig(uint8_t deviceClass) {
+    switch (deviceClass) {
+        case SH_CLASS_NET_ERL:
+        case SH_CLASS_NET_ZRL:
+        case SH_CLASS_NET_SEN:
+        case SH_CLASS_BAT_SEN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool istPowerTypeGueltig(uint8_t powerType) {
+    return powerType == SH_POWER_MAINS || powerType == SH_POWER_BATTERY;
+}
+
+unsigned long offlineTimeoutMsForPowerType(uint8_t powerType) {
+    return powerType == SH_POWER_BATTERY ? BATTERY_NODE_OFFLINE_TIMEOUT_MS : NODE_OFFLINE_TIMEOUT_MS;
+}
+
+void initialisiereNodeSlot(NodeRuntime& node) {
+    node = {};
+    node.cover_state = SH_COVER_STATE_STOPPED;
+    node.cover_position = 0U;
+    node.temp_01c = INT16_MIN;
+    node.hum_01pct = 0xFFFFU;
+    node.lux = 0xFFFFU;
+    node.pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
+    node.gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+    node.aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
+    node.tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
+    node.eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
+    node.battery_pct = BATTERY_PCT_UNGUELTIG;
+    node.battery_mv = BATTERY_MV_UNGUELTIG;
+    node.window_open = WINDOW_STATE_UNGUELTIG;
+    node.rain_raw = RAIN_RAW_UNGUELTIG;
+    node.meta_schema_version = SH_META_SCHEMA_VERSION_CURRENT;
+    node.control_mode = SH_CONTROL_MODE_NONE;
+    node.config_profile = SH_PROFILE_NONE;
+    node.reporting_mode = SH_REPORTING_HYBRID;
+    copyText(node.sensor_mask, sizeof(node.sensor_mask), "XXXXXXXXXX");
+    copyText(node.input_mask, sizeof(node.input_mask), "XXXXX");
+    copyText(node.device_name, sizeof(node.device_name), "unknown");
+}
+
+void initialisiereNodeStates() {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        initialisiereNodeSlot(nodeStates[i]);
+    }
+}
+
 bool nodeHasCap(size_t nodeIndex, uint16_t cap) {
     return (nodeStates[nodeIndex].caps & cap) != 0U;
 }
 
-bool istRelayNode(size_t nodeIndex) {
-    return NODE_DEFINITIONS[nodeIndex].device_class == SH_CLASS_NET_ERL ||
-           NODE_DEFINITIONS[nodeIndex].device_class == SH_CLASS_NET_ZRL;
-}
-
 int findeNodeIndex(const char* nodeId) {
     if (!nodeId) return -1;
-    for (size_t i = 0; i < NODE_COUNT; ++i) {
-        if (strncmp(nodeId, NODE_DEFINITIONS[i].node_id, SH_DEVICE_ID_LEN) == 0) {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!nodeStates[i].belegt) continue;
+        if (strncmp(nodeStates[i].device_id, nodeId, SH_DEVICE_ID_LEN) == 0) {
             return (int)i;
         }
     }
@@ -275,39 +341,24 @@ int findeNodeIndex(const char* nodeId) {
 
 int findeNodeIndexPerMac(const uint8_t* mac) {
     if (!mac) return -1;
-    for (size_t i = 0; i < NODE_COUNT; ++i) {
-        if (nodeStates[i].mac_bekannt && memcmp(nodeStates[i].mac, mac, 6) == 0) {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!nodeStates[i].belegt || !nodeStates[i].mac_bekannt) continue;
+        if (memcmp(nodeStates[i].mac, mac, 6) == 0) {
             return (int)i;
         }
     }
     return -1;
 }
 
-uint16_t holeHelloCaps(const SmartHome::HelloPayload& payload) {
-    return (uint16_t)(((uint16_t)payload.caps_hi << 8) | payload.caps_lo);
+int findeFreienNodeIndex() {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!nodeStates[i].belegt) return (int)i;
+    }
+    return -1;
 }
 
-void initialisiereNodeStates() {
-    for (size_t i = 0; i < NODE_COUNT; ++i) {
-        nodeStates[i] = {};
-        nodeStates[i].cover_state = SH_COVER_STATE_STOPPED;
-        nodeStates[i].cover_position = 0xFFU;
-        nodeStates[i].temp_01c = INT16_MIN;
-        nodeStates[i].hum_01pct = 0xFFFFU;
-        nodeStates[i].lux = 0xFFFFU;
-        nodeStates[i].pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
-        nodeStates[i].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
-        nodeStates[i].aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
-        nodeStates[i].tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
-        nodeStates[i].eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
-        nodeStates[i].meta_schema_version = SH_META_SCHEMA_VERSION_CURRENT;
-        nodeStates[i].control_mode = SH_CONTROL_MODE_NONE;
-        nodeStates[i].config_profile = SH_PROFILE_NONE;
-        nodeStates[i].reporting_mode = SH_REPORTING_HYBRID;
-        copyText(nodeStates[i].sensor_mask, sizeof(nodeStates[i].sensor_mask), "XXXXXXXXXX");
-        copyText(nodeStates[i].input_mask, sizeof(nodeStates[i].input_mask), "XXXXX");
-        copyText(nodeStates[i].device_name, sizeof(nodeStates[i].device_name), deviceClassText(NODE_DEFINITIONS[i].device_class));
-    }
+uint16_t holeHelloCaps(const SmartHome::HelloPayload& payload) {
+    return (uint16_t)(((uint16_t)payload.caps_hi << 8) | payload.caps_lo);
 }
 
 void setzeNetSenZusatzwerteUnbekannt(size_t nodeIndex) {
@@ -319,10 +370,10 @@ void setzeNetSenZusatzwerteUnbekannt(size_t nodeIndex) {
 }
 
 void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
-    // Nach Master-Recovery kann frischer State vor frischer Meta eintreffen.
-    // Ohne bekannte Caps wuerden valide Sensorwerte hier wieder auf "unknown" fallen.
     if (!nodeStates[nodeIndex].meta_bekannt) return;
 
+    if (!nodeHasCap(nodeIndex, SH_CAP_RELAY)) nodeStates[nodeIndex].relay_1 = false;
+    if (!nodeHasCap(nodeIndex, SH_CAP_RELAY2)) nodeStates[nodeIndex].relay_2 = false;
     if (!nodeHasCap(nodeIndex, SH_CAP_TEMP)) nodeStates[nodeIndex].temp_01c = INT16_MIN;
     if (!nodeHasCap(nodeIndex, SH_CAP_HUM)) nodeStates[nodeIndex].hum_01pct = 0xFFFFU;
     if (!nodeHasCap(nodeIndex, SH_CAP_LUX)) nodeStates[nodeIndex].lux = 0xFFFFU;
@@ -333,10 +384,17 @@ void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
         nodeStates[nodeIndex].eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
     }
     if (!nodeHasCap(nodeIndex, SH_CAP_MOTION)) nodeStates[nodeIndex].motion = false;
+    if (!nodeHasCap(nodeIndex, SH_CAP_WINDOW)) nodeStates[nodeIndex].window_open = WINDOW_STATE_UNGUELTIG;
+    if (!nodeHasCap(nodeIndex, SH_CAP_RAIN)) nodeStates[nodeIndex].rain_raw = RAIN_RAW_UNGUELTIG;
+    if (!nodeHasCap(nodeIndex, SH_CAP_BATTERY)) {
+        nodeStates[nodeIndex].battery_pct = BATTERY_PCT_UNGUELTIG;
+        nodeStates[nodeIndex].battery_mv = BATTERY_MV_UNGUELTIG;
+    }
     if (!nodeHasCap(nodeIndex, SH_CAP_COVER)) {
         nodeStates[nodeIndex].cover_mode = false;
         nodeStates[nodeIndex].cover_state = SH_COVER_STATE_STOPPED;
-        nodeStates[nodeIndex].cover_position = 0xFFU;
+        nodeStates[nodeIndex].cover_position = 0U;
+        nodeStates[nodeIndex].cover_calibrated = false;
     }
 }
 
@@ -344,14 +402,16 @@ const char* availabilityStateText(size_t nodeIndex) {
     if (nodeStates[nodeIndex].online) {
         return "online";
     }
-
     const unsigned long letzterKontakt = nodeStates[nodeIndex].letzter_kontakt_ms;
-    if (letzterKontakt == 0UL) {
+    if (letzterKontakt == 0UL) return "offline";
+    const unsigned long delta = millis() - letzterKontakt;
+    const unsigned long timeout = offlineTimeoutMsForPowerType(nodeStates[nodeIndex].power_type);
+    if (nodeStates[nodeIndex].power_type == SH_POWER_BATTERY) {
+        if (delta <= timeout) return "asleep";
+        if (delta <= (timeout * 2UL)) return "late";
         return "offline";
     }
-
-    const unsigned long delta = millis() - letzterKontakt;
-    return delta <= NODE_DEFINITIONS[nodeIndex].offline_timeout_ms ? "late" : "offline";
+    return delta <= timeout ? "late" : "offline";
 }
 
 bool stellePeerSicher(const uint8_t* mac) {
@@ -425,8 +485,12 @@ void baueMasterTopic(const char* channel, char* buffer, size_t bufferSize) {
     snprintf(buffer, bufferSize, "smarthome/master/%s/%s", DEVICE_ID, channel);
 }
 
+void baueNodeTopicAusId(const char* deviceId, const char* suffix, char* buffer, size_t bufferSize) {
+    snprintf(buffer, bufferSize, "smarthome/device/%s/%s", deviceId ? deviceId : "unknown", suffix);
+}
+
 void baueNodeTopic(size_t nodeIndex, const char* suffix, char* buffer, size_t bufferSize) {
-    snprintf(buffer, bufferSize, "smarthome/device/%s/%s", NODE_DEFINITIONS[nodeIndex].node_id, suffix);
+    baueNodeTopicAusId(nodeStates[nodeIndex].device_id, suffix, buffer, bufferSize);
 }
 
 void publishRetained(const char* topic, const char* payload) {
@@ -478,10 +542,10 @@ void baueNodeMetaJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
         buffer,
         bufferSize,
         "{\"device_id\":\"%s\",\"device_name\":\"%s\",\"device_class\":\"%s\",\"power_type\":\"%s\",\"fw_version\":%u,\"caps\":%u,\"mac_address\":\"%s\",\"meta_schema_version\":%u,\"control_mode\":\"%s\",\"config_profile\":\"%s\",\"reporting_mode\":\"%s\",\"sensor_mask\":\"%s\",\"input_mask\":\"%s\"}",
-        NODE_DEFINITIONS[nodeIndex].node_id,
+        nodeStates[nodeIndex].device_id,
         nodeStates[nodeIndex].device_name,
-        deviceClassText(NODE_DEFINITIONS[nodeIndex].device_class),
-        powerTypeText(NODE_DEFINITIONS[nodeIndex].power_type),
+        deviceClassText(nodeStates[nodeIndex].device_class),
+        powerTypeText(nodeStates[nodeIndex].power_type),
         (unsigned)nodeStates[nodeIndex].fw_version,
         (unsigned)nodeStates[nodeIndex].caps,
         macBuffer,
@@ -499,10 +563,10 @@ void baueNodeAvailabilityJson(size_t nodeIndex, char* buffer, size_t bufferSize)
         buffer,
         bufferSize,
         "{\"device_id\":\"%s\",\"availability\":\"%s\",\"online\":%s,\"power_type\":\"%s\"}",
-        NODE_DEFINITIONS[nodeIndex].node_id,
+        nodeStates[nodeIndex].device_id,
         availability,
         nodeStates[nodeIndex].online ? "true" : "false",
-        powerTypeText(NODE_DEFINITIONS[nodeIndex].power_type));
+        powerTypeText(nodeStates[nodeIndex].power_type));
 }
 
 void schreibeIntOrNull(char* buffer, size_t bufferSize, long value, long invalidValue) {
@@ -530,39 +594,66 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
     char aqiText[16] = {0};
     char tvocText[16] = {0};
     char eco2Text[16] = {0};
+    char batteryPctText[16] = {0};
+    char batteryMvText[16] = {0};
+    char windowText[16] = {0};
+    char rainText[16] = {0};
     char coverPositionText[16] = {0};
 
-    switch (NODE_DEFINITIONS[nodeIndex].device_class) {
+    switch (nodeStates[nodeIndex].device_class) {
         case SH_CLASS_NET_ERL:
             schreibeIntOrNull(tempText, sizeof(tempText), nodeStates[nodeIndex].temp_01c, INT16_MIN);
             schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, 0xFFFFU);
             schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, 0xFFFFU);
+            schreibeUIntOrNull(pressureText, sizeof(pressureText), nodeStates[nodeIndex].pressure_pa, NET_SEN_PRESSURE_UNGUELTIG);
+            schreibeUIntOrNull(gasText, sizeof(gasText), nodeStates[nodeIndex].gas_ohm, NET_SEN_GAS_OHM_UNGUELTIG);
+            schreibeUIntOrNull(aqiText, sizeof(aqiText), nodeStates[nodeIndex].aqi, NET_SEN_AIR_METRIC_UNGUELTIG);
+            schreibeUIntOrNull(tvocText, sizeof(tvocText), nodeStates[nodeIndex].tvoc_ppb, NET_SEN_AIR_METRIC_UNGUELTIG);
+            schreibeUIntOrNull(eco2Text, sizeof(eco2Text), nodeStates[nodeIndex].eco2_ppm, NET_SEN_AIR_METRIC_UNGUELTIG);
             snprintf(
                 buffer,
                 bufferSize,
-                "{\"device_id\":\"%s\",\"relay_1\":%s,\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"motion\":%s,\"fault\":%s}",
-                NODE_DEFINITIONS[nodeIndex].node_id,
+                "{\"device_id\":\"%s\",\"relay_1\":%s,\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
+                nodeStates[nodeIndex].device_id,
                 nodeStates[nodeIndex].relay_1 ? "true" : "false",
                 tempText,
                 humText,
                 luxText,
+                pressureText,
+                gasText,
+                aqiText,
+                tvocText,
+                eco2Text,
                 nodeStates[nodeIndex].motion ? "true" : "false",
                 nodeStates[nodeIndex].fault ? "true" : "false");
             return;
 
         case SH_CLASS_NET_ZRL:
-            schreibeUIntOrNull(coverPositionText, sizeof(coverPositionText), nodeStates[nodeIndex].cover_position, 0xFFU);
-            snprintf(
-                buffer,
-                bufferSize,
-                "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":%u,\"cover_position\":%s,\"fault\":%s}",
-                NODE_DEFINITIONS[nodeIndex].node_id,
-                nodeStates[nodeIndex].relay_1 ? "true" : "false",
-                nodeStates[nodeIndex].relay_2 ? "true" : "false",
-                nodeStates[nodeIndex].cover_mode ? "true" : "false",
-                (unsigned)nodeStates[nodeIndex].cover_state,
-                coverPositionText,
-                nodeStates[nodeIndex].fault ? "true" : "false");
+            if (nodeStates[nodeIndex].cover_calibrated) {
+                schreibeUIntOrNull(coverPositionText, sizeof(coverPositionText), nodeStates[nodeIndex].cover_position, 255U);
+                snprintf(
+                    buffer,
+                    bufferSize,
+                    "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":\"%s\",\"cover_position\":%s,\"cover_calibrated\":true,\"fault\":%s}",
+                    nodeStates[nodeIndex].device_id,
+                    nodeStates[nodeIndex].relay_1 ? "true" : "false",
+                    nodeStates[nodeIndex].relay_2 ? "true" : "false",
+                    nodeStates[nodeIndex].cover_mode ? "true" : "false",
+                    coverStateText(nodeStates[nodeIndex].cover_state, true, nodeStates[nodeIndex].cover_position),
+                    coverPositionText,
+                    nodeStates[nodeIndex].fault ? "true" : "false");
+            } else {
+                snprintf(
+                    buffer,
+                    bufferSize,
+                    "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":\"%s\",\"cover_calibrated\":false,\"fault\":%s}",
+                    nodeStates[nodeIndex].device_id,
+                    nodeStates[nodeIndex].relay_1 ? "true" : "false",
+                    nodeStates[nodeIndex].relay_2 ? "true" : "false",
+                    nodeStates[nodeIndex].cover_mode ? "true" : "false",
+                    coverStateText(nodeStates[nodeIndex].cover_state, false, 0U),
+                    nodeStates[nodeIndex].fault ? "true" : "false");
+            }
             return;
 
         case SH_CLASS_NET_SEN:
@@ -578,7 +669,7 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 buffer,
                 bufferSize,
                 "{\"device_id\":\"%s\",\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
-                NODE_DEFINITIONS[nodeIndex].node_id,
+                nodeStates[nodeIndex].device_id,
                 tempText,
                 humText,
                 luxText,
@@ -588,6 +679,24 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 tvocText,
                 eco2Text,
                 nodeStates[nodeIndex].motion ? "true" : "false",
+                nodeStates[nodeIndex].fault ? "true" : "false");
+            return;
+
+        case SH_CLASS_BAT_SEN:
+            schreibeUIntOrNull(batteryPctText, sizeof(batteryPctText), nodeStates[nodeIndex].battery_pct, BATTERY_PCT_UNGUELTIG);
+            schreibeUIntOrNull(batteryMvText, sizeof(batteryMvText), nodeStates[nodeIndex].battery_mv, BATTERY_MV_UNGUELTIG);
+            schreibeUIntOrNull(windowText, sizeof(windowText), nodeStates[nodeIndex].window_open, WINDOW_STATE_UNGUELTIG);
+            schreibeUIntOrNull(rainText, sizeof(rainText), nodeStates[nodeIndex].rain_raw, RAIN_RAW_UNGUELTIG);
+            snprintf(
+                buffer,
+                bufferSize,
+                "{\"device_id\":\"%s\",\"battery_pct\":%s,\"battery_mv\":%s,\"window_open\":%s,\"rain_raw\":%s,\"button_flags\":%u,\"fault\":%s}",
+                nodeStates[nodeIndex].device_id,
+                batteryPctText,
+                batteryMvText,
+                windowText,
+                rainText,
+                (unsigned)nodeStates[nodeIndex].button_flags,
                 nodeStates[nodeIndex].fault ? "true" : "false");
             return;
 
@@ -603,10 +712,17 @@ const char* eventTypeText(uint8_t eventType) {
         case SH_EVENT_BUTTON_RELEASE: return "button_release";
         case SH_EVENT_BUTTON_LONG_PRESS: return "button_long_press";
         case SH_EVENT_MOTION_DETECTED: return "motion_detected";
+        case SH_EVENT_WINDOW_OPENED: return "window_opened";
+        case SH_EVENT_WINDOW_CLOSED: return "window_closed";
+        case SH_EVENT_RAIN_DETECTED: return "rain_detected";
         case SH_EVENT_RELAY_CHANGED: return "relay_changed";
+        case SH_EVENT_LIGHT_AUTO_ON: return "light_auto_on";
+        case SH_EVENT_LIGHT_AUTO_OFF: return "light_auto_off";
         case SH_EVENT_COVER_UP: return "cover_up";
         case SH_EVENT_COVER_DOWN: return "cover_down";
         case SH_EVENT_COVER_STOP: return "cover_stop";
+        case SH_EVENT_COVER_CALIB_START: return "cover_calib_start";
+        case SH_EVENT_COVER_CALIB_DONE: return "cover_calib_done";
         case SH_EVENT_NODE_BOOT: return "node_boot";
         case SH_EVENT_SENSOR_FAULT: return "sensor_fault";
         case SH_EVENT_COMM_FAULT: return "comm_fault";
@@ -619,7 +735,7 @@ void baueNodeEventJson(size_t nodeIndex, const SmartHome::EventReportPayload& pa
         buffer,
         bufferSize,
         "{\"device_id\":\"%s\",\"event\":\"%s\",\"event_type\":%u,\"trigger\":%u,\"param1\":%u,\"param2\":%u}",
-        NODE_DEFINITIONS[nodeIndex].node_id,
+        nodeStates[nodeIndex].device_id,
         eventTypeText(payload.event_type),
         (unsigned)payload.event_type,
         (unsigned)payload.trigger,
@@ -644,7 +760,7 @@ void publishMasterEvent(const char* eventName) {
 }
 
 void publishNodeMeta(size_t nodeIndex) {
-    if (!nodeStates[nodeIndex].meta_bekannt) return;
+    if (!nodeStates[nodeIndex].belegt || !nodeStates[nodeIndex].meta_bekannt) return;
     char topic[96] = {0};
     char payload[640] = {0};
     baueNodeTopic(nodeIndex, "meta", topic, sizeof(topic));
@@ -653,6 +769,7 @@ void publishNodeMeta(size_t nodeIndex) {
 }
 
 void publishNodeAvailability(size_t nodeIndex) {
+    if (!nodeStates[nodeIndex].belegt) return;
     char topic[96] = {0};
     char payload[192] = {0};
     baueNodeTopic(nodeIndex, "availability", topic, sizeof(topic));
@@ -661,7 +778,7 @@ void publishNodeAvailability(size_t nodeIndex) {
 }
 
 void publishNodeState(size_t nodeIndex) {
-    if (!nodeStates[nodeIndex].state_bekannt) return;
+    if (!nodeStates[nodeIndex].belegt || !nodeStates[nodeIndex].state_bekannt) return;
     char topic[96] = {0};
     char payload[512] = {0};
     baueNodeTopic(nodeIndex, "state", topic, sizeof(topic));
@@ -670,6 +787,7 @@ void publishNodeState(size_t nodeIndex) {
 }
 
 void publishNodeEvent(size_t nodeIndex, const SmartHome::EventReportPayload& payload) {
+    if (!nodeStates[nodeIndex].belegt) return;
     char topic[96] = {0};
     char json[224] = {0};
     baueNodeTopic(nodeIndex, "event", topic, sizeof(topic));
@@ -677,15 +795,15 @@ void publishNodeEvent(size_t nodeIndex, const SmartHome::EventReportPayload& pay
     publishTransient(topic, json);
 }
 
-void publishNodeAck(size_t nodeIndex, const char* requestId, const char* channel, const char* statusText, int statusCode, uint8_t ackMsgType, uint8_t ackSeq, const char* source) {
+void publishNodeAckById(const char* deviceId, const char* requestId, const char* channel, const char* statusText, int statusCode, uint8_t ackMsgType, uint8_t ackSeq, const char* source) {
     char topic[96] = {0};
-    char payload[320] = {0};
-    baueNodeTopic(nodeIndex, "ack", topic, sizeof(topic));
+    char payload[384] = {0};
+    baueNodeTopicAusId(deviceId, "ack", topic, sizeof(topic));
     snprintf(
         payload,
         sizeof(payload),
         "{\"device_id\":\"%s\",\"request_id\":\"%s\",\"channel\":\"%s\",\"status\":\"%s\",\"status_code\":%d,\"ack_msg_type\":%u,\"ack_seq\":%u,\"source\":\"%s\"}",
-        NODE_DEFINITIONS[nodeIndex].node_id,
+        deviceId ? deviceId : "unknown",
         requestId ? requestId : "",
         channel ? channel : "command",
         statusText ? statusText : "unknown",
@@ -696,10 +814,15 @@ void publishNodeAck(size_t nodeIndex, const char* requestId, const char* channel
     publishTransient(topic, payload);
 }
 
+void publishNodeAck(size_t nodeIndex, const char* requestId, const char* channel, const char* statusText, int statusCode, uint8_t ackMsgType, uint8_t ackSeq, const char* source) {
+    publishNodeAckById(nodeStates[nodeIndex].device_id, requestId, channel, statusText, statusCode, ackMsgType, ackSeq, source);
+}
+
 void publishBekannteNodesNachReconnect() {
     publishMasterStatus();
     publishMasterEvent("mqtt_connected");
-    for (size_t i = 0; i < NODE_COUNT; ++i) {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!nodeStates[i].belegt) continue;
         publishNodeMeta(i);
         publishNodeAvailability(i);
         publishNodeState(i);
@@ -717,7 +840,7 @@ void aktualisiereNodeKontakt(size_t nodeIndex, const uint8_t* mac) {
         if (neueMac) {
             char text[18] = {0};
             macText(mac, text, sizeof(text));
-            logf("INFO", "%s MAC aktualisiert: %s", NODE_DEFINITIONS[nodeIndex].node_id, text);
+            logf("INFO", "%s MAC aktualisiert: %s", nodeStates[nodeIndex].device_id, text);
         }
     }
 
@@ -725,7 +848,7 @@ void aktualisiereNodeKontakt(size_t nodeIndex, const uint8_t* mac) {
     nodeStates[nodeIndex].online = true;
     if (warOffline) {
         publishNodeAvailability(nodeIndex);
-        logf("INFO", "Node %s ist online", NODE_DEFINITIONS[nodeIndex].node_id);
+        logf("INFO", "Node %s ist online", nodeStates[nodeIndex].device_id);
     }
 }
 
@@ -736,17 +859,53 @@ void sendeHelloAck(const uint8_t* zielMac, uint8_t ackStatus) {
     sendePaket(zielMac, SH_MSG_HELLO_ACK, &payload, sizeof(payload), "HELLO_ACK");
 }
 
-void verarbeiteHello(const uint8_t* senderMac, const SmartHome::HelloPayload& payload) {
-    const int nodeIndex = findeNodeIndex(payload.device_id);
-    if (nodeIndex < 0) {
-        logf("WARN", "HELLO ignoriert: unbekannte node_id=%s", payload.device_id);
-        sendeHelloAck(senderMac, SH_ACK_REJECTED);
-        return;
+int registriereOderFindeNode(const uint8_t* senderMac, const SmartHome::HelloPayload& payload) {
+    if (!SmartHome::isValidDeviceId(payload.device_id)) {
+        logf("WARN", "HELLO abgelehnt: ungueltige device_id=%s", payload.device_id);
+        return -1;
+    }
+    if (!istDeviceClassGueltig(payload.device_class) || !istPowerTypeGueltig(payload.power_type)) {
+        logf("WARN", "HELLO abgelehnt: class=%u power=%u", (unsigned)payload.device_class, (unsigned)payload.power_type);
+        return -1;
+    }
+    const int idIndex = findeNodeIndex(payload.device_id);
+    const int macIndex = findeNodeIndexPerMac(senderMac);
+
+    if (idIndex >= 0) {
+        if (nodeStates[idIndex].device_class != payload.device_class || nodeStates[idIndex].power_type != payload.power_type) {
+            logf("WARN", "HELLO abgelehnt: bestehende node %s hat andere class/power", payload.device_id);
+            return -1;
+        }
+        if (macIndex >= 0 && macIndex != idIndex) {
+            logf("WARN", "HELLO abgelehnt: MAC-Konflikt fuer %s", payload.device_id);
+            return -1;
+        }
+        return idIndex;
     }
 
-    if (payload.device_class != NODE_DEFINITIONS[nodeIndex].device_class ||
-        payload.power_type != NODE_DEFINITIONS[nodeIndex].power_type) {
-        logf("WARN", "HELLO abgelehnt: node=%s class=%u power=%u", payload.device_id, (unsigned)payload.device_class, (unsigned)payload.power_type);
+    if (macIndex >= 0 && strncmp(nodeStates[macIndex].device_id, payload.device_id, SH_DEVICE_ID_LEN) != 0) {
+        logf("WARN", "HELLO abgelehnt: bekannte MAC gehoert bereits zu %s", nodeStates[macIndex].device_id);
+        return -1;
+    }
+
+    const int freeIndex = findeFreienNodeIndex();
+    if (freeIndex < 0) {
+        logf("WARN", "HELLO abgelehnt: Registry voll (device_id=%s)", payload.device_id);
+        return -1;
+    }
+
+    initialisiereNodeSlot(nodeStates[freeIndex]);
+    nodeStates[freeIndex].belegt = true;
+    nodeStates[freeIndex].device_class = payload.device_class;
+    nodeStates[freeIndex].power_type = payload.power_type;
+    copyText(nodeStates[freeIndex].device_id, sizeof(nodeStates[freeIndex].device_id), payload.device_id);
+    logf("INFO", "Node dynamisch registriert: %s (%s)", payload.device_id, deviceClassText(payload.device_class));
+    return freeIndex;
+}
+
+void verarbeiteHello(const uint8_t* senderMac, const SmartHome::HelloPayload& payload) {
+    const int nodeIndex = registriereOderFindeNode(senderMac, payload);
+    if (nodeIndex < 0) {
         sendeHelloAck(senderMac, SH_ACK_REJECTED);
         return;
     }
@@ -801,62 +960,54 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
 
     aktualisiereNodeKontakt((size_t)nodeIndex, senderMac);
 
-    switch (NODE_DEFINITIONS[nodeIndex].device_class) {
+    switch (nodeStates[nodeIndex].device_class) {
         case SH_CLASS_NET_ERL: {
             if (payloadLen == sizeof(SmartHome::StateReportPayload)) {
                 const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
                 nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
-                logf("INFO",
-                    "STATE_REPORT %s payloadLen=%u relay_1=%u fault=%u (basic)",
-                    nodeId,
-                    (unsigned)payloadLen,
-                    (unsigned)state.relay_1,
-                    (unsigned)state.fault);
                 break;
             }
-
             if (payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload) ||
                 payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)) {
-                const SmartHome::RelayComfortStateReportPayload& state =
-                    *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
+                const SmartHome::RelayComfortStateReportPayload& state = *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
                 nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
                 nodeStates[nodeIndex].temp_01c = state.temp_01c;
                 nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
                 nodeStates[nodeIndex].lux = state.lux;
                 nodeStates[nodeIndex].motion = (state.motion != 0U);
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
-                logf("INFO",
-                    "STATE_REPORT %s payloadLen=%u relay_1=%u temp_01c=%d hum_01pct=%u lux=%u motion=%u fault=%u (relay_comfort%s)",
-                    nodeId,
-                    (unsigned)payloadLen,
-                    (unsigned)state.relay_1,
-                    (int)state.temp_01c,
-                    (unsigned)state.hum_01pct,
-                    (unsigned)state.lux,
-                    (unsigned)state.motion,
-                    (unsigned)state.fault,
-                    payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload) ? "_config" : "");
                 break;
             }
-
             logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
             return;
         }
 
         case SH_CLASS_NET_ZRL: {
-            if (payloadLen != sizeof(SmartHome::ZrlStateReportPayload)) {
-                logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-                return;
+            if (payloadLen == sizeof(SmartHome::ZrlStateReportPayload)) {
+                const SmartHome::ZrlStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
+                nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
+                nodeStates[nodeIndex].cover_state = state.cover_state;
+                nodeStates[nodeIndex].cover_position = state.cover_position;
+                nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
             }
-            const SmartHome::ZrlStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload);
-            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-            nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
-            nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
-            nodeStates[nodeIndex].cover_state = state.cover_state;
-            nodeStates[nodeIndex].cover_position = state.cover_position;
-            nodeStates[nodeIndex].fault = (state.fault != 0U);
-            break;
+            if (payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
+                const SmartHome::ZrlConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlConfigStateReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
+                nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
+                nodeStates[nodeIndex].cover_state = state.cover_state;
+                nodeStates[nodeIndex].cover_position = state.cover_position;
+                nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
+            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
+            return;
         }
 
         case SH_CLASS_NET_SEN: {
@@ -870,7 +1021,6 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 setzeNetSenZusatzwerteUnbekannt((size_t)nodeIndex);
                 break;
             }
-
             if (payloadLen == sizeof(SmartHome::SensorConfigStateReportPayload)) {
                 const SmartHome::SensorConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorConfigStateReportPayload*>(payload);
                 nodeStates[nodeIndex].temp_01c = state.temp_01c;
@@ -881,7 +1031,6 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 setzeNetSenZusatzwerteUnbekannt((size_t)nodeIndex);
                 break;
             }
-
             if (payloadLen == sizeof(SmartHome::ExtendedSensorStateReportPayload) ||
                 payloadLen == sizeof(SmartHome::ExtendedSensorConfigStateReportPayload)) {
                 const SmartHome::ExtendedSensorStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorStateReportPayload*>(payload);
@@ -897,7 +1046,6 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
                 break;
             }
-
             if (payloadLen == sizeof(SmartHome::ExtendedSensorGasStateReportPayload) ||
                 payloadLen == sizeof(SmartHome::ExtendedSensorGasConfigStateReportPayload)) {
                 const SmartHome::ExtendedSensorGasStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorGasStateReportPayload*>(payload);
@@ -913,7 +1061,31 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
                 break;
             }
+            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
+            return;
+        }
 
+        case SH_CLASS_BAT_SEN: {
+            if (payloadLen == sizeof(SmartHome::BatteryStateReportPayload)) {
+                const SmartHome::BatteryStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryStateReportPayload*>(payload);
+                nodeStates[nodeIndex].battery_pct = state.battery_pct;
+                nodeStates[nodeIndex].battery_mv = state.battery_mv;
+                nodeStates[nodeIndex].window_open = state.window_open;
+                nodeStates[nodeIndex].rain_raw = state.rain_raw;
+                nodeStates[nodeIndex].button_flags = state.button_flags;
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
+            if (payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
+                const SmartHome::BatteryConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryConfigStateReportPayload*>(payload);
+                nodeStates[nodeIndex].battery_pct = state.battery_pct;
+                nodeStates[nodeIndex].battery_mv = state.battery_mv;
+                nodeStates[nodeIndex].window_open = state.window_open;
+                nodeStates[nodeIndex].rain_raw = state.rain_raw;
+                nodeStates[nodeIndex].button_flags = state.button_flags;
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
             logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
             return;
         }
@@ -950,23 +1122,21 @@ void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payloa
         return;
     }
 
-    if (pendingConfigCommand.aktiv &&
-        pendingConfigCommand.node_index == (size_t)nodeIndex &&
+    if (nodeStates[nodeIndex].pending_cfg.aktiv &&
         payload.ack_msg_type == SH_MSG_CFG &&
-        payload.ack_seq == pendingConfigCommand.seq) {
+        payload.ack_seq == nodeStates[nodeIndex].pending_cfg.seq) {
         const char* statusText = payload.status == SH_ACK_OK ? "ok" : (payload.status == SH_ACK_REJECTED ? "rejected" : "error");
-        publishNodeAck((size_t)nodeIndex, pendingConfigCommand.request_id, pendingConfigCommand.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
-        pendingConfigCommand = {};
+        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cfg.request_id, nodeStates[nodeIndex].pending_cfg.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
+        nodeStates[nodeIndex].pending_cfg = {};
         return;
     }
 
-    if (pendingRelayCommand.aktiv &&
-        pendingRelayCommand.node_index == (size_t)nodeIndex &&
+    if (nodeStates[nodeIndex].pending_cmd.aktiv &&
         payload.ack_msg_type == SH_MSG_CMD &&
-        payload.ack_seq == pendingRelayCommand.seq) {
+        payload.ack_seq == nodeStates[nodeIndex].pending_cmd.seq) {
         const char* statusText = payload.status == SH_ACK_OK ? "ok" : (payload.status == SH_ACK_REJECTED ? "rejected" : "error");
-        publishNodeAck((size_t)nodeIndex, pendingRelayCommand.request_id, pendingRelayCommand.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
-        pendingRelayCommand = {};
+        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cmd.request_id, nodeStates[nodeIndex].pending_cmd.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
+        nodeStates[nodeIndex].pending_cmd = {};
         return;
     }
 
@@ -1040,7 +1210,7 @@ void onEspNowSent(const uint8_t* mac, esp_now_send_status_t status) {
 
 bool sendeStateRequest(size_t nodeIndex) {
     if (!nodeStates[nodeIndex].mac_bekannt) {
-        logf("WARN", "STATE_REQUEST verworfen: MAC fuer %s unbekannt", NODE_DEFINITIONS[nodeIndex].node_id);
+        logf("WARN", "STATE_REQUEST verworfen: MAC fuer %s unbekannt", nodeStates[nodeIndex].device_id);
         return false;
     }
 
@@ -1049,16 +1219,16 @@ bool sendeStateRequest(size_t nodeIndex) {
     return sendePaket(nodeStates[nodeIndex].mac, SH_MSG_CMD, &payload, sizeof(payload), "STATE_REQUEST");
 }
 
-bool sendeRelayCommand(size_t nodeIndex, uint8_t relayIndex, bool relayState, const char* requestId, const char* channel) {
+bool sendeCmdRequest(size_t nodeIndex, uint8_t cmdType, uint8_t param1, uint8_t param2, const char* requestId, const char* channel, const char* label) {
     if (!nodeStates[nodeIndex].mac_bekannt) {
-        logf("WARN", "COMMAND_SET_RELAY verworfen: MAC fuer %s unbekannt", NODE_DEFINITIONS[nodeIndex].node_id);
+        logf("WARN", "%s verworfen: MAC fuer %s unbekannt", label, nodeStates[nodeIndex].device_id);
         return false;
     }
 
     SmartHome::CmdPayload payload = {};
-    payload.cmd_type = SH_CMD_SET_RELAY;
-    payload.param1 = relayIndex;
-    payload.param2 = relayState ? 1U : 0U;
+    payload.cmd_type = cmdType;
+    payload.param1 = param1;
+    payload.param2 = param2;
 
     uint8_t seq = 0U;
     const bool erfolgreich = sendePaketMitOptionen(
@@ -1066,29 +1236,38 @@ bool sendeRelayCommand(size_t nodeIndex, uint8_t relayIndex, bool relayState, co
         SH_MSG_CMD,
         &payload,
         sizeof(payload),
-        "COMMAND_SET_RELAY",
+        label,
         SH_FLAG_ACK_REQUEST,
         false,
         0U,
         &seq);
 
-    if (!erfolgreich) {
-        return false;
-    }
+    if (!erfolgreich) return false;
 
-    pendingRelayCommand = {};
-    pendingRelayCommand.aktiv = true;
-    pendingRelayCommand.node_index = nodeIndex;
-    pendingRelayCommand.seq = seq;
-    pendingRelayCommand.letztes_senden_ms = millis();
-    copyText(pendingRelayCommand.request_id, sizeof(pendingRelayCommand.request_id), requestId);
-    copyText(pendingRelayCommand.command_channel, sizeof(pendingRelayCommand.command_channel), channel ? channel : "command");
+    nodeStates[nodeIndex].pending_cmd = {};
+    nodeStates[nodeIndex].pending_cmd.aktiv = true;
+    nodeStates[nodeIndex].pending_cmd.seq = seq;
+    nodeStates[nodeIndex].pending_cmd.retries = 0U;
+    nodeStates[nodeIndex].pending_cmd.cmd_type = cmdType;
+    nodeStates[nodeIndex].pending_cmd.param1 = param1;
+    nodeStates[nodeIndex].pending_cmd.param2 = param2;
+    nodeStates[nodeIndex].pending_cmd.letztes_senden_ms = millis();
+    copyText(nodeStates[nodeIndex].pending_cmd.request_id, sizeof(nodeStates[nodeIndex].pending_cmd.request_id), requestId);
+    copyText(nodeStates[nodeIndex].pending_cmd.command_channel, sizeof(nodeStates[nodeIndex].pending_cmd.command_channel), channel ? channel : "command");
     return true;
+}
+
+bool sendeRelayCommand(size_t nodeIndex, uint8_t relayIndex, bool relayState, const char* requestId, const char* channel) {
+    return sendeCmdRequest(nodeIndex, SH_CMD_SET_RELAY, relayIndex, relayState ? 1U : 0U, requestId, channel, "COMMAND_SET_RELAY");
+}
+
+bool sendeCoverCommand(size_t nodeIndex, uint8_t coverAction, uint8_t position, const char* requestId, const char* channel) {
+    return sendeCmdRequest(nodeIndex, SH_CMD_COVER, coverAction, position, requestId, channel, "COMMAND_COVER");
 }
 
 bool sendeConfigCommand(size_t nodeIndex, uint8_t paramId, uint16_t value, const char* requestId, const char* channel) {
     if (!nodeStates[nodeIndex].mac_bekannt) {
-        logf("WARN", "CONFIG_SET verworfen: MAC fuer %s unbekannt", NODE_DEFINITIONS[nodeIndex].node_id);
+        logf("WARN", "CONFIG_SET verworfen: MAC fuer %s unbekannt", nodeStates[nodeIndex].device_id);
         return false;
     }
 
@@ -1108,17 +1287,17 @@ bool sendeConfigCommand(size_t nodeIndex, uint8_t paramId, uint16_t value, const
         0U,
         &seq);
 
-    if (!erfolgreich) {
-        return false;
-    }
+    if (!erfolgreich) return false;
 
-    pendingConfigCommand = {};
-    pendingConfigCommand.aktiv = true;
-    pendingConfigCommand.node_index = nodeIndex;
-    pendingConfigCommand.seq = seq;
-    pendingConfigCommand.letztes_senden_ms = millis();
-    copyText(pendingConfigCommand.request_id, sizeof(pendingConfigCommand.request_id), requestId);
-    copyText(pendingConfigCommand.command_channel, sizeof(pendingConfigCommand.command_channel), channel ? channel : "command");
+    nodeStates[nodeIndex].pending_cfg = {};
+    nodeStates[nodeIndex].pending_cfg.aktiv = true;
+    nodeStates[nodeIndex].pending_cfg.seq = seq;
+    nodeStates[nodeIndex].pending_cfg.retries = 0U;
+    nodeStates[nodeIndex].pending_cfg.param_id = paramId;
+    nodeStates[nodeIndex].pending_cfg.value = value;
+    nodeStates[nodeIndex].pending_cfg.letztes_senden_ms = millis();
+    copyText(nodeStates[nodeIndex].pending_cfg.request_id, sizeof(nodeStates[nodeIndex].pending_cfg.request_id), requestId);
+    copyText(nodeStates[nodeIndex].pending_cfg.command_channel, sizeof(nodeStates[nodeIndex].pending_cfg.command_channel), channel ? channel : "command");
     return true;
 }
 
@@ -1247,26 +1426,10 @@ bool parseSetConfigMinimal(size_t nodeIndex, const char* json, uint8_t* paramId,
         return false;
     }
 
-    const char* deviceType = deviceClassText(NODE_DEFINITIONS[nodeIndex].device_class);
-    bool legacyBool = false;
-    long legacyNumber = 0L;
-    if (jsonHoleBool(valuesJson, "automation_enabled", &legacyBool) ||
-        jsonHoleZahl(valuesJson, "auto_on_lux_threshold", &legacyNumber) ||
-        jsonHoleZahl(valuesJson, "auto_off_delay_s", &legacyNumber)) {
-        copyText(errorText, errorSize, "Alte set_config-Felder sind im Master deaktiviert");
-        return false;
-    }
-
     long numberValue = 0L;
-
     if (jsonHoleZahl(valuesJson, "report_interval_s", &numberValue)) {
         if (numberValue < CFG_REPORT_INTERVAL_MIN || numberValue > CFG_REPORT_INTERVAL_MAX) {
-            snprintf(
-                errorText,
-                errorSize,
-                "report_interval_s ausserhalb %ld..%ld",
-                CFG_REPORT_INTERVAL_MIN,
-                CFG_REPORT_INTERVAL_MAX);
+            snprintf(errorText, errorSize, "report_interval_s ausserhalb %ld..%ld", CFG_REPORT_INTERVAL_MIN, CFG_REPORT_INTERVAL_MAX);
             return false;
         }
         *paramId = SH_CFG_REPORT_INTERVAL_S;
@@ -1274,8 +1437,27 @@ bool parseSetConfigMinimal(size_t nodeIndex, const char* json, uint8_t* paramId,
         return true;
     }
 
-    snprintf(errorText, errorSize, "Kein unterstuetztes CFG-Feld fuer %s gefunden", deviceType);
+    snprintf(errorText, errorSize, "Kein unterstuetztes CFG-Feld fuer %s gefunden", deviceClassText(nodeStates[nodeIndex].device_class));
     return false;
+}
+
+bool istCoverGeraet(size_t nodeIndex) {
+    return nodeStates[nodeIndex].control_mode == SH_CONTROL_MODE_COVER || nodeHasCap(nodeIndex, SH_CAP_COVER);
+}
+
+bool istRelayBefehlZulaessig(size_t nodeIndex, uint8_t relayIndex) {
+    if (istCoverGeraet(nodeIndex)) return false;
+    if (relayIndex == 0U) {
+        return nodeHasCap(nodeIndex, SH_CAP_RELAY);
+    }
+    if (relayIndex == 1U) {
+        return nodeHasCap(nodeIndex, SH_CAP_RELAY2);
+    }
+    return false;
+}
+
+uint8_t ackMsgTypeFuerCommand(const char* cmd) {
+    return (cmd != nullptr && strcmp(cmd, "set_config") == 0) ? SH_MSG_CFG : SH_MSG_CMD;
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -1310,12 +1492,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     memcpy(nodeId, start, nodeLen);
     nodeId[nodeLen] = '\0';
 
-    const int nodeIndex = findeNodeIndex(nodeId);
-    if (nodeIndex < 0) {
-        logf("WARN", "MQTT Command fuer unbekannte device_id=%s", nodeId);
-        return;
-    }
-
     char cmd[32] = {0};
     if (!jsonHoleString(json, "command", cmd, sizeof(cmd)) || cmd[0] == '\0') {
         logf("WARN", "MQTT command ohne gueltiges command-Feld fuer %s", nodeId);
@@ -1324,7 +1500,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     logf("INFO", "MQTT empfangen %s -> %s", topic, json);
 
+    const int nodeIndex = findeNodeIndex(nodeId);
     if (strcmp(cmd, "get_state") == 0) {
+        if (nodeIndex < 0) {
+            logf("WARN", "MQTT get_state fuer unbekannte device_id=%s", nodeId);
+            return;
+        }
         sendeStateRequest((size_t)nodeIndex);
         return;
     }
@@ -1336,25 +1517,35 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
 
     const char* commandChannel = "command";
+    const uint8_t ackMsgType = ackMsgTypeFuerCommand(cmd);
+
+    if (nodeIndex < 0) {
+        publishNodeAckById(nodeId, requestId, commandChannel, "unknown_device", STATUS_CODE_UNKNOWN_DEVICE, ackMsgType, 0U, "master_registry");
+        return;
+    }
 
     if (strcmp(cmd, "set_relay") == 0) {
-        if (!istRelayNode((size_t)nodeIndex)) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
-            return;
-        }
-        if (pendingRelayCommand.aktiv && pendingRelayCommand.node_index == (size_t)nodeIndex) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, pendingRelayCommand.seq, "master_busy");
+        if (nodeStates[nodeIndex].pending_cmd.aktiv) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
             return;
         }
 
         bool relayState = false;
         if (jsonHoleBool(json, "relay_1", &relayState)) {
+            if (!istRelayBefehlZulaessig((size_t)nodeIndex, 0U)) {
+                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
+                return;
+            }
             if (!sendeRelayCommand((size_t)nodeIndex, 0U, relayState, requestId, commandChannel)) {
                 publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
             }
             return;
         }
-        if (NODE_DEFINITIONS[nodeIndex].device_class == SH_CLASS_NET_ZRL && jsonHoleBool(json, "relay_2", &relayState)) {
+        if (jsonHoleBool(json, "relay_2", &relayState)) {
+            if (!istRelayBefehlZulaessig((size_t)nodeIndex, 1U)) {
+                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
+                return;
+            }
             if (!sendeRelayCommand((size_t)nodeIndex, 1U, relayState, requestId, commandChannel)) {
                 publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
             }
@@ -1365,9 +1556,53 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
+    if (strcmp(cmd, "open") == 0 || strcmp(cmd, "close") == 0 || strcmp(cmd, "stop") == 0 || strcmp(cmd, "set_position") == 0) {
+        if (!istCoverGeraet((size_t)nodeIndex)) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
+            return;
+        }
+        if (nodeStates[nodeIndex].pending_cmd.aktiv) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
+            return;
+        }
+
+        if (strcmp(cmd, "open") == 0) {
+            if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_OPEN, 0U, requestId, commandChannel)) {
+                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+            }
+            return;
+        }
+        if (strcmp(cmd, "close") == 0) {
+            if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_CLOSE, 0U, requestId, commandChannel)) {
+                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+            }
+            return;
+        }
+        if (strcmp(cmd, "stop") == 0) {
+            if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_STOP, 0U, requestId, commandChannel)) {
+                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+            }
+            return;
+        }
+
+        long position = -1L;
+        if (!jsonHoleZahl(json, "position", &position) || position < 0L || position > 100L) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
+            return;
+        }
+        if (!nodeStates[nodeIndex].cover_calibrated) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "not_calibrated", STATUS_CODE_NOT_CALIBRATED, SH_MSG_CMD, 0U, "master_validation");
+            return;
+        }
+        if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_SET_POSITION, (uint8_t)position, requestId, commandChannel)) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+        }
+        return;
+    }
+
     if (strcmp(cmd, "set_config") == 0) {
-        if (pendingConfigCommand.aktiv && pendingConfigCommand.node_index == (size_t)nodeIndex) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CFG, pendingConfigCommand.seq, "master_busy");
+        if (nodeStates[nodeIndex].pending_cfg.aktiv) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CFG, nodeStates[nodeIndex].pending_cfg.seq, "master_busy");
             return;
         }
 
@@ -1501,47 +1736,74 @@ void pruefeMqttVerbindung() {
     publishBekannteNodesNachReconnect();
 }
 
-void pruefePendingRelayTimeout() {
-    if (!pendingRelayCommand.aktiv) return;
-    if ((millis() - pendingRelayCommand.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) return;
+void pruefePendingCmdTimeouts() {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!nodeStates[i].belegt || !nodeStates[i].pending_cmd.aktiv) continue;
+        if ((millis() - nodeStates[i].pending_cmd.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) continue;
 
-    publishNodeAck(
-        pendingRelayCommand.node_index,
-        pendingRelayCommand.request_id,
-        pendingRelayCommand.command_channel,
-        "timeout",
-        (int)SH_ERROR_ACK_TIMEOUT,
-        SH_MSG_CMD,
-        pendingRelayCommand.seq,
-        "master_timeout");
+        if (nodeStates[i].pending_cmd.retries < COMMAND_MAX_RETRIES) {
+            SmartHome::CmdPayload payload = {};
+            payload.cmd_type = nodeStates[i].pending_cmd.cmd_type;
+            payload.param1 = nodeStates[i].pending_cmd.param1;
+            payload.param2 = nodeStates[i].pending_cmd.param2;
+            if (sendePaketMitOptionen(
+                    nodeStates[i].mac,
+                    SH_MSG_CMD,
+                    &payload,
+                    sizeof(payload),
+                    "COMMAND retry",
+                    (uint8_t)(SH_FLAG_ACK_REQUEST | SH_FLAG_RETRANSMIT),
+                    true,
+                    nodeStates[i].pending_cmd.seq,
+                    nullptr)) {
+                nodeStates[i].pending_cmd.retries++;
+                nodeStates[i].pending_cmd.letztes_senden_ms = millis();
+                continue;
+            }
+        }
 
-    pendingRelayCommand = {};
+        publishNodeAck(i, nodeStates[i].pending_cmd.request_id, nodeStates[i].pending_cmd.command_channel, "timeout", (int)SH_ERROR_ACK_TIMEOUT, SH_MSG_CMD, nodeStates[i].pending_cmd.seq, "master_timeout");
+        nodeStates[i].pending_cmd = {};
+    }
 }
 
-void pruefePendingConfigTimeout() {
-    if (!pendingConfigCommand.aktiv) return;
-    if ((millis() - pendingConfigCommand.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) return;
+void pruefePendingCfgTimeouts() {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!nodeStates[i].belegt || !nodeStates[i].pending_cfg.aktiv) continue;
+        if ((millis() - nodeStates[i].pending_cfg.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) continue;
 
-    publishNodeAck(
-        pendingConfigCommand.node_index,
-        pendingConfigCommand.request_id,
-        pendingConfigCommand.command_channel,
-        "timeout",
-        (int)SH_ERROR_ACK_TIMEOUT,
-        SH_MSG_CFG,
-        pendingConfigCommand.seq,
-        "master_timeout");
+        if (nodeStates[i].pending_cfg.retries < COMMAND_MAX_RETRIES) {
+            SmartHome::CfgPayload payload = {};
+            payload.param_id = nodeStates[i].pending_cfg.param_id;
+            payload.value = nodeStates[i].pending_cfg.value;
+            if (sendePaketMitOptionen(
+                    nodeStates[i].mac,
+                    SH_MSG_CFG,
+                    &payload,
+                    sizeof(payload),
+                    "CONFIG retry",
+                    (uint8_t)(SH_FLAG_ACK_REQUEST | SH_FLAG_RETRANSMIT),
+                    true,
+                    nodeStates[i].pending_cfg.seq,
+                    nullptr)) {
+                nodeStates[i].pending_cfg.retries++;
+                nodeStates[i].pending_cfg.letztes_senden_ms = millis();
+                continue;
+            }
+        }
 
-    pendingConfigCommand = {};
+        publishNodeAck(i, nodeStates[i].pending_cfg.request_id, nodeStates[i].pending_cfg.command_channel, "timeout", (int)SH_ERROR_ACK_TIMEOUT, SH_MSG_CFG, nodeStates[i].pending_cfg.seq, "master_timeout");
+        nodeStates[i].pending_cfg = {};
+    }
 }
 
 void pruefeOfflineTimeout() {
-    for (size_t i = 0; i < NODE_COUNT; ++i) {
-        if (!nodeStates[i].online) continue;
-        if ((millis() - nodeStates[i].letzter_kontakt_ms) > NODE_DEFINITIONS[i].offline_timeout_ms) {
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!nodeStates[i].belegt || !nodeStates[i].online) continue;
+        if ((millis() - nodeStates[i].letzter_kontakt_ms) > offlineTimeoutMsForPowerType(nodeStates[i].power_type)) {
             nodeStates[i].online = false;
             publishNodeAvailability(i);
-            logf("WARN", "Node %s nicht mehr online (availability=%s)", NODE_DEFINITIONS[i].node_id, availabilityStateText(i));
+            logf("WARN", "Node %s nicht mehr online (availability=%s)", nodeStates[i].device_id, availabilityStateText(i));
         }
     }
 }
@@ -1558,22 +1820,18 @@ void gibStartmeldungAus() {
     Serial.println(PROJECT_VERSION);
     Serial.print("Variante: ");
     Serial.println(FW_VARIANT);
-    Serial.println("Master-MVP:");
+    Serial.println("Master-Stand:");
+    Serial.println(" - dynamische Node-Registry");
     Serial.println(" - HELLO / HELLO_ACK / HEARTBEAT / STATE / EVENT / ACK");
-    Serial.println(" - einfache Meta-/Availability-/State-/Event-Themen");
-    Serial.println(" - kein config_schema / kein config_state");
-    Serial.println(" - keine profileHint-Sonderlogik");
-    Serial.println(" - HELLO mit control/profile/reporting/masks");
-    Serial.println("Bekannte Nodes:");
-    for (size_t i = 0; i < NODE_COUNT; ++i) {
-        Serial.print(" - ");
-        Serial.print(NODE_DEFINITIONS[i].node_id);
-        Serial.print(" (");
-        Serial.print(deviceClassText(NODE_DEFINITIONS[i].device_class));
-        Serial.println(")");
-    }
+    Serial.println(" - set_relay / get_state / set_config(report_interval_s)");
+    Serial.println(" - cover: open / close / stop / set_position");
+    Serial.println(" - Pending/ACK pro Geraet");
+    Serial.print("Max. dynamische Nodes: ");
+    Serial.println(MAX_DYNAMIC_NODES);
     Serial.println("================================");
 }
+
+}  // namespace
 
 void setup() {
     if (DEBUG_LOKAL_AKTIV) {
@@ -1595,8 +1853,8 @@ void setup() {
 void loop() {
     pruefeWlanVerbindung();
     pruefeMqttVerbindung();
-    pruefePendingRelayTimeout();
-    pruefePendingConfigTimeout();
+    pruefePendingCmdTimeouts();
+    pruefePendingCfgTimeouts();
     pruefeOfflineTimeout();
     delay(LOOP_INTERVAL_MS);
 }
