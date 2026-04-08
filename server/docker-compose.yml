@@ -80,8 +80,12 @@ services:
         async function ensurePhase1Migrations(db) {
           const stateColumns = await queryAll(db, "PRAGMA table_info(device_state_latest)");
           const hasCoverDirection = stateColumns.some((column) => column && column.name === 'cover_direction');
+          const hasCoverCalibrated = stateColumns.some((column) => column && column.name === 'cover_calibrated');
           if (!hasCoverDirection) {
             await runSql(db, "ALTER TABLE device_state_latest ADD COLUMN cover_direction TEXT");
+          }
+          if (!hasCoverCalibrated) {
+            await runSql(db, "ALTER TABLE device_state_latest ADD COLUMN cover_calibrated INTEGER");
           }
         }
         function ensureSchema() {

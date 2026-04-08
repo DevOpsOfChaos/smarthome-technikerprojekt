@@ -7,7 +7,7 @@ Phase 1 zieht nur den fachlichen Kern hoch:
 - MQTT-Ingest fuer Geraete und Master
 - Topic-Routing auf kleine Handler
 - gemeinsames Geraeteobjekt als fachliche Mitte
-- ein einziger offizieller Command-Ausgang fuer `net_erl` Relay 1
+- enge offizielle Command-Ausgaenge fuer `net_erl` Relay 1 und Cover
 - separater Masterzustand
 - minimales SQLite-Schema als spaetere Persistenzbasis
 
@@ -17,7 +17,7 @@ Nicht Teil dieser Stufe sind breite UI, Diagramme, eine allgemeine Command-Welt,
 
 Auf `main` ist dieser Zuschnitt nicht nur beschrieben, sondern auf dem realen Pfad nachgewiesen:
 
-- der offizielle Server-Einstieg `POST /api/phase1/net-erl/relay-1` ist aktiv
+- die offiziellen Server-Einstiege `POST /api/phase1/net-erl/relay-1` und `POST /api/phase1/cover/command` sind aktiv
 - fuer `net_erl_01` ist der echte HTTP -> MQTT -> Master -> Geraet -> ACK/State-Roundtrip belegt
 - derselbe Minimalpfad ist nach Server-Restart erneut belegt
 - derselbe Minimalpfad ist nach gezieltem Node-Recovery erneut belegt
@@ -39,7 +39,7 @@ Die passenden Detailnachweise liegen in `PROTOKOLL/` und bauen auf derselben Pha
 - `00_boot` initialisiert den gemeinsamen Runtime-State
 - `10_mqtt_ingest` abonniert nur die Pflicht-Topics und verteilt sie weiter
 - `20_device_store` pflegt das Geraeteobjekt
-- `40_command_minimal` baut genau einen offiziellen Command-Einstieg fuer `net_erl` Relay 1
+- `40_command_minimal` baut die engen offiziellen Command-Einstiege fuer `net_erl` Relay 1 und Cover
 - `90_master_diag` haelt Masterstatus und Masterevents getrennt
 
 ### Fachliche Mitte
@@ -70,8 +70,10 @@ Masterdaten laufen bewusst ausserhalb dieser Geraeteobjekte.
 ### Geraete-Command Minimalpfad
 
 - `POST /api/phase1/net-erl/relay-1`
+- `POST /api/phase1/cover/command`
 - MQTT-Publish auf `smarthome/device/<device_id>/command`
-- Payload nur fuer `set_relay` auf `relay_1` mit serverseitig erzeugter `request_id`
+- Payload fuer `set_relay` auf `relay_1` oder fuer die Cover-Kommandos `open`, `close`, `stop`, `set_position`
+- `set_position` respektiert serverseitig den letzten bekannten Zustand `cover_calibrated`
 
 ### Master
 
@@ -95,6 +97,6 @@ Das ist klein genug, um testbar zu bleiben, und stabil genug, um spaeter Persist
 Real bestaetigt ist ein enger, belastbarer Kern.
 Nicht bestaetigt ist damit automatisch schon:
 
-- eine breite Command-Matrix fuer weitere Geraetetypen
+- eine breite Command-Matrix ueber die engen Relay- und Cover-Pfade hinaus
 - eine voll ausgebaute UI oder Bedienoberflaeche
 - Timeseries- oder Komfortwelten ausserhalb des Phase-1-Kerns

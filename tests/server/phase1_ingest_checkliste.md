@@ -116,19 +116,18 @@ Erwartung:
 ### Cover-State senden
 
 ```bash
-mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/state -r -m "{\"device_id\":\"net_zrl_demo\",\"cover_state\":\"moving\",\"cover_direction\":\"down\",\"cover_position\":35,\"is_calibrated\":true}"
+mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/state -r -m "{\"device_id\":\"net_zrl_demo\",\"cover_state\":\"closing\",\"cover_position\":35,\"cover_calibrated\":true}"
 ```
 
 Erwartung:
 
-- `state.cover_state = moving`
-- `state.cover_direction = down`
+- `state.cover_state = closing`
 - `state.cover_position = 35`
-- `state.is_calibrated = true`
+- `state.cover_calibrated = true`
 - `availability.online` bleibt oder wird `true`
-- `device_state_latest.cover_state = moving`
-- `device_state_latest.cover_direction = down`
+- `device_state_latest.cover_state = closing`
 - `device_state_latest.cover_position = 35`
+- `device_state_latest.cover_calibrated = 1`
 
 ### Partiellen Cover-State pruefen
 
@@ -139,8 +138,8 @@ mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/state -r -m "{\"devi
 Erwartung:
 
 - `state.cover_state` wird auf `stopped` gesetzt
-- `state.cover_direction` bleibt `down`
 - `state.cover_position` bleibt `35`
+- `state.cover_calibrated` bleibt `true`
 - fehlende Cover-Felder loeschen nichts
 
 ### Partieller State
@@ -229,6 +228,41 @@ Erwartung:
 - `device_state_latest.last_ack_channel = command`
 - `device_state_latest.relay_1 = true`, wenn der optionale State-Nachtrag gefahren wurde
 
+## Minimalen Cover-Command-Pfad pruefen
+
+Fuer den Cover-Command-Pfad einen bekannten Cover-Node verwenden, zum Beispiel `NET-ZRL-001`.
+
+In einem zweiten Terminal vor dem HTTP-Aufruf den offiziellen Command-Capture starten:
+
+```bash
+mosquitto_sub -h localhost -t smarthome/device/NET-ZRL-001/command -C 1 -v
+```
+
+Dann den engen Cover-Einstieg aufrufen:
+
+```bash
+curl -s -X POST http://localhost:1880/api/phase1/cover/command -H "Content-Type: application/json" -d "{\"device_id\":\"NET-ZRL-001\",\"command\":\"open\"}"
+```
+
+Erwartung:
+
+- HTTP antwortet mit `202`
+- die Antwort enthaelt `device_id`, `request_id`, `command = open`
+- MQTT zeigt genau einen Publish auf `smarthome/device/NET-ZRL-001/command`
+- der publizierte Payload enthaelt dieselbe `request_id`
+
+Fuer Prozentanfahrt:
+
+```bash
+curl -s -X POST http://localhost:1880/api/phase1/cover/command -H "Content-Type: application/json" -d "{\"device_id\":\"NET-ZRL-001\",\"command\":\"set_position\",\"position\":42}"
+```
+
+Erwartung:
+
+- HTTP antwortet mit `202`, wenn der letzte bekannte State `cover_calibrated = true` ist
+- HTTP antwortet mit `409`, wenn der letzte bekannte State `cover_calibrated = false` ist
+- MQTT enthaelt bei Erfolg `{\"command\":\"set_position\",\"position\":42,...}`
+
 ## Master separat prüfen
 
 ### Masterstatus
@@ -261,7 +295,7 @@ import sqlite3
 db = sqlite3.connect("server/sqlite/smarthome_phase1.db")
 for sql in [
     "select device_id, device_name from devices order by device_id",
-    "select device_id, online, relay_1, motion, lux, cover_state, cover_direction, cover_position from device_state_latest order by device_id",
+    "select device_id, online, relay_1, motion, lux, cover_state, cover_position, cover_calibrated from device_state_latest order by device_id",
     "select device_id, event_type, event_label from device_event_log order by id desc limit 3",
     "select device_id, request_id, status from device_ack_log order by id desc limit 3",
     "select master_id, online, wifi, mqtt, espnow from master_status order by master_id",

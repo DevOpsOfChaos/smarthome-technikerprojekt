@@ -21,16 +21,17 @@ Die aktiven Flows enthalten nur noch die Node-RED-Bruecken fuer:
 
 ## Minimaler Command-Ausgang
 
-Phase 1.3 fuehrt genau einen offiziellen Server-Ausgang ein:
+Phase 1.3 fuehrt enge offizielle Server-Ausgaenge ein:
 
-- HTTP-Eingang: `POST /api/phase1/net-erl/relay-1`
+- HTTP-Eingaenge: `POST /api/phase1/net-erl/relay-1` und `POST /api/phase1/cover/command`
 - MQTT-Ziel: `smarthome/device/<device_id>/command`
-- erlaubter Inhalt: nur `set_relay` fuer `relay_1`
+- erlaubter Inhalt: `set_relay` fuer `relay_1` sowie `open`, `close`, `stop`, `set_position` fuer Cover
 - `request_id` wird serverseitig erzeugt
+- `set_position` wird serverseitig nur weitergegeben, wenn der letzte bekannte Cover-State `cover_calibrated` nicht `false` ist
 
 Diese Strecke erweitert den Ingest nicht um eine zweite Fachwelt. ACK und State laufen danach weiter ueber dieselbe bestehende Ingest-Kette zurueck.
 
-Auf `main` ist dieser Minimalpfad fuer den realen Node `net_erl_01` belegt:
+Auf `main` ist der enge Relay-Minimalpfad fuer den realen Node `net_erl_01` belegt:
 
 - echter HTTP-Aufruf gegen `POST /api/phase1/net-erl/relay-1`
 - MQTT-Command ueber `smarthome/device/net_erl_01/command`
@@ -38,7 +39,7 @@ Auf `main` ist dieser Minimalpfad fuer den realen Node `net_erl_01` belegt:
 - erneute Nachweise nach Server-Restart, Node-Recovery und Master-Recovery
 - Hardware-Rerun fuer den frueheren Master-Recovery-Fehler mit bestaetigt erhaltenen Voll-States
 
-Die oeffentliche Aussage ist damit eng, aber klar: Es gibt einen real bestaetigten Minimalpfad, keine allgemeine Command-Welt.
+Fuer Cover gibt es jetzt denselben engen serverseitigen Ausgang auf demselben MQTT-Command-Topic, ohne daraus eine allgemeine Command-Welt zu machen.
 
 ## Topic auf Zielblock
 
@@ -61,7 +62,7 @@ Die oeffentliche Aussage ist damit eng, aber klar: Es gibt einen real bestaetigt
 ### `state`
 
 - aktualisiert nur bekannte State-Felder
-- traegt fuer `cover` minimal `cover_state`, `cover_direction` und `cover_position`
+- traegt fuer `cover` minimal `cover_state`, optional `cover_position` und `cover_calibrated`
 - spiegelt wenige echte Laufzeitparameter nach `config`
 - setzt `last_seen_at`
 - behandelt fehlende Felder nicht als Loeschsignal
@@ -140,8 +141,8 @@ Noch nicht Teil dieses Schritts:
 - Timeseries-Schreiben
 - weitere Verlaufs- oder Console-Historien ausser Event- und ACK-Log
 - UI-Ableitungen
-- jede breitere oder generische Command-Welt ausser `net_erl` Relay 1
-- serverseitige Cover-Commands oder Rolladen-Komfortlogik
+- jede breitere oder generische Command-Welt ueber die engen Relay- und Cover-Pfade hinaus
+- serverseitige Rolladen-Komfortlogik
 - Wetter und Automationen
 
 Das ist kein Mangel. Das ist Scope-Kontrolle.

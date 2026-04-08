@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "40_command_minimal",
     "disabled": false,
-    "info": "Enger offizieller Command-Einstieg fuer net_erl relay_1 mit serverseitiger request_id."
+    "info": "Enge offizielle Command-Einstiege fuer net_erl relay_1 und cover mit serverseitiger request_id."
   },
   {
     "id": "comment_40_command_minimal",
     "type": "comment",
     "z": "tab_40_command_minimal",
     "name": "Minimaler Command-Pfad",
-    "info": "Dieser Tab baut absichtlich nur einen Pfad: POST -> request_id erzeugen -> MQTT command publizieren. ACK und State kommen ueber die bestehende Ingest-Kette zurueck.",
+    "info": "Dieser Tab baut absichtlich nur enge Pfade: POST -> request_id erzeugen -> MQTT command publizieren. ACK und State kommen ueber die bestehende Ingest-Kette zurueck.",
     "x": 180,
     "y": 60,
     "wires": []
@@ -98,6 +98,90 @@
     "headers": {},
     "x": 860,
     "y": 180,
+    "wires": []
+  },
+  {
+    "id": "httpin_40_cover_command",
+    "type": "http in",
+    "z": "tab_40_command_minimal",
+    "name": "POST cover command",
+    "url": "/api/phase1/cover/command",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 165,
+    "y": 300,
+    "wires": [
+      [
+        "json_40_cover_command"
+      ]
+    ]
+  },
+  {
+    "id": "json_40_cover_command",
+    "type": "json",
+    "z": "tab_40_command_minimal",
+    "name": "Cover JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 365,
+    "y": 300,
+    "wires": [
+      [
+        "func_40_cover_command"
+      ]
+    ]
+  },
+  {
+    "id": "func_40_cover_command",
+    "type": "function",
+    "z": "tab_40_command_minimal",
+    "name": "Build cover command",
+    "func": "const commandMinimal = global.get(\"commandMinimal\");\nif (!commandMinimal || typeof commandMinimal.buildCoverCommand !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload = {\n        error: \"command_minimal_unavailable\",\n        message: \"command helper missing\"\n    };\n    return [null, msg];\n}\n\ntry {\n    const runtime = global.get(\"smarthome_runtime\");\n    const result = commandMinimal.buildCoverCommand(runtime, msg.payload);\n    if (!result.ok) {\n        msg.statusCode = result.statusCode || 400;\n        msg.payload = {\n            error: result.error,\n            message: result.message\n        };\n        return [null, msg];\n    }\n\n    const mqttMsg = {\n        topic: result.command.topic,\n        payload: result.command.payload,\n        qos: 0,\n        retain: false\n    };\n    const responseMsg = {\n        req: msg.req,\n        res: msg.res,\n        statusCode: 202,\n        payload: result.response\n    };\n    return [mqttMsg, responseMsg];\n} catch (error) {\n    node.error(error, msg);\n    msg.statusCode = 500;\n    msg.payload = {\n        error: \"command_minimal_internal\",\n        message: error.message\n    };\n    return [null, msg];\n}",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 605,
+    "y": 300,
+    "wires": [
+      [
+        "mqttout_40_cover_command"
+      ],
+      [
+        "httpresp_40_cover_command"
+      ]
+    ]
+  },
+  {
+    "id": "mqttout_40_cover_command",
+    "type": "mqtt out",
+    "z": "tab_40_command_minimal",
+    "name": "Publish cover command",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "cfg_mqtt_broker",
+    "x": 875,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "httpresp_40_cover_command",
+    "type": "http response",
+    "z": "tab_40_command_minimal",
+    "name": "HTTP response",
+    "statusCode": "",
+    "headers": {},
+    "x": 860,
+    "y": 340,
     "wires": []
   }
 ]

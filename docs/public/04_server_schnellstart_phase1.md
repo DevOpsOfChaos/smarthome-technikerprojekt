@@ -11,6 +11,7 @@ Der aktuelle Phase-1-Stand umfasst:
 - aktive Phase-1-Flows
 - minimales SQLite-Schema im Repo
 - einen engen offiziellen Minimal-Command-Pfad für `net_erl_01` Relay 1
+- einen engen offiziellen Minimal-Command-Pfad fuer Cover-Devices
 
 ## Wichtige Einordnung
 Dieser Stand ist ein technischer Kernstart, kein vollständiger Produktivstand.
@@ -45,7 +46,7 @@ Nach dem Start soll vor allem nachvollziehbar sein:
 - welche MQTT-Themen Phase 1 verarbeitet
 - wie Geräte intern modelliert werden
 - dass der Master getrennt vom normalen Gerätepfad geführt wird
-- wie der enge Minimalpfad für `net_erl_01` aufgebaut ist
+- wie die engen Minimalpfade fuer Relay und Cover aufgebaut sind
 - wie SQLite aus derselben fachlichen Handlerkette beschrieben wird
 
 ## Bereits öffentlich belegter Minimalpfad
@@ -56,6 +57,11 @@ Der öffentliche Stand enthält bereits einen real nachgewiesenen engen Bedienpf
 - passende SQLite-Belege im Server
 
 Dieser Pfad ist bewusst eng gehalten und dient als belastbare Phase-1-Basis, nicht als fertige allgemeine Command-Welt.
+
+Zusaetzlich gibt es jetzt einen engen neutralen Cover-Einstieg:
+- HTTP `POST /api/phase1/cover/command`
+- MQTT-Command `open`, `close`, `stop` oder `set_position` auf `smarthome/device/<device_id>/command`
+- serverseitige Respektierung von `cover_calibrated` fuer `set_position`
 
 ## Was noch nicht erwartet werden sollte
 - vollständige Serveroberfläche

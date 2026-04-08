@@ -94,6 +94,7 @@ function buildDeviceUpsert(device) {
 function buildDeviceStateLatestUpsert(device) {
   const event = device.last_event || {};
   const ack = device.last_ack || {};
+  const coverCalibrated = device.state.cover_calibrated ?? device.state.is_calibrated;
   const values = {
     device_id: device.identity.device_id,
     availability: device.availability.availability || "unknown",
@@ -106,7 +107,8 @@ function buildDeviceStateLatestUpsert(device) {
     cover_state: device.state.cover_state,
     cover_direction: device.state.cover_direction,
     cover_position: device.state.cover_position,
-    is_calibrated: device.state.is_calibrated,
+    cover_calibrated: coverCalibrated,
+    is_calibrated: coverCalibrated,
     travel_time_ms: device.state.travel_time_ms,
     temp_01c: device.state.temp_01c,
     hum_01pct: device.state.hum_01pct,

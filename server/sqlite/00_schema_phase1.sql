@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS device_state_latest (
     cover_state TEXT,
     cover_direction TEXT,
     cover_position REAL,
+    cover_calibrated INTEGER,
     is_calibrated INTEGER,
     travel_time_ms INTEGER,
     temp_01c REAL,

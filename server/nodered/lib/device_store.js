@@ -35,6 +35,7 @@ const STATE_FIELD_TRANSFORMS = {
   cover_state: (value) => value,
   cover_direction: (value) => value,
   cover_position: (value) => coerceNumber(value, null),
+  cover_calibrated: (value) => coerceBoolean(value, false),
   is_calibrated: (value) => coerceBoolean(value, false),
   travel_time_ms: (value) => coerceNumber(value, null),
   temp_01c: (value) => coerceNumber(value, null),
@@ -226,6 +227,12 @@ function applyState(device, payload, timestamp = nowIso()) {
         ? coerceBoolean(nextPayload[field], false)
         : coerceNumber(nextPayload[field], nextPayload[field]);
     }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextPayload, "cover_calibrated")) {
+    device.state.is_calibrated = device.state.cover_calibrated;
+  } else if (Object.prototype.hasOwnProperty.call(nextPayload, "is_calibrated")) {
+    device.state.cover_calibrated = device.state.is_calibrated;
   }
 
   device.availability.online = true;
