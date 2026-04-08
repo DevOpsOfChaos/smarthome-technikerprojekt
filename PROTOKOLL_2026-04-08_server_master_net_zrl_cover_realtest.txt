@@ -1,0 +1,121 @@
+PROTOKOLL 2026-04-08 – Server + Master + NET-ZRL Cover-Realtest
+
+Datum: 2026-04-08
+Bezug: echter End-to-End-Pfad Server -> Master -> NET-ZRL und NET-ZRL -> Master -> Server
+Ziel: den engen offiziellen Cover-Pfad real pruefen, nicht nur Build- oder JSON-Syntax
+
+1. Ausgangslage
+- Repo sauber, Branch main, Worktree sauber
+- Stack lief lokal mit mosquitto, nodered und influxdb
+- http://localhost:1880 war erreichbar
+- offizieller Server-Einstieg fuer Cover vorhanden: POST /api/phase1/cover/command
+
+2. Live-Geraetezustand vor dem Test
+Master live:
+- Topic: smarthome/master/MASTER-001/status
+- online=true
+- wifi=true
+- mqtt=true
+- espnow=true
+- fw="0.2.2"
+
+NET-ZRL live:
+- Topics: smarthome/device/NET-ZRL-001/meta, availability, state
+- control_mode="cover"
+- cover_calibrated=true
+
+3. Real getestete Schritte
+3.1 open
+- HTTP 202
+- realer Anlauf des Geraets bestaetigt
+- Live-State ging auf opening
+- Endzustand spaeter open
+
+3.2 close
+- aus stabilem open getestet
+- HTTP 202
+- MQTT-Command korrekt publiziert
+- ACK ok
+- Live-State ging auf closing
+
+3.3 stop
+- waehrend closing getestet
+- HTTP 202
+- MQTT-Command korrekt publiziert
+- ACK ok
+- Live-State ging auf stopped bei Position 25
+
+3.4 set_position 60
+- HTTP 202
+- MQTT-Command korrekt publiziert
+- ACK ok
+- Live-State ging auf opening
+- Endzustand spaeter stopped bei Position 60
+
+3.5 Nachtest set_position 40
+- nach Laufzeitfix erneut getestet
+- HTTP 202
+- ACK ok
+- SQLite aktualisierte last_ack_*
+- Endzustand stopped bei Position 40
+
+4. Was real funktioniert hat
+- HTTP/Server-Antwort korrekt: ja, nach Laufzeitfix
+- MQTT-Command korrekt publiziert: ja
+- Master verarbeitet korrekt: ja
+- NET-ZRL reagiert korrekt: ja
+- ACK und State kommen korrekt zurueck: ja
+- SQLite/Runtime-State passt: ja, nach Container-Recreate
+
+5. Reale Fehler im Test
+5.1 Erster Bruch
+Beobachtung:
+- POST /api/phase1/cover/command existierte live zuerst nicht
+
+Ursache:
+- laufendes /data/flows.json enthielt den Cover-Flow nicht, obwohl server/nodered/flows/active/40_command_minimal.json ihn bereits enthaelt
+
+Fix:
+- Node-RED sauber neu gestartet
+
+5.2 Zweiter Bruch
+Beobachtung:
+- SQLite persistierte NET-ZRL-001 zunaechst nicht korrekt
+
+Ursache:
+- laufender nodered-Container nutzte offenbar noch eine alte Containerkonfiguration
+- einfacher Restart reichte nicht
+- erst docker compose up -d --force-recreate nodered zog die aktuelle Schema-/Migrationslogik sauber nach
+
+Fix:
+- reiner Laufzeitfix
+- keine Codeaenderung
+
+6. Nicht real abgehakt
+- set_position bei cover_calibrated=false wurde in diesem Lauf nicht real getestet
+
+Grund:
+- Live-Geraet war durchgehend real kalibriert
+- bewusst kein destruktiver Reset- oder Entkalibrierungs-Nebenpfad geoeffnet
+
+7. Dateien in diesem Lauf
+- keine Code- oder Flow-Dateien geaendert
+- kein Commit aus dem Realtest selbst
+
+8. Wichtige Beobachtung
+- der Live-Master meldete weiterhin fw="0.2.2"
+- der aktuelle Quellstand traegt in main.cpp bereits 0.4.0
+- der getestete Cover-Pfad lief trotzdem
+- der reale Flash-Stand des Masters ist damit aber offensichtlich nicht deckungsgleich zum aktuellen Source-Stand
+
+9. Ergebnis
+Der enge offizielle Cover-Pfad ist real belegt fuer:
+- open
+- close
+- stop
+- set_position
+
+Der Pfad Server -> Master -> NET-ZRL und zurueck ueber ACK/State ist damit fuer den kalibrierten Realfall erfolgreich nachgewiesen.
+
+Offen bleibt als gezielter Restpunkt:
+- negativer Realfall set_position bei cover_calibrated=false
