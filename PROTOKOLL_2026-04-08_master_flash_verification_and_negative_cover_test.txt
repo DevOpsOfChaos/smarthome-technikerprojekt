@@ -1,0 +1,139 @@
+PROTOKOLL 2026-04-08 – Master-Flashstand verifizieren und negativer Cover-Test
+
+Datum: 2026-04-08
+Bezug: echter Nachlauf nach dem Cover-Realtest mit Fokus auf Master-Flashstand und negativem set_position-Fall
+Ziel: den realen Master-Flashstand belastbar verifizieren und den offenen Negativfall fuer Cover sauber ueber den offiziellen Serverpfad belegen
+
+1. Ausgangslage
+- Arbeitsrepo: aktueller `main`-Stand von `smarthome-technikerprojekt`
+- reale Hardware vorhanden:
+  - `master` auf `COM3`
+  - `net_zrl` auf `COM6`
+- Server-Stack aktiv:
+  - Node-RED auf `http://localhost:1880`
+  - Mosquitto auf `localhost:1883`
+
+2. Reale Feststellung vor dem Reflash
+- der laufende Master publizierte live auf `smarthome/master/MASTER-001/status`:
+  - `fw="0.2.2"`
+- gleichzeitig trugen mehrere Quelldateien im Master bereits interne Stand-Markierungen `0.4.0`
+
+3. Wichtiger Befund zur Ursache
+Der Widerspruch war nicht primaer ein Flashproblem, sondern ein Versionsquellenproblem im Repo:
+- `firmware/src/basetypes/master/main.cpp` trug weiterhin `0.4.0` als Dateistand
+- die zentrale Versionsquelle `firmware/include/ProjectVersion.h` stand aber noch auf:
+  - `PROJECT_VERSION = "0.2.2"`
+  - `PROJECT_VERSION_DATE = "2026-03-10"`
+
+Damit war die bisherige Annahme "realer Master laeuft nicht auf aktuellem Stand" zu ungenau.
+Der reale Master konnte durchaus frisch geflasht sein und trotzdem wegen der zentralen Projektversion weiter `0.2.2` publizieren.
+
+4. Korrektur im Repo
+Gezielt geaendert wurde:
+- `firmware/include/ProjectVersion.h`
+
+Korrektur:
+- `PROJECT_VERSION` von `0.2.2` auf `0.4.0`
+- `PROJECT_VERSION_DATE` von `2026-03-10` auf `2026-04-08`
+
+Keine weiteren Architektur- oder Featureaenderungen in diesem Teil.
+
+5. Rebuild und echter Reflash des Masters
+Erfolgreich ausgefuehrt:
+- `pio run -e master`
+- `pio run -e master -t upload --upload-port COM3`
+
+Ergebnis:
+- Build erfolgreich
+- Upload auf das reale Master-Board auf `COM3` erfolgreich
+- USB-MAC des realen Masters waehrend des Flashs:
+  - `20:6e:f1:6d:92:c0`
+
+6. Reale Live-Verifikation nach dem Reflash
+Nach dem Reflash und Reconnect publizierte der Master live:
+- Topic: `smarthome/master/MASTER-001/status`
+- Payload:
+  - `{"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.4.0"}`
+
+Bewertung:
+- der reale Master laeuft jetzt nachweisbar mit dem korrigiert gekennzeichneten aktuellen Source-Stand
+- ein erneuter Flash war in diesem Lauf sinnvoll und wurde real ausgefuehrt
+
+7. Vorbereitung des negativen Cover-Tests
+Danach wurde auf den Live-State des realen `NET-ZRL-001` geprueft.
+
+Realer State vor dem Test:
+- Topic: `smarthome/device/NET-ZRL-001/state`
+- Payload:
+  - `{"device_id":"NET-ZRL-001","relay_1":false,"relay_2":false,"cover_mode":true,"cover_state":"stopped","cover_calibrated":false,"fault":false}`
+
+Wichtig:
+- `cover_calibrated=false` war live sichtbar
+- `cover_position` wurde im unkalibrierten Zustand nicht publiziert
+
+8. Negativer Realtest: set_position bei cover_calibrated=false
+Offizieller Server-Einstieg:
+- `POST /api/phase1/cover/command`
+
+Gesendeter Request:
+- `{"device_id":"NET-ZRL-001","command":"set_position","position":30}`
+
+8.1 HTTP-Antwort
+Der Server antwortete real mit:
+- HTTP `409 Conflict`
+- Body:
+  - `{"error":"not_calibrated","message":"set_position requires a calibrated cover"}`
+
+Bewertung:
+- der offizielle Serverpfad blockiert den unkalibrierten Prozentbefehl bereits korrekt auf oberer Ebene
+
+8.2 MQTT-Command
+Parallel wurde auf `smarthome/device/NET-ZRL-001/command` mit Capture gewartet.
+
+Ergebnis:
+- kein MQTT-Command publiziert
+- der Command-Capture lief in den Timeout
+
+Bewertung:
+- der ungueltige `set_position`-Befehl wurde nicht an den Master und nicht an den Node durchgereicht
+
+8.3 ACK / Ablehnung
+Parallel wurde auf `smarthome/device/NET-ZRL-001/ack` gewartet.
+
+Ergebnis:
+- kein ACK publiziert
+- der ACK-Capture lief in den Timeout
+
+Bewertung:
+- die Ablehnung erfolgt in diesem Pfad serverseitig vor der MQTT-Weitergabe
+- entsprechend entsteht kein geraeteseitiger ACK-Rueckweg
+
+8.4 State-Verhalten
+Nach dem Negativtest blieb der reale Geraetezustand fachlich unveraendert:
+- `cover_state` blieb `stopped`
+- `cover_calibrated` blieb `false`
+- es wurde keine unpassende Fahrt ausgeloest
+
+9. Ergebnis
+Teil A:
+- der reale Master-Flash wurde in diesem Lauf erneut ausgefuehrt
+- die Live-Version ist jetzt korrekt als `0.4.0` verifiziert
+- die eigentliche Fehlerursache war ein inkonsistentes zentrales Versionslabel im Repo
+
+Teil B:
+- der negative Realfall `set_position` bei `cover_calibrated=false` ist sauber belegt
+- HTTP blockiert korrekt mit `409 not_calibrated`
+- kein MQTT-Command
+- kein ACK
+- kein unpassender Statewechsel
+- kein Fahrbefehl wurde durchgelassen
+
+10. Dateien in diesem Lauf
+- geaendert:
+  - `firmware/include/ProjectVersion.h`
+- neu angelegt:
+  - `PROTOKOLL_2026-04-08_master_flash_verification_and_negative_cover_test.txt`
+
+11. Commit-Status
+- in diesem Teil des Laufs noch kein Commit erfolgt
+- Commit soll spaeter gesammelt mit den weiteren direkt anschliessenden Arbeiten erfolgen

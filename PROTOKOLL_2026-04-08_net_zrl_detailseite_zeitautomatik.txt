@@ -1,0 +1,126 @@
+PROTOKOLL 2026-04-08 – NET-ZRL Detailseite mit kleiner Zeitautomatik
+
+Datum: 2026-04-08
+Bezug: zweiter Teil des direkten Anschlusslaufs nach Master-Flashstand und negativem Cover-Realtest
+Ziel: eine kleine, vorzeigbare Zeitautomatik fuer `NET-ZRL` direkt an einer Geraete-Detailseite einbauen, ohne den neutralen Cover-Vertrag aufzublaehen
+
+1. Ausgangslage
+- der offizielle neutrale Cover-Pfad existiert bereits:
+  - `POST /api/phase1/cover/command`
+  - kanonische Commands `open`, `close`, `stop`, `set_position`
+  - `set_position` nur bei `cover_calibrated=true`
+- im Repo gab es vor diesem Lauf keine echte Geraete-Detailseite fuer Cover
+- im Repo gab es vor diesem Lauf keine kleine, lokale Zeitautomatik fuer ein einzelnes Cover-Geraet
+
+2. Wichtige Architekturkorrektur
+Ein erster Zwischenansatz zog Zeitfelder wie `auto_up_time` in servernahe Datenstrukturen und Richtung API-/Persistenzpfad.
+
+Das war fachlich die falsche Schicht.
+
+Korrigierte Linie:
+- der neutrale Serververtrag bleibt bei Cover-Kommandos und Cover-State
+- keine Zeitfelder im MQTT-Vertrag
+- keine Zeitfelder im normalen Geraeteobjekt
+- keine Erweiterung von `command_minimal` um Scheduling-Semantik
+- die Zeitautomatik lebt lokal an einer kleinen Cover-Detailseite
+- die Ausloesung nutzt intern weiter denselben offiziellen Cover-Command-Baustein
+
+3. Umgesetzte Funktion
+Neu eingebaut wurde eine kleine lokale Detailseite fuer Cover-Geraete:
+- Pfad: `GET /device/<device_id>`
+
+Funktion auf der Seite:
+- Aktivierung / Deaktivierung der Zeitautomatik fuer dieses konkrete Geraet
+- zwei feste Fahrten pro Tag
+- pro Fahrt genau:
+  - Uhrzeit
+  - Zielwert
+- Zielwert ist bewusst hart begrenzt auf:
+  - `0`
+  - `25`
+  - `50`
+  - `75`
+  - `100`
+
+Die Seite zeigt zusaetzlich den aktuellen Cover-Status des Geraets:
+- online
+- `cover_state`
+- `cover_position` falls vorhanden
+- `cover_calibrated`
+
+4. Lokale Persistenz
+Die Detailseiten-Konfiguration wird lokal gespeichert in:
+- `server/nodered/cover_automation.json`
+
+Wichtig:
+- diese Datei ist Laufzeitkonfiguration und kein Teil des Repo-Inhalts
+- sie wurde deshalb in `.gitignore` aufgenommen
+
+5. Scheduler-Logik
+Die Zeitautomatik arbeitet als kleiner lokaler Minutentick in Node-RED.
+
+Dabei gilt:
+- pro Minute wird geprueft, ob ein aktiver Slot fuer die aktuelle lokale Uhrzeit faellig ist
+- pro Slot und Tag wird hoechstens einmal ausgeloest
+- bei Faelligkeit wird kein Sonderpfad erfunden
+- stattdessen wird derselbe Cover-Command-Baustein verwendet wie im offiziellen Cover-Pfad
+
+Dadurch bleibt die obere Semantik gleich:
+- es wird ein kanonischer `set_position`-Command gebaut
+- der MQTT-Publish geht auf `smarthome/device/<device_id>/command`
+- bestehende Validierung fuer Cover bleibt wirksam
+
+6. Geaenderte Dateien
+- `.gitignore`
+- `server/docker-compose.yml`
+- `server/nodered/lib/cover_automation.js`
+- `server/nodered/flows/active/41_cover_automation_detail.json`
+
+7. Technische Verifikation
+7.1 Detailseite
+Real geprueft:
+- `GET http://localhost:1880/device/NET-ZRL-001`
+- HTTP `200 OK`
+- HTML-Seite fuer `NET-ZRL-001` wurde korrekt ausgeliefert
+
+7.2 Speichern der Automation
+Real geprueft:
+- `POST http://localhost:1880/api/phase1/cover/automation/NET-ZRL-001`
+- Beispielwerte:
+  - `slot_1_time = 07:15`
+  - `slot_1_position = 100`
+  - `slot_2_time = 20:45`
+  - `slot_2_position = 25`
+- Antwort:
+  - `ok: true`
+- die lokale Datei `server/nodered/cover_automation.json` enthielt danach genau diese Werte
+- anschliessender GET auf die Detailseite zeigte:
+  - aktivierte Checkbox
+  - `07:15`
+  - `20:45`
+  - `100%` fuer Slot 1
+  - `25%` fuer Slot 2
+
+7.3 Scheduler-Command-Bau
+Logisch isoliert geprueft:
+- ein Testslot fuer `07:15` mit `75%` wurde gegen die lokale Scheduler-Logik laufen gelassen
+- Ergebnis:
+  - offizielles MQTT-Topic `smarthome/device/NET-ZRL-TEST/command`
+  - Payload mit `command = "set_position"` und `position = 75`
+  - serverseitig erzeugter `request_id`
+
+Bewertung:
+- die Zeitautomatik baut keinen zweiten Command-Weg
+- sie erzeugt denselben oberen Cover-Command wie der restliche Cover-Pfad
+
+8. Ergebnis
+Die geforderte enge Praxisfunktion ist jetzt in der richtigen Schicht umgesetzt:
+- direkt an einer kleinen Geraete-Detailseite
+- mit genau zwei Zeit/Wert-Slots
+- mit festen Zielwertoptionen `0/25/50/75/100`
+- ohne Zeitmuell im MQTT-Vertrag
+- ohne Aufblasen des neutralen Serverpfads zur allgemeinen Automationsplattform
+
+9. Commit-Status
+- in diesem Lauf noch kein Commit erfolgt
+- Commit soll anschliessend gesammelt und bewusst formuliert erfolgen

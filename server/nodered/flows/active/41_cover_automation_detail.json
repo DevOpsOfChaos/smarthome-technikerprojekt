@@ -1,0 +1,192 @@
+[
+  {
+    "id": "tab_41_cover_automation_detail",
+    "type": "tab",
+    "label": "41_cover_automation_detail",
+    "disabled": false,
+    "info": "Kleine Cover-Detailseite mit zwei lokalen Zeit/Wert-Slots. Kein Teil des MQTT-Vertrags."
+  },
+  {
+    "id": "comment_41_cover_automation_detail",
+    "type": "comment",
+    "z": "tab_41_cover_automation_detail",
+    "name": "Lokale Cover-Zeitautomatik",
+    "info": "Diese Einbaustelle bleibt bewusst lokal zur Detailseite. Die Fahrten nutzen intern denselben Cover-Command-Builder, aber es werden keine Zeitfelder in das Geräteobjekt oder in den MQTT-Vertrag gezogen.",
+    "x": 220,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "httpin_41_cover_detail",
+    "type": "http in",
+    "z": "tab_41_cover_automation_detail",
+    "name": "GET cover detail page",
+    "url": "/device/:device_id",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 140,
+    "wires": [
+      [
+        "func_41_cover_detail"
+      ]
+    ]
+  },
+  {
+    "id": "func_41_cover_detail",
+    "type": "function",
+    "z": "tab_41_cover_automation_detail",
+    "name": "Render cover detail page",
+    "func": "const coverAutomation = global.get(\"coverAutomation\");\nif (!coverAutomation || typeof coverAutomation.renderDetailPage !== \"function\") {\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"text/plain; charset=utf-8\" };\n    msg.payload = \"cover automation helper missing\";\n    return msg;\n}\n\nconst runtime = global.get(\"smarthome_runtime\");\nconst params = msg.req && msg.req.params ? msg.req.params : {};\nconst query = msg.req && msg.req.query ? msg.req.query : {};\nconst deviceId = params.device_id || \"\";\nconst notice = query.saved === \"1\" ? \"Zeitautomatik gespeichert.\" : \"\";\nconst result = coverAutomation.renderDetailPage(runtime, deviceId, notice);\nmsg.statusCode = result.statusCode || 200;\nmsg.headers = { \"Content-Type\": \"text/html; charset=utf-8\" };\nmsg.payload = result.html;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 140,
+    "wires": [
+      [
+        "httpresp_41_cover_detail"
+      ]
+    ]
+  },
+  {
+    "id": "httpresp_41_cover_detail",
+    "type": "http response",
+    "z": "tab_41_cover_automation_detail",
+    "name": "HTTP response",
+    "statusCode": "",
+    "headers": {},
+    "x": 690,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "httpin_41_cover_automation_save",
+    "type": "http in",
+    "z": "tab_41_cover_automation_detail",
+    "name": "POST cover automation save",
+    "url": "/api/phase1/cover/automation/:device_id",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 240,
+    "wires": [
+      [
+        "json_41_cover_automation_save"
+      ]
+    ]
+  },
+  {
+    "id": "json_41_cover_automation_save",
+    "type": "json",
+    "z": "tab_41_cover_automation_detail",
+    "name": "Automation JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 410,
+    "y": 240,
+    "wires": [
+      [
+        "func_41_cover_automation_save"
+      ]
+    ]
+  },
+  {
+    "id": "func_41_cover_automation_save",
+    "type": "function",
+    "z": "tab_41_cover_automation_detail",
+    "name": "Save cover automation",
+    "func": "const coverAutomation = global.get(\"coverAutomation\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst runtime = global.get(\"smarthome_runtime\");\nif (!coverAutomation || typeof coverAutomation.saveDeviceConfig !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload = { ok: false, error: \"cover_automation_unavailable\", message: \"cover automation helper missing\" };\n    return msg;\n}\n\nconst params = msg.req && msg.req.params ? msg.req.params : {};\nconst deviceId = params.device_id || \"\";\nconst device = runtime && runtime.devices ? runtime.devices[deviceId] : null;\nif (!device) {\n    msg.statusCode = 404;\n    msg.payload = { ok: false, error: \"device_not_found\", message: \"device not found\" };\n    return msg;\n}\n\nconst result = coverAutomation.saveDeviceConfig(deviceId, msg.payload, timeHelpers.nowIso());\nmsg.statusCode = result.ok ? 200 : 400;\nmsg.payload = result.ok\n    ? { ok: true, device_id: deviceId, config: result.config }\n    : { ok: false, error: result.error, message: result.message };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 660,
+    "y": 240,
+    "wires": [
+      [
+        "httpresp_41_cover_automation_save"
+      ]
+    ]
+  },
+  {
+    "id": "httpresp_41_cover_automation_save",
+    "type": "http response",
+    "z": "tab_41_cover_automation_detail",
+    "name": "HTTP response",
+    "statusCode": "",
+    "headers": {},
+    "x": 900,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "inject_41_cover_automation_tick",
+    "type": "inject",
+    "z": "tab_41_cover_automation_detail",
+    "name": "Tick jede Minute",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "* * * * *",
+    "once": false,
+    "onceDelay": "0.1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 360,
+    "wires": [
+      [
+        "func_41_cover_automation_tick"
+      ]
+    ]
+  },
+  {
+    "id": "func_41_cover_automation_tick",
+    "type": "function",
+    "z": "tab_41_cover_automation_detail",
+    "name": "Build due automation commands",
+    "func": "const coverAutomation = global.get(\"coverAutomation\");\nconst commandMinimal = global.get(\"commandMinimal\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst runtime = global.get(\"smarthome_runtime\");\nif (!coverAutomation || typeof coverAutomation.buildDueMessages !== \"function\") {\n    return null;\n}\n\nconst now = timeHelpers.nowIso();\nconst result = coverAutomation.buildDueMessages(runtime, commandMinimal, now);\nif (Array.isArray(result.errors) && result.errors.length > 0) {\n    node.warn(result.errors.map((entry) => `${entry.device_id} ${entry.slot}: ${entry.error}`).join(\" | \"));\n}\nif (!Array.isArray(result.messages) || result.messages.length === 0) {\n    return null;\n}\nreturn [result.messages, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 450,
+    "y": 360,
+    "wires": [
+      [
+        "mqttout_41_cover_automation_tick"
+      ],
+      []
+    ]
+  },
+  {
+    "id": "mqttout_41_cover_automation_tick",
+    "type": "mqtt out",
+    "z": "tab_41_cover_automation_detail",
+    "name": "Publish due cover command",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "cfg_mqtt_broker",
+    "x": 740,
+    "y": 360,
+    "wires": []
+  }
+]

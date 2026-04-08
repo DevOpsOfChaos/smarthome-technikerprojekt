@@ -138,7 +138,8 @@ services:
             "    topicHandlers: require('/data/lib/topic_handlers'),",
             "    capabilityHelpers: require('/data/lib/capability_helpers'),",
             "    timeHelpers: require('/data/lib/time_helpers'),",
-            "    commandMinimal: require('/data/lib/command_minimal')",
+            "    commandMinimal: require('/data/lib/command_minimal'),",
+            "    coverAutomation: require('/data/lib/cover_automation')",
             '  }',
             '};',
             ''

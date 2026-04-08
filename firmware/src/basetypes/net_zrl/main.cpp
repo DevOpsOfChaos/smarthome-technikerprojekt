@@ -1443,6 +1443,8 @@ bool starteNormaleFahrtNachOben(const char* grund, uint8_t trigger = SH_TRIGGER_
     unsigned long autoStopMs = 0UL;
     if (runtime.isCalibrated && isTravelTimeValid(runtime.travelTimeUpMs)) {
         autoStopMs = (runtime.travelTimeUpMs * 12UL) / 10UL;
+    } else if (!runtime.isCalibrated && isTravelTimeValid(runtime.defaultEstimatedTravelTimeMs)) {
+        autoStopMs = runtime.defaultEstimatedTravelTimeMs;
     }
 
     const bool gestartet =
@@ -1458,6 +1460,8 @@ bool starteNormaleFahrtNachUnten(const char* grund, uint8_t trigger = SH_TRIGGER
     unsigned long autoStopMs = 0UL;
     if (runtime.isCalibrated && isTravelTimeValid(runtime.travelTimeDownMs)) {
         autoStopMs = (runtime.travelTimeDownMs * 12UL) / 10UL;
+    } else if (!runtime.isCalibrated && isTravelTimeValid(runtime.defaultEstimatedTravelTimeMs)) {
+        autoStopMs = runtime.defaultEstimatedTravelTimeMs;
     }
 
     const bool gestartet =

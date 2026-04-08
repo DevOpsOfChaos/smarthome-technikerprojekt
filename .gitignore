@@ -24,6 +24,7 @@ __pycache__/
 server/nodered/.config*.json
 server/nodered/.config*.json.backup
 server/nodered/.npm/
+server/nodered/cover_automation.json
 server/nodered/flows.json
 server/nodered/node_modules/
 server/sqlite/*.db

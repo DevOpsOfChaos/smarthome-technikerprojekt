@@ -1,0 +1,65 @@
+PROTOKOLL 2026-04-08 – NET-ZRL Fix fuer unkalibrierten Auto-Stopp
+
+Datum: 2026-04-08
+Bezug: Fehleranalyse nach Beobachtung einer endlosen Fahrt im unkalibrierten Zustand
+Ziel: die lokale Fahrlogik des `NET-ZRL` so korrigieren, dass normale Fahrten auch ohne Kalibrierung nach der konfigurierten Default-Fahrzeit automatisch stoppen
+
+1. Beobachteter Fehler
+- im unkalibrierten Zustand wurde getestet, ob der Rolladen die konfigurierte `default_estimated_travel_time_ms` als Sicherheitsgrenze nutzt
+- reales Verhalten:
+  - der Rolladen stoppte nicht
+  - die Fahrt lief endlos weiter
+
+2. Ursache im Code
+Die Ursache lag nicht im Master und nicht im neutralen Serverpfad, sondern direkt in der lokalen `NET-ZRL`-Firmware.
+
+Betroffen:
+- `firmware/src/basetypes/net_zrl/main.cpp`
+
+Relevante Logik:
+- `starteNormaleFahrtNachOben(...)`
+- `starteNormaleFahrtNachUnten(...)`
+
+Fehlerhafte alte Linie:
+- `autoStopMs` wurde nur gesetzt, wenn `runtime.isCalibrated == true`
+- im unkalibrierten Zustand blieb `autoStopMs = 0`
+- dadurch blieb `runtime.movementDeadlineAtMs = 0`
+- `verarbeiteBewegungsTimeouts()` hatte damit keine wirksame Deadline und stoppte die Fahrt nicht
+
+3. Korrektur
+Die normale Fahrlogik wurde so erweitert:
+- wenn kalibriert:
+  - weiter wie bisher auf Basis von `travelTimeUpMs` bzw. `travelTimeDownMs`
+- wenn nicht kalibriert:
+  - Nutzung von `defaultEstimatedTravelTimeMs` als Auto-Stopp-Deadline
+
+Konkret:
+- `starteNormaleFahrtNachOben(...)` nutzt jetzt bei unkalibriertem Zustand `runtime.defaultEstimatedTravelTimeMs`
+- `starteNormaleFahrtNachUnten(...)` nutzt jetzt bei unkalibriertem Zustand `runtime.defaultEstimatedTravelTimeMs`
+
+4. Technische Bewertung
+Das ist die fachlich richtige Stelle fuer den Fix:
+- die Verantwortung liegt in der lokalen Geraetefirmware
+- der neutrale Cover-Vertrag bleibt unveraendert
+- `set_position` bleibt weiterhin nur bei Kalibrierung erlaubt
+- einfache Fahrten `open` / `close` bekommen aber wieder eine echte Sicherheitsgrenze
+
+5. Build und Flash
+Erfolgreich ausgefuehrt:
+- `pio run -e net_zrl`
+- `pio run -e net_zrl -t upload --upload-port COM6`
+
+Flash-Ergebnis:
+- Upload auf das reale `NET-ZRL`-Board an `COM6` erfolgreich
+- erkannte MAC waehrend des Flashs:
+  - `8c:d0:b2:a8:80:bb`
+
+6. Dateien
+- geaendert:
+  - `firmware/src/basetypes/net_zrl/main.cpp`
+- neu:
+  - `PROTOKOLL_2026-04-08_net_zrl_uncalibrated_autostop_fix.txt`
+
+7. Commit-Status
+- in diesem Schritt noch kein Commit
+- Commit erfolgt gesammelt mit den direkt zusammenhaengenden Aenderungen dieses Laufs
