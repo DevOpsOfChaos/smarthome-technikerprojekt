@@ -12,6 +12,35 @@ const CAPABILITY_ALIASES = new Map([
 
 const ALWAYS_PRESENT_CAPABILITIES = ["online_state", "fault_state", "ack_tracking"];
 
+function inferBaseTypeFromDeviceId(deviceId) {
+  const normalized = String(deviceId || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.startsWith("master")) {
+    return "master";
+  }
+
+  if (/^net[-_]?erl/.test(normalized)) {
+    return "net_erl";
+  }
+
+  if (/^net[-_]?zrl/.test(normalized)) {
+    return "net_zrl";
+  }
+
+  if (/^net[-_]?sen/.test(normalized)) {
+    return "net_sen";
+  }
+
+  if (/^bat[-_]?sen/.test(normalized)) {
+    return "bat_sen";
+  }
+
+  return normalized;
+}
+
 function normalizeCapabilities(rawCaps) {
   const values = Array.isArray(rawCaps)
     ? rawCaps
@@ -59,5 +88,6 @@ module.exports = {
   ALWAYS_PRESENT_CAPABILITIES,
   deriveCapabilities,
   hasCapability,
+  inferBaseTypeFromDeviceId,
   normalizeCapabilities
 };

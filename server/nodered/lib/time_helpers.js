@@ -43,9 +43,43 @@ function coerceNumber(value, fallback = null) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function escapeSqlText(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function toSqlLiteral(value) {
+  if (value === undefined || value === null) {
+    return "NULL";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "1" : "0";
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "NULL";
+  }
+
+  if (Array.isArray(value) || typeof value === "object") {
+    return toSqlLiteral(JSON.stringify(value));
+  }
+
+  return "'" + escapeSqlText(value) + "'";
+}
+
+function toSqlJsonLiteral(value) {
+  if (value === undefined || value === null) {
+    return "NULL";
+  }
+
+  return toSqlLiteral(JSON.stringify(value));
+}
+
 module.exports = {
   coerceBoolean,
   coerceNumber,
   coerceTimestamp,
-  nowIso
+  nowIso,
+  toSqlJsonLiteral,
+  toSqlLiteral
 };
