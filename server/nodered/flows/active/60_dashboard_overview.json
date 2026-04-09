@@ -1,0 +1,86 @@
+[
+  {
+    "id": "tab_dashboard_v1_ui",
+    "type": "tab",
+    "label": "60 Dashboard Overview",
+    "disabled": false,
+    "info": "Kleine Dashboard-V1-├£bersicht auf Basis der aktuellen Phase-1-Tabellen."
+  },
+  {
+    "id": "ui_template_dashboard_overview_v1",
+    "type": "ui-template",
+    "z": "tab_dashboard_v1_ui",
+    "group": "cfg_ui_group_overview_v1",
+    "name": "Overview View",
+    "order": 1,
+    "width": 12,
+    "height": 0,
+    "format": "<template>\n  <div class=\"sh-page\">\n    <div class=\"sh-toolbar\">\n      <div>\n        <h2>Ger├ñte├╝bersicht</h2>\n        <p class=\"sh-muted\">Zentraler Einstieg f├╝r den engen Dashboard-V1-Pfad.</p>\n      </div>\n      <button class=\"sh-btn\" @click=\"reload\">Neu laden</button>\n    </div>\n\n    <div class=\"sh-summary\" v-if=\"payload.summary\">\n      <span class=\"sh-chip\">{{ payload.summary.device_count || 0 }} Ger├ñte</span>\n      <span class=\"sh-chip\">{{ payload.summary.master_count || 0 }} Master</span>\n    </div>\n\n    <div class=\"sh-empty\" v-if=\"!devices.length\">Noch keine Ger├ñte in `devices` sichtbar.</div>\n\n    <div class=\"sh-grid\" v-else>\n      <article\n        v-for=\"device in devices\"\n        :key=\"device.device_id\"\n        class=\"sh-card\"\n        :class=\"device.surface_class\"\n        tabindex=\"0\"\n        role=\"link\"\n        @click=\"openDetail(device)\"\n        @keydown.enter.prevent=\"openDetail(device)\"\n        @keydown.space.prevent=\"openDetail(device)\">\n        <div class=\"sh-card-head\">\n          <div>\n            <span class=\"sh-kicker\"><i :class=\"'mdi ' + device.type_icon\"></i>{{ device.kind_label }}</span>\n            <h3>{{ device.display_name }}</h3>\n            <p class=\"sh-muted sh-id\">{{ device.device_id }}</p>\n          </div>\n          <div class=\"sh-chip-stack\">\n            <span class=\"sh-chip\" :class=\"device.availability_class\">{{ device.availability_label }}</span>\n            <span class=\"sh-chip sh-chip-sim\" v-if=\"device.simulation\">SIM</span>\n          </div>\n        </div>\n\n        <div class=\"sh-highlight-grid\" v-if=\"device.highlight_values && device.highlight_values.length\">\n          <div class=\"sh-highlight\" v-for=\"item in device.highlight_values\" :key=\"device.device_id + '-' + item.key\">\n            <span>{{ item.label }}</span>\n            <strong>{{ item.value_text }}</strong>\n          </div>\n        </div>\n\n        <div class=\"sh-inline-row\" v-if=\"device.controls && device.controls.kind === 'relay'\">\n          <span class=\"sh-secondary-pill\" v-for=\"relay in device.controls.relays\" :key=\"device.device_id + '-' + relay.key\">{{ relay.label }}: {{ relay.state_label }}</span>\n        </div>\n\n        <div class=\"sh-inline-row\" v-if=\"device.controls && device.controls.kind === 'cover'\">\n          <span class=\"sh-secondary-pill\">Position: {{ device.controls.position_text }}</span>\n          <span class=\"sh-secondary-pill\">{{ device.controls.state_text }}</span>\n        </div>\n\n        <div class=\"sh-inline-row\" v-if=\"device.battery_value\">\n          <span class=\"sh-secondary-pill\">{{ device.battery_value }}</span>\n        </div>\n\n        <div class=\"sh-footer\">\n          <span class=\"sh-muted\" :title=\"device.status_time_exact_label\">{{ device.status_time_label }}: {{ device.status_time_value }}</span>\n          <span class=\"sh-link-hint\">Detail</span>\n        </div>\n      </article>\n    </div>\n  </div>\n</template>\n<script>\nexport default {\n  computed: {\n    payload() { return this.msg?.payload || { summary: {}, devices: [] } },\n    devices() { return Array.isArray(this.payload.devices) ? this.payload.devices : [] }\n  },\n  methods: {\n    reload() { this.send({ payload: { action: 'load' } }) },\n    openDetail(device) { if (device?.detail_url) window.location.assign(device.detail_url) }\n  },\n  mounted() { setTimeout(() => this.reload(), 120) }\n}\n</script>\n<style>\n  .sh-page{--sh-border:#2a3846;--sh-text:#ecf3fa;--sh-muted:#9db0c3;--sh-chip:#182432;color:var(--sh-text);padding:.35rem 0 .6rem}.sh-page *{box-sizing:border-box}.sh-toolbar,.sh-summary,.sh-inline-row,.sh-chip-stack{display:flex;gap:.45rem;flex-wrap:wrap}.sh-toolbar{justify-content:space-between;align-items:flex-start;margin-bottom:.8rem}.sh-toolbar h2,.sh-card h3{margin:0}.sh-muted{color:var(--sh-muted);margin:.15rem 0 0}.sh-btn{border:1px solid var(--sh-border);border-radius:999px;background:linear-gradient(180deg,rgba(22,33,45,.96),rgba(10,17,25,.98));color:var(--sh-text);padding:.55rem .9rem;cursor:pointer}.sh-chip,.sh-secondary-pill{display:inline-flex;align-items:center;gap:.25rem;border-radius:999px;border:1px solid transparent;background:var(--sh-chip);color:var(--sh-text);padding:.3rem .6rem;font-size:.82rem}.sh-secondary-pill{background:rgba(24,36,50,.88);border-color:rgba(61,83,105,.72)}.sh-chip-online{background:rgba(21,78,53,.82);color:#9af3c2;border-color:rgba(86,185,129,.3)}.sh-chip-late{background:rgba(77,64,23,.88);color:#ffdd8b;border-color:rgba(177,145,63,.3)}.sh-chip-offline{background:rgba(86,28,38,.86);color:#ffb5bf;border-color:rgba(185,89,105,.28)}.sh-chip-unknown{background:#232e39;color:#b6c2cc}.sh-chip-sim{background:rgba(66,50,19,.88);color:#ffd98a}.sh-empty{border:1px solid var(--sh-border);border-radius:18px;background:linear-gradient(180deg,rgba(18,27,38,.97),rgba(11,18,25,.99));padding:.9rem 1rem}.sh-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.75rem}.sh-card{border:1px solid var(--sh-border);border-radius:20px;background:radial-gradient(circle at top right,rgba(123,200,255,.11),transparent 36%),linear-gradient(180deg,rgba(21,32,43,.98),rgba(11,18,24,.99));padding:.85rem;display:grid;gap:.7rem;cursor:pointer;min-height:220px}.sh-card:focus-visible{outline:2px solid rgba(123,200,255,.78);outline-offset:2px}.sh-card.is-relay-card{border-color:rgba(171,139,67,.55)}.sh-card.is-cover-card{border-color:rgba(99,168,207,.55)}.sh-card.is-battery-card{border-color:rgba(75,143,89,.55)}.sh-card-head,.sh-footer{display:flex;justify-content:space-between;gap:.7rem;align-items:flex-start}.sh-kicker{display:inline-flex;align-items:center;gap:.35rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:#a8c4de;margin-bottom:.2rem}.sh-id{font-size:.8rem}.sh-highlight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(98px,1fr));gap:.42rem}.sh-highlight{border:1px solid rgba(45,65,84,.8);border-radius:14px;padding:.5rem .55rem;background:rgba(9,16,23,.45)}.sh-highlight span{display:block;font-size:.72rem;color:var(--sh-muted);margin-bottom:.12rem}.sh-highlight strong{font-size:.96rem}.sh-footer{margin-top:auto;padding-top:.7rem;border-top:1px solid rgba(31,45,58,.9)}.sh-link-hint{font-size:.82rem;color:#7fcdbd;text-transform:uppercase;letter-spacing:.08em}@media (max-width:640px){.sh-toolbar,.sh-card-head,.sh-footer{flex-direction:column;align-items:flex-start}}\n</style>",
+    "storeOutMessages": true,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 220,
+    "y": 140,
+    "wires": [
+      [
+        "fn_build_dashboard_overview_query_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build_dashboard_overview_query_v1",
+    "type": "function",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Build Dashboard Query",
+    "func": "const dashboard = global.get(\"dashboardV1\");\nif (!dashboard) {\n    node.error(\"dashboardV1 helper missing\");\n    return null;\n}\nmsg.topic = dashboard.buildOverviewQuery();\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 140,
+    "wires": [
+      [
+        "sqlite_dashboard_overview_v1"
+      ]
+    ]
+  },
+  {
+    "id": "sqlite_dashboard_overview_v1",
+    "type": "sqlite",
+    "z": "tab_dashboard_v1_ui",
+    "mydb": "cfg_sqlite_db",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Read Overview",
+    "x": 700,
+    "y": 140,
+    "wires": [
+      [
+        "fn_build_dashboard_overview_payload_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build_dashboard_overview_payload_v1",
+    "type": "function",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Build Overview Payload",
+    "func": "const dashboard = global.get(\"dashboardV1\");\nif (!dashboard) {\n    node.error(\"dashboardV1 helper missing\");\n    return null;\n}\nmsg.payload = dashboard.buildOverviewPayload(Array.isArray(msg.payload) ? msg.payload : []);\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 950,
+    "y": 140,
+    "wires": [
+      [
+        "ui_template_dashboard_overview_v1"
+      ]
+    ]
+  }
+]

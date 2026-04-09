@@ -1,326 +1,230 @@
 "use strict";
 
-const { deriveCapabilities } = require("./capability_helpers");
-const { coerceBoolean, coerceNumber, coerceTimestamp, nowIso } = require("./time_helpers");
+const capabilityHelpers = require("./capability_helpers");
+const timeHelpers = require("./time_helpers");
 
-const META_FIELDS = [
-  "device_class",
-  "power_type",
-  "fw_version",
-  "control_mode",
-  "config_profile",
-  "reporting_mode",
-  "sensor_mask",
-  "input_mask",
-  "mac_address",
-  "meta_schema_version"
-];
+function createRuntimeState() {
+    return {
+        devices: {},
+        masters: {},
+        initialized_at: timeHelpers.nowIso(),
+        schema_version: 1
+    };
+}
 
-const CONFIG_FIELDS = [
-  "report_interval_s",
-  "lux_threshold_on",
-  "auto_off_delay_s",
-  "rain_threshold",
-  "auto_up_time",
-  "auto_down_time",
-  "auto_schedule_enabled"
-];
+function createEmptyDevice(deviceId, now) {
+    const baseType = capabilityHelpers.inferBaseTypeFromDeviceId(deviceId);
+    return {
+        identity: {
+            device_id: deviceId,
+            base_type: baseType,
+            device_class: baseType,
+            profile: null,
+            display_name: deviceId
+        },
+        meta: null,
+        availability: null,
+        state: {},
+        config: {},
+        last_event: null,
+        last_ack: null,
+        diagnostics: {
+            auto_created: true,
+            dropped_state_fields: [],
+            last_handler: null,
+            last_topic: null
+        },
+        created_at: now,
+        updated_at: now,
+        first_seen_at: now,
+        last_seen_at: now,
+        last_meta_at: null,
+        last_availability_at: null,
+        last_state_at: null,
+        last_event_at: null,
+        last_ack_at: null
+    };
+}
 
-const STATE_FIELD_TRANSFORMS = {
-  fault: (value) => coerceBoolean(value, false),
-  uptime_s: (value) => coerceNumber(value, null),
-  relay_1: (value) => coerceBoolean(value, false),
-  relay_2: (value) => coerceBoolean(value, false),
-  cover_mode: (value) => value,
-  cover_state: (value) => value,
-  cover_direction: (value) => value,
-  cover_position: (value) => coerceNumber(value, null),
-  cover_calibrated: (value) => coerceBoolean(value, false),
-  is_calibrated: (value) => coerceBoolean(value, false),
-  travel_time_ms: (value) => coerceNumber(value, null),
-  temp_01c: (value) => coerceNumber(value, null),
-  hum_01pct: (value) => coerceNumber(value, null),
-  lux: (value) => coerceNumber(value, null),
-  pressure_pa: (value) => coerceNumber(value, null),
-  gas_ohm: (value) => coerceNumber(value, null),
-  aqi: (value) => coerceNumber(value, null),
-  tvoc_ppb: (value) => coerceNumber(value, null),
-  eco2_ppm: (value) => coerceNumber(value, null),
-  motion: (value) => coerceBoolean(value, false),
-  rain: (value) => coerceBoolean(value, false),
-  rain_raw: (value) => coerceNumber(value, null),
-  window_open: (value) => coerceBoolean(value, false),
-  battery_pct: (value) => coerceNumber(value, null),
-  battery_mv: (value) => coerceNumber(value, null),
-  button_last_action: (value) => value,
-  button_last_action_at: (value) => value
-};
+function createEmptyMaster(masterId, now) {
+    return {
+        master_id: masterId,
+        status: null,
+        last_event: null,
+        diagnostics: {
+            last_handler: null,
+            last_topic: null
+        },
+        created_at: now,
+        updated_at: now,
+        first_seen_at: now,
+        last_seen_at: now,
+        last_status_at: null,
+        last_event_at: null
+    };
+}
 
-function createRuntimeState(timestamp = nowIso()) {
-  return {
-    schema_version: 1,
-    initialized_at: timestamp,
-    devices: {},
-    master: {},
-    diag: {
-      booted_at: timestamp,
-      last_boot_reason: "runtime"
+function ensureDevice(runtimeState, deviceId, now, options) {
+    const runtime = runtimeState || createRuntimeState();
+    const opts = options || {};
+    let created = false;
+
+    if (!runtime.devices[deviceId]) {
+        if (!opts.autoCreate) {
+            return { created: false, device: null, runtime };
+        }
+        runtime.devices[deviceId] = createEmptyDevice(deviceId, now);
+        created = true;
     }
-  };
+
+    return {
+        created,
+        device: runtime.devices[deviceId],
+        runtime
+    };
 }
 
-function ensureRuntime(runtime, timestamp = nowIso()) {
-  const nextRuntime = runtime && typeof runtime === "object"
-    ? runtime
-    : createRuntimeState(timestamp);
+function ensureMaster(runtimeState, masterId, now) {
+    const runtime = runtimeState || createRuntimeState();
+    let created = false;
 
-  nextRuntime.devices = nextRuntime.devices || {};
-  nextRuntime.master = nextRuntime.master || {};
-  nextRuntime.diag = nextRuntime.diag || {
-    booted_at: timestamp,
-    last_boot_reason: "runtime"
-  };
-
-  if (!nextRuntime.initialized_at) {
-    nextRuntime.initialized_at = timestamp;
-  }
-
-  return nextRuntime;
-}
-
-function markRuntimeBoot(runtime, reason = "runtime", timestamp = nowIso()) {
-  const nextRuntime = ensureRuntime(runtime, timestamp);
-  nextRuntime.diag.booted_at = timestamp;
-  nextRuntime.diag.last_boot_reason = reason;
-  return nextRuntime;
-}
-
-function createEmptyDevice(deviceId, timestamp = nowIso()) {
-  return {
-    identity: {
-      device_id: deviceId,
-      device_name: deviceId
-    },
-    meta: {
-      caps: []
-    },
-    availability: {
-      availability: "unknown",
-      online: false,
-      last_seen_at: null
-    },
-    state: {
-      fault: false
-    },
-    config: {},
-    last_event: {},
-    last_ack: {},
-    diagnostics: {
-      status_chip: "new",
-      last_update_source: "boot",
-      notes: ""
-    },
-    created_at: timestamp,
-    updated_at: timestamp
-  };
-}
-
-function createEmptyMaster(masterId, timestamp = nowIso()) {
-  return {
-    status: {
-      master_id: masterId,
-      online: false,
-      wifi: false,
-      mqtt: false,
-      espnow: false,
-      fw: null,
-      last_seen_at: null,
-      updated_at: timestamp
-    },
-    last_event: {},
-    diagnostics: {
-      last_update_source: "boot"
+    if (!runtime.masters[masterId]) {
+        runtime.masters[masterId] = createEmptyMaster(masterId, now);
+        created = true;
     }
-  };
+
+    return {
+        created,
+        master: runtime.masters[masterId],
+        runtime
+    };
 }
 
-function ensureDevice(runtime, deviceId, timestamp = nowIso()) {
-  runtime.devices = runtime.devices || {};
-  if (!runtime.devices[deviceId]) {
-    runtime.devices[deviceId] = createEmptyDevice(deviceId, timestamp);
-  }
-  return runtime.devices[deviceId];
+function buildDeviceRow(device) {
+    return {
+        device_id: device.identity.device_id,
+        device_role: "node",
+        base_type: device.identity.base_type,
+        device_class: device.identity.device_class,
+        profile: device.identity.profile,
+        display_name: device.identity.display_name,
+        default_name: device.identity.device_id,
+        identity_json: device.identity,
+        meta_json: device.meta,
+        created_at: device.created_at,
+        updated_at: device.updated_at,
+        first_seen_at: device.first_seen_at,
+        last_seen_at: device.last_seen_at,
+        last_meta_at: device.last_meta_at,
+        last_availability_at: device.last_availability_at,
+        last_state_at: device.last_state_at,
+        last_event_at: device.last_event_at,
+        last_ack_at: device.last_ack_at
+    };
 }
 
-function ensureMaster(runtime, masterId, timestamp = nowIso()) {
-  runtime.master = runtime.master || {};
-  if (!runtime.master[masterId]) {
-    runtime.master[masterId] = createEmptyMaster(masterId, timestamp);
-  }
-  return runtime.master[masterId];
+function buildDeviceStateLatestRow(device) {
+    return {
+        device_id: device.identity.device_id,
+        identity_json: device.identity,
+        meta_json: device.meta,
+        availability_json: device.availability,
+        state_json: device.state,
+        config_json: device.config,
+        last_event_json: device.last_event,
+        last_ack_json: device.last_ack,
+        diagnostics_json: device.diagnostics,
+        created_at: device.created_at,
+        updated_at: device.updated_at,
+        first_seen_at: device.first_seen_at,
+        last_seen_at: device.last_seen_at,
+        last_meta_at: device.last_meta_at,
+        last_availability_at: device.last_availability_at,
+        last_state_at: device.last_state_at,
+        last_event_at: device.last_event_at,
+        last_ack_at: device.last_ack_at
+    };
 }
 
-function deriveStatusChip(device) {
-  if (!device.availability.online) {
-    return "offline";
-  }
-
-  if (device.state.fault) {
-    return "fault";
-  }
-
-  return "online";
+function buildMasterStatusRow(master) {
+    return {
+        master_id: master.master_id,
+        status_json: master.status,
+        last_status_at: master.last_status_at,
+        last_event_json: master.last_event,
+        last_event_at: master.last_event_at,
+        diagnostics_json: master.diagnostics,
+        created_at: master.created_at,
+        updated_at: master.updated_at,
+        first_seen_at: master.first_seen_at,
+        last_seen_at: master.last_seen_at
+    };
 }
 
-function applyMeta(device, payload, timestamp = nowIso()) {
-  const nextPayload = payload || {};
-  device.identity.device_id = nextPayload.device_id || device.identity.device_id;
-  device.identity.device_name = nextPayload.device_name || device.identity.device_name;
+function buildUpsertSql(tableName, keyColumn, row, jsonColumns, updateColumns) {
+    const columns = Object.keys(row);
+    const jsonColumnSet = new Set(jsonColumns || []);
+    const updates = updateColumns || columns.filter((columnName) => columnName !== keyColumn && columnName !== "created_at" && columnName !== "first_seen_at");
+    const values = columns.map((columnName) => {
+        const value = row[columnName];
+        return jsonColumnSet.has(columnName)
+            ? timeHelpers.toSqlJsonLiteral(value)
+            : timeHelpers.toSqlLiteral(value);
+    });
 
-  for (const field of META_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(nextPayload, field) && nextPayload[field] !== undefined) {
-      device.meta[field] = nextPayload[field];
-    }
-  }
-
-  device.meta.caps = deriveCapabilities({
-    ...device.meta,
-    caps: nextPayload.caps || device.meta.caps
-  });
-  device.diagnostics.status_chip = deriveStatusChip(device);
-  device.diagnostics.last_update_source = "meta";
-  device.diagnostics.notes = device.meta.caps.join(", ");
-  device.updated_at = timestamp;
-  return device;
+    return [
+        "INSERT INTO " + tableName + " (" + columns.join(", ") + ")",
+        "VALUES (" + values.join(", ") + ")",
+        "ON CONFLICT(" + keyColumn + ") DO UPDATE SET",
+        updates.map((columnName) => columnName + " = excluded." + columnName).join(", "),
+        ";"
+    ].join(" ");
 }
 
-function applyAvailability(device, payload, timestamp = nowIso()) {
-  const nextPayload = payload || {};
-  if (Object.prototype.hasOwnProperty.call(nextPayload, "availability")) {
-    device.availability.availability = nextPayload.availability || device.availability.availability;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(nextPayload, "online")) {
-    device.availability.online = coerceBoolean(nextPayload.online, device.availability.online);
-  } else if (nextPayload.availability) {
-    device.availability.online = String(nextPayload.availability).toLowerCase() === "online";
-  }
-
-  device.availability.last_seen_at = timestamp;
-  device.diagnostics.status_chip = deriveStatusChip(device);
-  device.diagnostics.last_update_source = "availability";
-  device.updated_at = timestamp;
-  return device;
+function buildDevicesUpsertSql(row) {
+    return buildUpsertSql(
+        "devices",
+        "device_id",
+        row,
+        ["identity_json", "meta_json"]
+    );
 }
 
-function applyState(device, payload, timestamp = nowIso()) {
-  const nextPayload = payload || {};
-  for (const [field, transform] of Object.entries(STATE_FIELD_TRANSFORMS)) {
-    if (Object.prototype.hasOwnProperty.call(nextPayload, field) && nextPayload[field] !== undefined) {
-      device.state[field] = transform(nextPayload[field]);
-    }
-  }
-
-  for (const field of CONFIG_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(nextPayload, field) && nextPayload[field] !== undefined) {
-      device.config[field] = field === "auto_schedule_enabled"
-        ? coerceBoolean(nextPayload[field], false)
-        : coerceNumber(nextPayload[field], nextPayload[field]);
-    }
-  }
-
-  if (Object.prototype.hasOwnProperty.call(nextPayload, "cover_calibrated")) {
-    device.state.is_calibrated = device.state.cover_calibrated;
-  } else if (Object.prototype.hasOwnProperty.call(nextPayload, "is_calibrated")) {
-    device.state.cover_calibrated = device.state.is_calibrated;
-  }
-
-  device.availability.online = true;
-  device.availability.availability = nextPayload.availability || "online";
-  device.availability.last_seen_at = timestamp;
-  device.diagnostics.status_chip = deriveStatusChip(device);
-  device.diagnostics.last_update_source = "state";
-  device.updated_at = timestamp;
-  return device;
+function buildDeviceStateLatestUpsertSql(row) {
+    return buildUpsertSql(
+        "device_state_latest",
+        "device_id",
+        row,
+        [
+            "identity_json",
+            "meta_json",
+            "availability_json",
+            "state_json",
+            "config_json",
+            "last_event_json",
+            "last_ack_json",
+            "diagnostics_json"
+        ]
+    );
 }
 
-function applyEvent(device, payload, timestamp = nowIso()) {
-  const nextPayload = payload || {};
-  device.last_event = {
-    event_type: nextPayload.event_type || nextPayload.event || null,
-    event_label: nextPayload.event || nextPayload.event_label || nextPayload.event_type || null,
-    event_trigger: nextPayload.trigger || null,
-    param1: Object.prototype.hasOwnProperty.call(nextPayload, "param1") ? nextPayload.param1 : null,
-    param2: Object.prototype.hasOwnProperty.call(nextPayload, "param2") ? nextPayload.param2 : null,
-    event_at: coerceTimestamp(nextPayload.event_at, timestamp)
-  };
-  device.diagnostics.last_update_source = "event";
-  device.updated_at = timestamp;
-  return device;
-}
-
-function applyAck(device, payload, timestamp = nowIso()) {
-  const nextPayload = payload || {};
-  device.last_ack = {
-    request_id: nextPayload.request_id || null,
-    channel: nextPayload.channel || null,
-    status: nextPayload.status || null,
-    status_code: Object.prototype.hasOwnProperty.call(nextPayload, "status_code") ? nextPayload.status_code : null,
-    ack_msg_type: nextPayload.ack_msg_type || null,
-    ack_seq: Object.prototype.hasOwnProperty.call(nextPayload, "ack_seq") ? nextPayload.ack_seq : null,
-    ack_at: coerceTimestamp(nextPayload.ack_at, timestamp)
-  };
-  device.diagnostics.last_update_source = "ack";
-  device.updated_at = timestamp;
-  return device;
-}
-
-function applyMasterStatus(master, payload, timestamp = nowIso()) {
-  const nextPayload = payload || {};
-  for (const field of ["online", "wifi", "mqtt", "espnow"]) {
-    if (Object.prototype.hasOwnProperty.call(nextPayload, field)) {
-      master.status[field] = coerceBoolean(nextPayload[field], master.status[field]);
-    }
-  }
-
-  if (Object.prototype.hasOwnProperty.call(nextPayload, "fw")) {
-    master.status.fw = nextPayload.fw;
-  }
-
-  master.status.last_seen_at = timestamp;
-  master.status.updated_at = timestamp;
-  master.diagnostics.last_update_source = "status";
-  return master;
-}
-
-function applyMasterEvent(master, payload, timestamp = nowIso()) {
-  const nextPayload = payload || {};
-  master.last_event = {
-    event: nextPayload.event || null,
-    message: nextPayload.message || nextPayload.event || null,
-    fw: nextPayload.fw || null,
-    occurred_at: coerceTimestamp(nextPayload.occurred_at, timestamp)
-  };
-  master.diagnostics.last_update_source = "event";
-  return master;
+function buildMasterStatusUpsertSql(row) {
+    return buildUpsertSql(
+        "master_status",
+        "master_id",
+        row,
+        ["status_json", "last_event_json", "diagnostics_json"]
+    );
 }
 
 module.exports = {
-  CONFIG_FIELDS,
-  META_FIELDS,
-  STATE_FIELD_TRANSFORMS,
-  applyAck,
-  applyAvailability,
-  applyEvent,
-  applyMasterEvent,
-  applyMasterStatus,
-  applyMeta,
-  applyState,
-  createEmptyDevice,
-  createEmptyMaster,
-  createRuntimeState,
-  ensureRuntime,
-  ensureDevice,
-  ensureMaster,
-  markRuntimeBoot
+    buildDeviceRow,
+    buildDeviceStateLatestRow,
+    buildDeviceStateLatestUpsertSql,
+    buildDevicesUpsertSql,
+    buildMasterStatusRow,
+    buildMasterStatusUpsertSql,
+    createRuntimeState,
+    ensureDevice,
+    ensureMaster
 };
