@@ -12,7 +12,7 @@ Im Serverbereich ist aktuell eine belastbare Phase-1-Linie sichtbar:
 - gemeinsames Geräteobjekt
 - separater Masterpfad
 - minimales SQLite-Schema als Grundlage
-- offizieller Minimalpfad für `net_erl_01` Relay 1
+- Dashboard V1 mit Geräteübersicht und versteckter Detailseite
 
 ## Bereits real nachgewiesen
 Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Protokolle und Testläufe belegt:
@@ -42,7 +42,7 @@ Wichtig ist dabei:
 ## Bereits sichtbar im Repo
 - grundlegende öffentliche Projektdokumentation
 - technische Trennung von Geräteschicht, Master und Server
-- erste Server-Phase für Ingest und Zustandsmodell
+- erste Server-Phase für Ingest, Zustandsmodell und kleines Dashboard V1
 - offizielle Nachweis- und Teststruktur
 - reale Recovery- und Roundtrip-Protokolle
 - bestätigter Master-Fix im belegten Hardwarepfad
