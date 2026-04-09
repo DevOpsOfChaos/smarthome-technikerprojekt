@@ -52,7 +52,7 @@
     "id": "sqlite_dashboard_overview_v1",
     "type": "sqlite",
     "z": "tab_dashboard_v1_ui",
-    "mydb": "cfg_sqlite_db",
+    "mydb": "sqlitedb_30_phase1",
     "sqlquery": "msg.topic",
     "sql": "",
     "name": "Read Overview",

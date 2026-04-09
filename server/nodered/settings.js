@@ -1,3 +1,6 @@
+const path = require("path");
+const libRoot = path.join(__dirname, "lib");
+
 module.exports = {
     flowFile: "flows.json",
     flowFilePretty: true,
@@ -8,12 +11,12 @@ module.exports = {
     debugMaxLength: 1000,
     functionExternalModules: false,
     functionGlobalContext: {
-        capabilityHelpers: require("/opt/smarthome/lib/capability_helpers"),
-        dashboardV1: require("/opt/smarthome/lib/dashboard_v1"),
-        deviceStore: require("/opt/smarthome/lib/device_store"),
-        timeHelpers: require("/opt/smarthome/lib/time_helpers"),
-        topicHandlers: require("/opt/smarthome/lib/topic_handlers"),
-        topicRouter: require("/opt/smarthome/lib/topic_router")
+        capabilityHelpers: require(path.join(libRoot, "capability_helpers")),
+        dashboardV1: require(path.join(libRoot, "dashboard_v1")),
+        deviceStore: require(path.join(libRoot, "device_store")),
+        timeHelpers: require(path.join(libRoot, "time_helpers")),
+        topicHandlers: require(path.join(libRoot, "topic_handlers")),
+        topicRouter: require(path.join(libRoot, "topic_router"))
     },
     exportGlobalContextKeys: false,
     sqliteReconnectTime: 20000,

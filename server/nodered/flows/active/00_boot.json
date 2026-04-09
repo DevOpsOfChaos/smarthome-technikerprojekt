@@ -46,7 +46,7 @@
     "type": "function",
     "z": "tab_00_boot",
     "name": "Runtime vorbereiten",
-    "func": "const deviceStore = global.get(\"deviceStore\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst now = timeHelpers.nowIso();\nconst existing = global.get(\"smarthome_runtime\");\nconst reason = existing && typeof existing === \"object\" ? \"restart\" : \"startup\";\nconst runtime = deviceStore.markRuntimeBoot(existing, reason, now);\nglobal.set(\"smarthome_runtime\", runtime);\nmsg.payload = {\n    status: \"bootstrapped\",\n    initialized_at: runtime.initialized_at,\n    device_count: Object.keys(runtime.devices).length,\n    master_count: Object.keys(runtime.master).length\n};\nreturn msg;",
+    "func": "const deviceStore = global.get(\"deviceStore\");\nconst timeHelpers = global.get(\"timeHelpers\");\nif (!deviceStore || typeof deviceStore.ensureRuntime !== \"function\") {\n    node.error(\"deviceStore.ensureRuntime missing\");\n    return null;\n}\nif (!timeHelpers || typeof timeHelpers.nowIso !== \"function\") {\n    node.error(\"timeHelpers.nowIso missing\");\n    return null;\n}\nconst now = timeHelpers.nowIso();\nconst existing = global.get(\"smarthome_runtime\");\nconst runtime = deviceStore.ensureRuntime(existing, now);\nglobal.set(\"smarthome_runtime\", runtime);\nmsg.payload = {\n    status: \"bootstrapped\",\n    initialized_at: runtime.initialized_at,\n    device_count: Object.keys(runtime.devices || {}).length,\n    master_count: Object.keys(runtime.masters || {}).length\n};\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",

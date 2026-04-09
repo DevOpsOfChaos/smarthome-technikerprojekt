@@ -23,7 +23,7 @@ function sqlStringLiteral(value) {
 }
 
 function normalizeBaseType(value) {
-    const text = normalizeString(value).toLowerCase();
+    const text = normalizeString(value).toLowerCase().replace(/-/g, "_");
     if (!text) {
         return "";
     }
@@ -93,12 +93,15 @@ function formatStateValue(key, value) {
     if (["relay_1", "relay_2"].includes(key)) return value ? "An" : "Aus";
     if (["motion", "presence"].includes(key)) return value ? "Erkannt" : "Nein";
     if (key === "contact_open") return value ? "Offen" : "Geschlossen";
+    if (key === "window_open") return value ? "Offen" : "Geschlossen";
     if (key === "cover_moving") return value ? "Ja" : "Nein";
     if (["cover_position", "cover_target", "battery_pct"].includes(key)) return formatNumber(value, 0, "%");
     if (key === "battery_mv") return formatNumber(value, 0, "mV");
     if (key === "temp_01c") return formatNumber(value, 10, "°C");
     if (key === "hum_01pct") return formatNumber(value, 10, "%");
     if (key === "pressure_hpa") return formatNumber(value, 0, "hPa");
+    if (key === "pressure_pa") return formatNumber(value, 100, "hPa");
+    if (key === "lux") return formatNumber(value, 0, "lx");
     if (key === "lux_01lx") return formatNumber(value, 10, "lx");
     if (key === "gas_ohm") return formatNumber(value, 0, "Ohm");
     if (typeof value === "number" && Number.isFinite(value)) return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
@@ -118,15 +121,158 @@ function labelForStateKey(key) {
         cover_target: "Ziel",
         gas_ohm: "Gas",
         hum_01pct: "Luftfeuchte",
+        lux: "Helligkeit",
         lux_01lx: "Helligkeit",
         motion: "Bewegung",
         presence: "Präsenz",
+        pressure_pa: "Druck",
         pressure_hpa: "Druck",
         relay_1: "Relais 1",
         relay_2: "Relais 2",
-        temp_01c: "Temperatur"
+        temp_01c: "Temperatur",
+        window_open: "Kontakt"
     };
     return labels[key] || key.replace(/_/g, " ");
+}
+
+function toBooleanOrNull(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    return Boolean(value);
+}
+
+function assignIfPresent(target, key, value) {
+    if (value !== null && value !== undefined && value !== "") {
+        target[key] = value;
+    }
+}
+
+function buildMetaFromRow(row) {
+    const meta = {};
+    assignIfPresent(meta, "device_name", row.device_name);
+    assignIfPresent(meta, "device_class", row.device_class);
+    assignIfPresent(meta, "power_type", row.power_type);
+    assignIfPresent(meta, "fw_version", row.fw_version);
+    assignIfPresent(meta, "control_mode", row.control_mode);
+    assignIfPresent(meta, "config_profile", row.config_profile);
+    assignIfPresent(meta, "reporting_mode", row.reporting_mode);
+    assignIfPresent(meta, "sensor_mask", row.sensor_mask);
+    assignIfPresent(meta, "input_mask", row.input_mask);
+    assignIfPresent(meta, "mac_address", row.mac_address);
+    assignIfPresent(meta, "meta_schema_version", row.meta_schema_version);
+    const caps = parseJson(row.caps);
+    if (Array.isArray(caps)) {
+        meta.caps = caps;
+    }
+    return meta;
+}
+
+function buildAvailabilityFromRow(row) {
+    return {
+        availability: normalizeString(row.availability).toLowerCase() || "unknown",
+        online: toBooleanOrNull(row.online),
+        last_seen_at: row.last_seen_at || null
+    };
+}
+
+function buildStateFromRow(row) {
+    const state = {};
+    [
+        "cover_mode",
+        "cover_state",
+        "cover_direction",
+        "cover_position",
+        "travel_time_ms",
+        "temp_01c",
+        "hum_01pct",
+        "lux",
+        "pressure_pa",
+        "gas_ohm",
+        "aqi",
+        "tvoc_ppb",
+        "eco2_ppm",
+        "rain_raw",
+        "battery_pct",
+        "battery_mv",
+        "button_last_action",
+        "button_last_action_at"
+    ].forEach((key) => assignIfPresent(state, key, row[key]));
+
+    [
+        "fault",
+        "relay_1",
+        "relay_2",
+        "motion",
+        "rain",
+        "window_open",
+        "cover_calibrated",
+        "is_calibrated"
+    ].forEach((key) => {
+        const value = toBooleanOrNull(row[key]);
+        if (value !== null) {
+            state[key] = value;
+        }
+    });
+
+    if (state.window_open !== undefined) {
+        state.contact_open = state.window_open;
+    }
+
+    const coverState = normalizeString(row.cover_state).toLowerCase();
+    if (coverState) {
+        state.cover_moving = ["opening", "closing", "moving"].includes(coverState);
+    }
+
+    return state;
+}
+
+function buildConfigFromRow(row) {
+    const config = {};
+    [
+        "report_interval_s",
+        "lux_threshold_on",
+        "auto_off_delay_s",
+        "rain_threshold",
+        "auto_up_time",
+        "auto_down_time",
+        "auto_up_position",
+        "auto_down_position"
+    ].forEach((key) => assignIfPresent(config, key, row[key]));
+    const autoScheduleEnabled = toBooleanOrNull(row.auto_schedule_enabled);
+    if (autoScheduleEnabled !== null) {
+        config.auto_schedule_enabled = autoScheduleEnabled;
+    }
+    return config;
+}
+
+function buildLastEventFromRow(row) {
+    if (!row.last_event_at) {
+        return null;
+    }
+    return {
+        event_type: row.last_event_type || null,
+        event_label: row.last_event_label || null,
+        event_trigger: row.last_event_trigger || null,
+        param1: row.last_event_param1 || null,
+        param2: row.last_event_param2 || null,
+        event_at: row.last_event_at
+    };
+}
+
+function buildLastAckFromRow(row) {
+    if (!row.last_ack_at && !row.last_ack_request_id) {
+        return null;
+    }
+    return {
+        request_id: row.last_ack_request_id || null,
+        channel: row.last_ack_channel || null,
+        status: row.last_ack_status || null,
+        status_code: row.last_ack_status_code || null,
+        ack_msg_type: row.last_ack_msg_type || null,
+        ack_seq: row.last_ack_seq || null,
+        ack_at: row.last_ack_at || null
+    };
 }
 
 function formatTimestamp(value) {
@@ -164,7 +310,7 @@ function pickHighlights(device, state, meta) {
     } else if (isRelayDevice(device, state, meta)) {
         keys.push("relay_1", "relay_2");
     }
-    keys.push("temp_01c", "hum_01pct", "lux_01lx", "battery_pct", "battery_mv", "motion", "presence", "contact_open");
+    keys.push("temp_01c", "hum_01pct", "lux", "battery_pct", "battery_mv", "motion", "presence", "contact_open", "window_open");
     return keys
         .filter((key, index) => keys.indexOf(key) === index)
         .filter((key) => Object.prototype.hasOwnProperty.call(state, key))
@@ -224,20 +370,22 @@ function classifyDevice(device, state, meta) {
 }
 
 function describeDevice(row) {
-    const identity = parseJson(row.identity_json) || {};
-    const meta = parseJson(row.meta_json) || {};
-    const availability = parseJson(row.availability_json) || {};
-    const state = parseJson(row.state_json) || {};
-    const config = parseJson(row.config_json) || {};
-    const lastEvent = parseJson(row.last_event_json) || null;
-    const lastAck = parseJson(row.last_ack_json) || null;
-    const diagnostics = parseJson(row.diagnostics_json) || {};
+    const meta = buildMetaFromRow(row);
+    const availability = buildAvailabilityFromRow(row);
+    const state = buildStateFromRow(row);
+    const config = buildConfigFromRow(row);
+    const lastEvent = buildLastEventFromRow(row);
+    const lastAck = buildLastAckFromRow(row);
+    const diagnostics = {
+        device_updated_at: row.device_updated_at || null,
+        state_updated_at: row.state_updated_at || null
+    };
     const device = {
         device_id: row.device_id,
-        base_type: normalizeBaseType(row.base_type || row.device_class || identity.base_type || row.device_id),
-        device_class: normalizeBaseType(row.device_class || identity.device_class || row.base_type || row.device_id),
-        profile: normalizeString(row.profile || identity.profile),
-        display_name: normalizeString(row.display_name || identity.display_name || row.device_id) || row.device_id,
+        base_type: normalizeBaseType(row.device_class || row.device_id),
+        device_class: normalizeBaseType(row.device_class || row.device_id),
+        profile: normalizeString(row.config_profile),
+        display_name: normalizeString(row.device_name || row.device_id) || row.device_id,
         meta,
         availability,
         state,
@@ -246,9 +394,9 @@ function describeDevice(row) {
         last_ack: lastAck,
         diagnostics,
         last_seen_at: row.last_seen_at,
-        last_availability_at: row.last_availability_at,
-        last_state_at: row.last_state_at,
-        last_meta_at: row.last_meta_at,
+        last_availability_at: row.last_seen_at,
+        last_state_at: row.state_updated_at || row.last_seen_at,
+        last_meta_at: row.device_updated_at,
         last_event_at: row.last_event_at,
         last_ack_at: row.last_ack_at,
         simulation: row.device_id.startsWith("sim_")
@@ -283,29 +431,75 @@ function buildOverviewQuery() {
     return [
         "SELECT",
         "    d.device_id,",
-        "    d.base_type,",
+        "    d.device_name,",
         "    d.device_class,",
-        "    d.profile,",
-        "    d.display_name,",
-        "    d.identity_json,",
-        "    d.meta_json,",
-        "    d.updated_at,",
-        "    d.last_seen_at,",
-        "    d.last_meta_at,",
-        "    d.last_availability_at,",
-        "    d.last_state_at,",
-        "    d.last_event_at,",
-        "    d.last_ack_at,",
-        "    l.availability_json,",
-        "    l.state_json,",
-        "    l.config_json,",
-        "    l.last_event_json,",
-        "    l.last_ack_json,",
-        "    l.diagnostics_json,",
+        "    d.power_type,",
+        "    d.fw_version,",
+        "    d.caps,",
+        "    d.control_mode,",
+        "    d.config_profile,",
+        "    d.reporting_mode,",
+        "    d.sensor_mask,",
+        "    d.input_mask,",
+        "    d.mac_address,",
+        "    d.meta_schema_version,",
+        "    d.updated_at AS device_updated_at,",
+        "    l.availability,",
+        "    l.online,",
+        "    l.last_seen_at,",
+        "    l.fault,",
+        "    l.relay_1,",
+        "    l.relay_2,",
+        "    l.cover_mode,",
+        "    l.cover_state,",
+        "    l.cover_direction,",
+        "    l.cover_position,",
+        "    l.cover_calibrated,",
+        "    l.is_calibrated,",
+        "    l.travel_time_ms,",
+        "    l.temp_01c,",
+        "    l.hum_01pct,",
+        "    l.lux,",
+        "    l.pressure_pa,",
+        "    l.gas_ohm,",
+        "    l.aqi,",
+        "    l.tvoc_ppb,",
+        "    l.eco2_ppm,",
+        "    l.motion,",
+        "    l.rain,",
+        "    l.rain_raw,",
+        "    l.window_open,",
+        "    l.battery_pct,",
+        "    l.battery_mv,",
+        "    l.button_last_action,",
+        "    l.button_last_action_at,",
+        "    l.report_interval_s,",
+        "    l.lux_threshold_on,",
+        "    l.auto_off_delay_s,",
+        "    l.rain_threshold,",
+        "    l.auto_up_time,",
+        "    l.auto_down_time,",
+        "    l.auto_schedule_enabled,",
+        "    l.auto_up_position,",
+        "    l.auto_down_position,",
+        "    l.last_event_type,",
+        "    l.last_event_label,",
+        "    l.last_event_trigger,",
+        "    l.last_event_param1,",
+        "    l.last_event_param2,",
+        "    l.last_event_at,",
+        "    l.last_ack_request_id,",
+        "    l.last_ack_channel,",
+        "    l.last_ack_status,",
+        "    l.last_ack_status_code,",
+        "    l.last_ack_msg_type,",
+        "    l.last_ack_seq,",
+        "    l.last_ack_at,",
+        "    l.updated_at AS state_updated_at,",
         "    (SELECT COUNT(*) FROM master_status) AS master_count",
         "FROM devices AS d",
         "LEFT JOIN device_state_latest AS l ON l.device_id = d.device_id",
-        "ORDER BY lower(COALESCE(d.display_name, d.device_id));"
+        "ORDER BY lower(COALESCE(d.device_name, d.device_id));"
     ].join(" ");
 }
 
@@ -331,25 +525,71 @@ function buildDeviceDetailQuery(deviceId) {
     return [
         "SELECT",
         "    d.device_id,",
-        "    d.base_type,",
+        "    d.device_name,",
         "    d.device_class,",
-        "    d.profile,",
-        "    d.display_name,",
-        "    d.identity_json,",
-        "    d.meta_json,",
-        "    d.updated_at,",
-        "    d.last_seen_at,",
-        "    d.last_meta_at,",
-        "    d.last_availability_at,",
-        "    d.last_state_at,",
-        "    d.last_event_at,",
-        "    d.last_ack_at,",
-        "    l.availability_json,",
-        "    l.state_json,",
-        "    l.config_json,",
-        "    l.last_event_json,",
-        "    l.last_ack_json,",
-        "    l.diagnostics_json",
+        "    d.power_type,",
+        "    d.fw_version,",
+        "    d.caps,",
+        "    d.control_mode,",
+        "    d.config_profile,",
+        "    d.reporting_mode,",
+        "    d.sensor_mask,",
+        "    d.input_mask,",
+        "    d.mac_address,",
+        "    d.meta_schema_version,",
+        "    d.updated_at AS device_updated_at,",
+        "    l.availability,",
+        "    l.online,",
+        "    l.last_seen_at,",
+        "    l.fault,",
+        "    l.relay_1,",
+        "    l.relay_2,",
+        "    l.cover_mode,",
+        "    l.cover_state,",
+        "    l.cover_direction,",
+        "    l.cover_position,",
+        "    l.cover_calibrated,",
+        "    l.is_calibrated,",
+        "    l.travel_time_ms,",
+        "    l.temp_01c,",
+        "    l.hum_01pct,",
+        "    l.lux,",
+        "    l.pressure_pa,",
+        "    l.gas_ohm,",
+        "    l.aqi,",
+        "    l.tvoc_ppb,",
+        "    l.eco2_ppm,",
+        "    l.motion,",
+        "    l.rain,",
+        "    l.rain_raw,",
+        "    l.window_open,",
+        "    l.battery_pct,",
+        "    l.battery_mv,",
+        "    l.button_last_action,",
+        "    l.button_last_action_at,",
+        "    l.report_interval_s,",
+        "    l.lux_threshold_on,",
+        "    l.auto_off_delay_s,",
+        "    l.rain_threshold,",
+        "    l.auto_up_time,",
+        "    l.auto_down_time,",
+        "    l.auto_schedule_enabled,",
+        "    l.auto_up_position,",
+        "    l.auto_down_position,",
+        "    l.last_event_type,",
+        "    l.last_event_label,",
+        "    l.last_event_trigger,",
+        "    l.last_event_param1,",
+        "    l.last_event_param2,",
+        "    l.last_event_at,",
+        "    l.last_ack_request_id,",
+        "    l.last_ack_channel,",
+        "    l.last_ack_status,",
+        "    l.last_ack_status_code,",
+        "    l.last_ack_msg_type,",
+        "    l.last_ack_seq,",
+        "    l.last_ack_at,",
+        "    l.updated_at AS state_updated_at",
         "FROM devices AS d",
         "LEFT JOIN device_state_latest AS l ON l.device_id = d.device_id",
         "WHERE d.device_id = " + sqlStringLiteral(normalizedId) + ";"

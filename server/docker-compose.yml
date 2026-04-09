@@ -45,7 +45,7 @@ services:
       - -lc
     command:
       - |
-        if [ ! -d /data/node_modules/node-red-node-sqlite ]; then
+        if [ ! -d /data/node_modules/node-red-node-sqlite ] || [ ! -d /data/node_modules/@flowfuse/node-red-dashboard ]; then
           cd /data && npm install --no-audit --no-fund --unsafe-perm
         fi
         node <<'NODE'
