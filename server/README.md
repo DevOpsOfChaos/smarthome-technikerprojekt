@@ -55,12 +55,17 @@ Im Ordner `server/`:
 3. `docker compose up --build -d`
 4. `docker compose ps`
 
+Der echte V1-Startpfad liegt aktuell direkt in `docker-compose.yml`:
+- Node-RED startet aus dem offiziellen `nodered/node-red:3.1`-Image.
+- SQLite-Schema, kleine V1-Migrationen, `flows.json` und die generierten Settings werden beim Containerstart inline vorbereitet.
+- `nodered/settings.js` bleibt die Basisdatei, die Laufzeit erweitert sie beim Start um den V1-`functionGlobalContext`.
+
 ## Offizielle V1-Dateien
 
 - `docker-compose.yml`
 - `.env.example`
 - `sqlite/00_schema_phase1.sql`
-- `nodered/build-flows.js`
+- `nodered/settings.js`
 - `nodered/flows/active/*.json`
 - `nodered/lib/*.js`
 

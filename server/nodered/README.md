@@ -2,14 +2,15 @@
 
 Dieser Ordner enthaelt die kleine Node-RED-Laufzeit fuer den engen Server-/Dashboard-V1-Pfad.
 
-- `build-flows.js` baut `flows.json` aus `flows/active/`
+- `flows/active/` enthaelt die produktiven V1-Flow-Fragmente
 - `lib/` enthaelt kleine Hilfsmodule fuer Routing, Handler und SQL-Bausteine
-- `entrypoint.sh` initialisiert SQLite und baut die Flows beim Start neu
+- `settings.js` ist die Basis fuer die Node-RED-Settings
+- der echte Startpfad liegt aktuell in `../docker-compose.yml`: dort werden SQLite, V1-Migrationen, `flows.json` und die erweiterten Settings beim Containerstart inline erzeugt
 
 Aktiv enthalten:
 - MQTT-Ingest
-- Geraete- und Master-Store
-- kleines FlowFuse-Dashboard mit Uebersicht und Detailseite
+- Geräte- und Master-Store
+- kleines FlowFuse-Dashboard mit Übersicht und Detailseite
 
 Bewusst nicht Teil dieser Stufe:
 - Wetterpfad
