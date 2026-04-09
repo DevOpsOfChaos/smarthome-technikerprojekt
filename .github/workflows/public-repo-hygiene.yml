@@ -1,0 +1,36 @@
+name: Public Repo Hygiene
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  protocol-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail on root protocol files
+        shell: bash
+        run: |
+          files="$(git ls-files 'PROTOKOLL_*.txt')"
+          if [ -n "$files" ]; then
+            echo "Root protocol files are not allowed."
+            printf '%s\n' "$files"
+            exit 1
+          fi
+
+  internal-markers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail on internal markers
+        shell: bash
+        run: |
+          if git grep -n -I -i -E 'codex|chatgpt|openai|gpt|llm|smarthome-technikerprojekt-private|ai/|ai\\|prompts?_aktiv' -- . ':(exclude).github/workflows/public-repo-hygiene.yml' ':(exclude)server/nodered/node_modules' ':(exclude)server/nodered/package-lock.json'; then
+            echo "Internal markers are not allowed in the public repository."
+            exit 1
+          fi
