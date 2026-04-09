@@ -58,7 +58,7 @@ Flash-Ergebnis:
 - geaendert:
   - `firmware/src/basetypes/net_zrl/main.cpp`
 - neu:
-  - `PROTOKOLL_2026-04-08_net_zrl_uncalibrated_autostop_fix.txt`
+  - `PROTOKOLL/PROTOKOLL_2026-04-08_net_zrl_uncalibrated_autostop_fix.txt`
 
 7. Commit-Status
 - in diesem Schritt noch kein Commit
