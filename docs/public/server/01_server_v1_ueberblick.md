@@ -2,82 +2,82 @@
 
 ## Ziel von Phase 1
 
-Phase 1 zieht nur den fachlichen Kern hoch:
+Phase 1 zieht nur den kleinen kontrollierten Serverkern hoch:
 
 - MQTT-Ingest fuer Geraete und Master
 - Topic-Routing auf kleine Handler
 - gemeinsames Geraeteobjekt als fachliche Mitte
-- enge offizielle Command-Ausgaenge fuer `net_erl` Relay 1 und Cover
 - separater Masterzustand
-- minimales SQLite-Schema als spaetere Persistenzbasis
+- minimale SQLite-Persistenz fuer `devices`, `device_state_latest` und `master_status`
+- Dashboard V1 mit zentraler Uebersicht und versteckter Detailseite pro Geraet
 
-Nicht Teil dieser Stufe sind breite UI, Diagramme, eine allgemeine Command-Welt, Wetter oder eine allgemeine Automationsplattform.
+Nicht Teil dieser Stufe sind breite Komfortebenen wie Wetter, Diagramme, Logs-Konsole, breite Automationen oder eine grosse Command-Welt.
 
-## Real bestaetigter Stand
+## Real bestaetigter Stand im Repo
 
-Auf `main` ist dieser Zuschnitt nicht nur beschrieben, sondern auf dem realen Pfad nachgewiesen:
+Der aktuelle Stand ist im Repo nicht nur beschrieben, sondern direkt ablesbar:
 
-- die offiziellen Server-Einstiege `POST /api/phase1/net-erl/relay-1` und `POST /api/phase1/cover/command` sind aktiv
-- fuer `net_erl_01` ist der echte HTTP -> MQTT -> Master -> Geraet -> ACK/State-Roundtrip belegt
-- derselbe Minimalpfad ist nach Server-Restart erneut belegt
-- derselbe Minimalpfad ist nach gezieltem Node-Recovery erneut belegt
-- der Master-Recovery-Pfad ist fachlich ueber frischen Master-Status plus frische `availability`/`state` eingeordnet
-- der fruehere Null-State nach Master-Recovery ist fuer den betroffenen Pfad behoben und per Hardware-Rerun des Master-Fixes bestaetigt
+- der reale Node-RED-Startpfad liegt in `server/docker-compose.yml`
+- die aktive V1-Linie laeuft ueber `00_boot`, `05_dashboard_runtime`, `10_mqtt_ingest`, `20_device_store`, `30_sqlite_persist`, `60_dashboard_overview`, `63_dashboard_device_detail` und `90_master_diag`
+- `server/nodered/lib/dashboard_v1.js` liefert die Datenaufbereitung fuer Uebersicht und Detailseite
+- `server/nodered/lib/device_store.js` haelt den Laufzeitkern und die schemaenge Persistenzlinie zusammen
 
-Die passenden Detailnachweise liegen in `PROTOKOLL/` und bauen auf derselben Phase-1-Linie auf. Diese Doku behauptet daher keinen Zukunftswunsch, sondern beschreibt den real bestaetigten Kern.
+Diese Doku beschreibt damit keinen Wunschstand, sondern den aktuell sichtbaren V1-Zuschnitt.
 
 ## Aktueller realer Zuschnitt
 
 Der aktuelle Serverstand ist fachlich in vier Schichten zu lesen:
 
-### 1. Technischer Kern
+### 1. Start- und Laufzeitbasis
 
-- MQTT-Ingest fuer `meta`, `availability`, `state`, `event`, `ack`
+- `server/docker-compose.yml` startet Mosquitto, Node-RED und InfluxDB
+- SQLite bleibt eine lokale Datei
+- die Compose-Startlogik initialisiert Schema und kleine V1-Migrationen
+- die aktiven Flow-Dateien werden beim Start zu `flows.json` zusammengebaut
+
+### 2. Ingest, Store und Persistenz
+
+- MQTT-Ingest fuer `meta`, `availability`, `state`, `event` und `ack`
 - separater Masterpfad fuer `status` und `event`
 - gemeinsamer Runtime-State in Node-RED
 - zentrale SQLite-Writes aus derselben Handlerkette
 
-### 2. Offizieller neutraler Minimalpfad
+### 3. Dashboard V1
 
-- `POST /api/phase1/net-erl/relay-1`
-- `POST /api/phase1/cover/command`
+- `http://localhost:1880/dashboard/`
+- `http://localhost:1880/dashboard/geraet?device=<device_id>`
 
-Diese beiden Pfade sind der offizielle obere Server-Minimalpfad.
-Sie gehoeren zur neutralen Serverlinie.
+Das Dashboard V1 umfasst aktuell:
+- eine zentrale Geraeteuebersicht
+- eine versteckte Detailseite pro Geraet
 
-### 3. Lokale Bedienflaeche
+Mehr ist oeffentlich fuer diese Stufe nicht zu behaupten.
 
-Zusaetzlich existiert real:
-- `GET /device/<device_id>`
-- `POST /api/phase1/cover/automation/<device_id>`
-
-Diese Pfade bilden eine kleine lokale Cover-Detailseite mit zwei Zeit/Wert-Slots.
-Sie sind real nutzbar, aber nicht Teil des neutralen oberen Vertrags.
-
-### 4. Lokale Laufzeitdateien
+### 4. Nachweis- und Laufzeitbasis
 
 - `server/sqlite/smarthome_phase1.db`
 - `server/nodered/flows.json`
-- `server/nodered/cover_automation.json`
+- `tests/server/phase1_ingest_checkliste.md`
 
-Diese Dateien sind Teil des lokalen Laufzeitstands, nicht der neutralen Serveroberflaeche.
+Die Datenbank und `flows.json` sind Laufzeitprodukte, keine zweite Architektur.
 
 ## Minimale Bausteine
 
 ### Laufzeitbasis
 
-- `server/docker-compose.yml` startet nur Mosquitto, Node-RED und InfluxDB
-- `server/.env.example` haelt nur die noetigen Ports und Basiswerte
-- SQLite bleibt eine lokale Datei und braucht keinen eigenen Dienst
-- die Node-RED-Startlogik baut die aktiven Flows zu `flows.json` zusammen und zieht das SQLite-Schema samt kleiner Phase-1-Migrationen hoch
+- `server/docker-compose.yml` ist der offizielle V1-Startpfad
+- `server/.env.example` haelt die benoetigten Ports und Basiswerte
+- `server/nodered/settings.js` bleibt die Basisdatei; die erweiterte Laufzeitkonfiguration entsteht beim Start
 
 ### Node-RED-Struktur
 
 - `00_boot` initialisiert den gemeinsamen Runtime-State
-- `10_mqtt_ingest` abonniert nur die Pflicht-Topics und verteilt sie weiter
+- `05_dashboard_runtime` definiert Dashboard-Basis, Seiten und Gruppen
+- `10_mqtt_ingest` abonniert die Pflicht-Topics und verteilt sie weiter
 - `20_device_store` pflegt das Geraeteobjekt
-- `40_command_minimal` baut die engen offiziellen Command-Einstiege fuer `net_erl` Relay 1 und Cover
-- `41_cover_automation_detail` liefert die lokale Cover-Detailseite, den lokalen Save-Pfad und den kleinen Minutentick
+- `30_sqlite_persist` schreibt den engen V1-Stand nach SQLite
+- `60_dashboard_overview` liefert die zentrale Geraeteuebersicht
+- `63_dashboard_device_detail` liefert die versteckte Detailseite pro Geraet
 - `90_master_diag` haelt Masterstatus und Masterevents getrennt
 
 ### Fachliche Mitte
@@ -105,25 +105,6 @@ Masterdaten laufen bewusst ausserhalb dieser Geraeteobjekte.
 - `smarthome/device/+/event`
 - `smarthome/device/+/ack`
 
-### Geraete-Command Minimalpfad
-
-- `POST /api/phase1/net-erl/relay-1`
-- `POST /api/phase1/cover/command`
-- MQTT-Publish auf `smarthome/device/<device_id>/command`
-- Payload fuer `set_relay` auf `relay_1` oder fuer die Cover-Kommandos `open`, `close`, `stop`, `set_position`
-- `set_position` respektiert serverseitig den letzten bekannten Zustand `cover_calibrated`
-
-### Lokaler Cover-Bedienpfad
-
-- `GET /device/<device_id>`
-- `POST /api/phase1/cover/automation/<device_id>`
-- lokale Speicherung in `server/nodered/cover_automation.json`
-- Ausfuehrung ueber denselben Cover-Command-Baustein wie der offizielle Cover-Minimalpfad
-
-Wichtig:
-- dieser Pfad ist projektpraktisch und lokal
-- er erweitert nicht den neutralen MQTT-Vertrag um Zeitfelder oder Scheduling-Topics
-
 ### Master
 
 - `smarthome/master/+/status`
@@ -131,29 +112,21 @@ Wichtig:
 
 ## Warum dieser Zuschnitt richtig ist
 
-Der alte Fehler war nicht fehlende Features, sondern fehlende Disziplin. Phase 1 loest zuerst die fachliche Mitte:
+Der V1-Stand bleibt klein, damit er lesbar und belastbar bleibt:
 
-- State bleibt Hauptwahrheit
-- Event und ACK ergaenzen nur
-- der Server erzeugt Commands nur ueber einen engen offiziellen Pfad
-- der zusaetzliche lokale Cover-Bedienpfad bleibt bewusst ausserhalb dieses neutralen oberen Vertrags
-- unbekannte Geraete duerfen bei validem Meta-, Availability- oder State-Pfad auto-angelegt werden
-- partielle State-Nachrichten duerfen keine vorhandenen Felder loeschen
-
-Das ist klein genug, um testbar zu bleiben, und stabil genug, um spaeter Persistenz, UI und Commands darauf aufzusetzen.
+- Startpfad und Laufzeitwahrheit liegen an einer Stelle
+- Store, Persistenz und Dashboard bauen auf derselben engen Linie auf
+- die sichtbare UI bleibt auf Uebersicht und Detail beschraenkt
+- spaetere Komfortebenen werden nicht als schon erreicht verkauft
 
 ## Bewusste Grenze dieser Stufe
 
-Real bestaetigt ist ein kleiner, belastbarer Serverstand.
+Real vorhanden ist ein kleiner, belastbarer Serverstand mit Dashboard V1.
 
-Er ist mehr als nur Kern, weil:
-- die offiziellen HTTP-Minimalpfade real aufrufbar sind
-- eine kleine lokale Cover-Detailseite real existiert
-
-Er ist aber noch keine breite Produktflaeche.
-Nicht bestaetigt ist damit automatisch schon:
-
-- eine breite Command-Matrix ueber die engen Relay- und Cover-Pfade hinaus
-- eine voll ausgebaute UI fuer alle Geraeteklassen
-- eine allgemeine Automationsplattform
-- Timeseries- oder Komfortwelten ausserhalb des Phase-1-Kerns
+Nicht oeffentlich als aktueller V1-Hauptstand zu behandeln sind:
+- Wetter
+- Diagramme
+- Logs- oder MQTT-Konsole als Bedienflaeche
+- breite Automationen
+- Komfort-Commands als grosse Produktschicht
+- eine breite UI ueber Uebersicht und Detailseite hinaus
