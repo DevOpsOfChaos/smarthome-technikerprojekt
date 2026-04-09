@@ -58,7 +58,7 @@ Damit war der enge Bewegungsgrundpfad vor dem MQTT-Positionslauf bereits real po
 6) Echter Fehler im MQTT-/Recovery-Pfad
 Der erste direkte `set_position`-Test war nicht gruener als er aussah.
 Der Testbefehl war:
-- `{"command":"set_position","position":50,"request_id":"codex-setpos-50"}`
+- `{"command":"set_position","position":50,"request_id":"setpos-50"}`
 
 Der Master antwortete dabei mit:
 - `status":"unknown_device"`
@@ -94,7 +94,7 @@ Danach wurde bewusst der kritische Recovery-Fall gefahren:
 - danach wurde `set_position` erneut ueber MQTT gesendet
 
 Testbefehl:
-- `{"command":"set_position","position":50,"request_id":"codex-setpos-50-after-master-reset"}`
+- `{"command":"set_position","position":50,"request_id":"setpos-50-after-master-reset"}`
 
 Beobachteter Verlauf:
 - `MQTT verbunden`
@@ -123,7 +123,7 @@ Beobachteter Zustand:
 - Master-State ueber MQTT: `cover_calibrated":false`
 
 Testbefehl:
-- `{"command":"set_position","position":30,"request_id":"codex-setpos-30-uncal"}`
+- `{"command":"set_position","position":30,"request_id":"setpos-30-uncal"}`
 
 Ergebnis:
 - MQTT-ACK mit `status":"not_calibrated"` und `status_code":-5`

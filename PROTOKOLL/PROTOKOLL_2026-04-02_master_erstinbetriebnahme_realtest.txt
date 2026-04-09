@@ -26,7 +26,7 @@ Ziel war der reale Nachweis, dass die Master-Firmware im aktuellen Hauptstand bu
 - Branch: `main`
 - Commitbasis für den Test: `775cd2c`
 
-Privates Repository (`smarthome-technikerprojekt-private`):
+Internes Begleitrepository:
 - Branch: `main`
 - Commitbasis für Testdokumentation: `efe478d`
 

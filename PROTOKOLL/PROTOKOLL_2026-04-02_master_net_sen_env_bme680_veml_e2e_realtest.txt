@@ -25,7 +25,7 @@ Ziel war der reale Nachweis der vollständigen Integrationskette zwischen Master
 Öffentlich (`smarthome-technikerprojekt`):
 - 08d56b1 docs: add master erstinbetriebnahme realtest protocol
 
-Privat (`smarthome-technikerprojekt-private`):
+Internes Begleitrepository:
 - 2313831 docs(private): add master realtest output and log
 
 6) Build-/Flash-Schritte

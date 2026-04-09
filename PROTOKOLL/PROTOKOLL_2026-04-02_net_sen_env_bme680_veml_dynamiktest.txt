@@ -88,4 +88,4 @@ Der Pfad net_sen_env_bme680_veml reagiert im realen Aufbau plausibel auf Licht- 
 Kurzer Wiederholungslauf mit expliziter Zeitmarkierung der Benutzeraktionen direkt im Log (z. B. Marker über separates Steuerfenster), um die Phasen noch schärfer korrelieren zu können.
 
 13) Logpfad
-C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt-private\logs\hardwaretests\2026-04-03_realvalidierung\C_net_sen_env_bme680_veml_dynamiktest.log
+interner Hardwaretest-Log vom 2026-04-03 fuer den Dynamiktest net_sen_env_bme680_veml

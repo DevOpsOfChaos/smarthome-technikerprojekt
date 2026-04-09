@@ -137,4 +137,4 @@ Nicht erwarten:
 - `docs/public/server/03_cover_command_und_positionssemantik.md`
 - `docs/public/server/04_master_dynamische_registry_und_cover_pfad.md`
 - `tests/server/phase1_ingest_checkliste.md`
-- `PROTOKOLL_2026-04-08_server_inventur_und_produktflaeche.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-08_server_inventur_und_produktflaeche.txt`
