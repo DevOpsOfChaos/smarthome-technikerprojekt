@@ -7,10 +7,10 @@ Ziel: den aktuellen realen Serverstand fachlich und praktisch sauber einordnen, 
 
 Pflichtlektuere privat:
 - docs/uebergaben/2026-04-08_chatwechsel_geraeteprioritaet_und_2_tage_fokus.md
-- ai/kontext/2026-04-08_prioritaeten_geraete_und_arbeitsmodus.md
+- interne Kontextnotiz zur Geraeteprioritaet und Arbeitsweise vom 2026-04-08
 - docs/planung/2026-04-08_2_tage_fokusplan_vorzeigbares_system.md
-- ai/kontext/00_master_kurzfassung.md
-- ai/fehlerlernen/00_zusammenfassung_codex_fehlerlernen.md
+- interne Master-Kurzfassung
+- interne Fehlerlern-Zusammenfassung
 
 Pflichtlektuere oeffentlich:
 - README.md
@@ -134,7 +134,7 @@ Geaendert wurden:
 - docs/public/server/03_phase1_dateirollen.md
 
 Neu angelegt:
-- PROTOKOLL_2026-04-08_server_inventur_und_produktflaeche.txt
+- PROTOKOLL/PROTOKOLL_2026-04-08_server_inventur_und_produktflaeche.txt
 
 7. Ergebnis
 

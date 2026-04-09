@@ -15,8 +15,8 @@ Firmware und Doku:
 - `firmware/src/basetypes/master/AppConfig.h`
 - `firmware/src/basetypes/master/main.cpp`
 - `firmware/src/devices/net_sen_env_bme680_veml/DeviceConfig.h`
-- `PROTOKOLL_2026-04-02_master_net_sen_env_bme680_veml_e2e_realtest.txt`
-- `PROTOKOLL_2026-04-02_master_net_sen_env_bme680_veml_e2e_ens160_repeat.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-02_master_net_sen_env_bme680_veml_e2e_realtest.txt`
+- `PROTOKOLL/PROTOKOLL_2026-04-02_master_net_sen_env_bme680_veml_e2e_ens160_repeat.txt`
 
 Serielle und MQTT-Mitschnitte vom 2026-04-03:
 - `master.log`

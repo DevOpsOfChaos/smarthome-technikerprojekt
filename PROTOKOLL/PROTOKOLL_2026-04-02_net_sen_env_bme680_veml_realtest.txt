@@ -27,14 +27,13 @@ Ziel war die reale, vollständige Prüfung des Environment-Pfads net_sen_env_bme
 5) Durchgeführte Schritte
 1. Kontext- und Tooldateien vollständig gelesen.
 2. Repo-Stand im öffentlichen und privaten Repo geprüft.
-3. COM-Port mit ai/tools/list_serial_ports.ps1 -Detailed geprüft.
+3. COM-Port mit lokalem Port-Listing geprüft.
 4. Build und Upload ausgeführt:
    pio run -e net_sen_env_bme680_veml -t upload --upload-port COM4
 5. Ersten 5-Minuten-Capture gefahren (Warmup/Init bestätigt, Messwerttiefe noch unzureichend).
 6. Minimalanpassung für Snapshot-Logs implementiert.
 7. Erneut Build + Upload auf COM4.
-8. Finalen 5-Minuten-Log mit Zeitstempeln aufgenommen:
-   ai/tools/serial_log_capture.ps1 -Port COM4 -Baudrate 115200 -Timestamp -DurationSeconds 300
+8. Finalen 5-Minuten-Log mit Zeitstempeln per lokalem Capture-Skript aufgenommen.
 
 6) Beobachtungen beim Flashen und Starten
 - Build erfolgreich, keine Compiler- oder Linkfehler.
@@ -100,4 +99,4 @@ Als nächster Schritt sollte ein kurzer Wiederholungslauf mit bewusst verändert
 
 14) Lognachweis
 Finaler Log:
-C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt-private\logs\hardwaretests\2026-04-03_realvalidierung\C_net_sen_env_bme680_veml_fulltest.log
+interner Hardwaretest-Log vom 2026-04-03 fuer den Volltest net_sen_env_bme680_veml

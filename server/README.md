@@ -1,41 +1,77 @@
-# Server
+# Server V1
 
-Dieser Ordner enthaelt den aktuellen lokalen Serverstand fuer Phase 1.
+Bereichs-README fuer `server/`.
+Dieser Stand bleibt bewusst klein und kontrolliert.
 
-Er ist weder nur ein nackter MQTT-Kern noch schon eine breite Serveroberflaeche.
-Der reale Stand besteht aus einem kleinen technischen Kern mit engen offiziellen HTTP-Pfaden
-und einer zusaetzlichen lokalen Cover-Detailseite.
+Nicht diese Datei:
 
-## Real vorhandene Bausteine
+- Gesamtarchitektur und Entscheidungen: `../docs/README.md`, `../docs/DECISIONS.md`
+- belegter Gesamtstatus: `../docs/14_test_und_nachweisstand.md`
+
+## Rolle der Serverbasis
+
+V1 liefert die kleine serverseitige Grundlage plus einen engen Dashboard-Schnitt:
 
 - Mosquitto
-- Node-RED
-- InfluxDB als mitgestarteter Basisdienst
-- SQLite als lokale Datei unter `server/sqlite/`
-- aktive Flows `00`, `10`, `20`, `30`, `40`, `41`, `90`
+- Node-RED mit kleinem FlowFuse-Dashboard
+- SQLite
+- InfluxDB als bereits vorhandener Basisdienst
 
-## Reale Einstiege
+## Scope
 
-- `http://localhost:1880` fuer Node-RED
-- `POST /api/phase1/net-erl/relay-1` als enger offizieller Relay-Minimalpfad
-- `POST /api/phase1/cover/command` als enger offizieller neutraler Cover-Pfad
-- `GET /device/<device_id>` als lokale Cover-Detailseite
-- `POST /api/phase1/cover/automation/<device_id>` als lokaler Save-Pfad der Detailseite
+- MQTT-Ingest fuer die engen V1-Themen
+- Topic-Routing in Device- und Masterpfad
+- gemeinsames Laufzeitobjekt pro Geraet
+- separater Masterzustand
+- minimale SQLite-Persistenz fuer `devices`, `device_state_latest` und `master_status`
+- eine zentrale Geraeteuebersicht
+- eine versteckte Detailseite pro Geraet
 
-Wichtig:
-- die beiden `POST /api/phase1/...`-Pfade sind der offizielle obere Minimalpfad
-- die Detailseite und ihr Save-Pfad sind lokal und projektpraktisch, nicht der neutrale obere Vertrag
+## Bewusst nicht Teil dieser Stufe
 
-## Wichtige Laufzeitdateien
+- Diagramme
+- Wetter
+- volle Logs- oder MQTT-Konsole
+- Commands als Komfortpfad
+- Automationen
+- SIM-spezifischer Ausbau
+- grosse Konfigurationswelt
 
-- `server/sqlite/smarthome_phase1.db`
-- `server/nodered/flows.json`
-- `server/nodered/cover_automation.json`
+## Bereichsdoku
 
-## Einstieg in die Doku
+- `../docs/public/server/01_server_v1_ueberblick.md`
+- `../docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`
+- `../docs/public/server/03_phase1_dateirollen.md`
+- `flows/README.md`
+- `db/README.md`
+- `nodered/README.md`
 
-- `docs/public/04_server_schnellstart_phase1.md`
-- `docs/public/server/01_server_v1_ueberblick.md`
-- `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`
-- `docs/public/server/03_phase1_dateirollen.md`
-- `docs/public/server/03_cover_command_und_positionssemantik.md`
+## Start
+
+Im Ordner `server/`:
+
+1. optional `Copy-Item .env.example .env`
+2. lokale Werte in `.env` setzen
+3. `docker compose up --build -d`
+4. `docker compose ps`
+
+## Offizielle V1-Dateien
+
+- `docker-compose.yml`
+- `.env.example`
+- `sqlite/00_schema_phase1.sql`
+- `nodered/build-flows.js`
+- `nodered/flows/active/*.json`
+- `nodered/lib/*.js`
+
+## Lokal, nicht versioniert
+
+- `.env`
+- `config/.env`
+- `config/mosquitto/config/` inklusive lokaler Auth-Dateien
+- lokale Compose-Overrides
+
+## Ehrliche Grenze
+
+Wenn spaeter Diagramme, Wetter, Logs oder Commands dazukommen sollen, muessen sie auf diesem kleinen Ingest- und Dashboard-Kern aufbauen.
+Der aktuelle Stand ist absichtlich nicht die Komfortebene.

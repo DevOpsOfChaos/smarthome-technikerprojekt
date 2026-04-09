@@ -1,18 +1,9 @@
 # Node-RED Flows
 
-## Ziel
+Diese Ebene bleibt fuer V1 bewusst klein.
 
-Die Flows werden so getrennt, dass klar erkennbar ist, was zur aktiven Basislinie gehört und was vorläufig pausiert ist.
+- `active/` enthaelt die produktiven Flow-Fragmente.
+- `../build-flows.js` liest genau diese Dateien ein und baut daraus `flows.json`.
+- Die Reihenfolge ist absichtlich numerisch: Boot, Dashboard-Runtime, Ingest, Device-Store, Dashboard-Views, Master-Diagnostik.
 
-## Ordner
-
-- `active/` enthält Flows, die Teil des normalen Basisbetriebs sind.
-- `paused/` enthält Flows, die bewusst nicht aktiv genutzt werden.
-
-## Regel
-
-Pausierte Flows dürfen den aktiven Pflichtpfad nicht beeinflussen.
-
-## Basislinie
-
-Aktiv sind nur die Flows, die für Datenempfang, Visualisierung, einfache Bedienung und stabile Grundfunktion des Systems benötigt werden.
+Es gibt hier bewusst keine zweite Flow-Welt fuer Wetter, Charts, Logs, Commands oder Komfortpfade.

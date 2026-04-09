@@ -132,7 +132,7 @@ Teil B:
 - geaendert:
   - `firmware/include/ProjectVersion.h`
 - neu angelegt:
-  - `PROTOKOLL_2026-04-08_master_flash_verification_and_negative_cover_test.txt`
+  - `PROTOKOLL/PROTOKOLL_2026-04-08_master_flash_verification_and_negative_cover_test.txt`
 
 11. Commit-Status
 - in diesem Teil des Laufs noch kein Commit erfolgt

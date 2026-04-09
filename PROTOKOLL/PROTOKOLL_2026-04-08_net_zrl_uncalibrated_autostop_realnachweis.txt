@@ -136,7 +136,7 @@ Real belegt ist:
 
 9. Dateien in diesem Lauf
 - neu:
-  - `PROTOKOLL_2026-04-08_net_zrl_uncalibrated_autostop_realnachweis.txt`
+  - `PROTOKOLL/PROTOKOLL_2026-04-08_net_zrl_uncalibrated_autostop_realnachweis.txt`
 
 10. Commit-Status
 - in diesem Protokollschritt noch kein Commit

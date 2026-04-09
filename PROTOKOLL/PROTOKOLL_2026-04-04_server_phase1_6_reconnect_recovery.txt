@@ -33,8 +33,8 @@ Explizit nicht verwendet:
 
 3) Vorpruefung auf vorhandene Gruenbasis
 Auf `main` lagen die relevanten Vorstufen bereits vor:
-- Phase 1.4: `PROTOKOLL_2026-04-04_server_phase1_4_real_command_roundtrip.txt`
-- Phase 1.5: `PROTOKOLL_2026-04-04_server_phase1_5_restart_roundtrip.txt`
+- Phase 1.4: `PROTOKOLL/PROTOKOLL_2026-04-04_server_phase1_4_real_command_roundtrip.txt`
+- Phase 1.5: `PROTOKOLL/PROTOKOLL_2026-04-04_server_phase1_5_restart_roundtrip.txt`
 
 Damit war der Server-/Stack-Neustart schon belegt.
 Dieser Lauf prueft nur noch den Recovery-Fall nach Neustart des realen Zielnodes.
