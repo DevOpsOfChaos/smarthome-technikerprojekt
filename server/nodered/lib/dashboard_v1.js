@@ -96,7 +96,7 @@ function formatStateValue(key, value) {
     if (key === "cover_moving") return value ? "Ja" : "Nein";
     if (["cover_position", "cover_target", "battery_pct"].includes(key)) return formatNumber(value, 0, "%");
     if (key === "battery_mv") return formatNumber(value, 0, "mV");
-    if (key === "temp_01c") return formatNumber(value, 10, "┬░C");
+    if (key === "temp_01c") return formatNumber(value, 10, "°C");
     if (key === "hum_01pct") return formatNumber(value, 10, "%");
     if (key === "pressure_hpa") return formatNumber(value, 0, "hPa");
     if (key === "lux_01lx") return formatNumber(value, 10, "lx");
@@ -120,7 +120,7 @@ function labelForStateKey(key) {
         hum_01pct: "Luftfeuchte",
         lux_01lx: "Helligkeit",
         motion: "Bewegung",
-        presence: "Pr├ñsenz",
+        presence: "Präsenz",
         pressure_hpa: "Druck",
         relay_1: "Relais 1",
         relay_2: "Relais 2",
@@ -184,7 +184,7 @@ function buildControls(device, state, meta) {
         return {
             kind: "cover",
             position_text: positionValue === null ? "unbekannt" : String(positionValue) + " %",
-            state_text: moving ? (direction === "down" ? "f├ñhrt ab" : direction === "up" ? "f├ñhrt auf" : "in Bewegung") : "gestoppt",
+            state_text: moving ? (direction === "down" ? "fährt ab" : direction === "up" ? "fährt auf" : "in Bewegung") : "gestoppt",
             position_value: positionValue === null ? 55 : positionValue,
             position_known: positionValue !== null,
             motion_class: moving ? (direction === "down" ? "is-moving-down" : "is-moving-up") : "",
@@ -218,7 +218,7 @@ function classifyDevice(device, state, meta) {
         return { kind_label: "Aktor", icon: "mdi-lightbulb-outline", surface_class: "is-relay-card" };
     }
     if (isBatteryDevice(device)) {
-        return { kind_label: "Batterieger├ñt", icon: "mdi-battery-outline", surface_class: "is-battery-card" };
+        return { kind_label: "Batteriegerät", icon: "mdi-battery-outline", surface_class: "is-battery-card" };
     }
     return { kind_label: "Sensor", icon: "mdi-thermometer", surface_class: "is-sensor-card" };
 }
@@ -314,7 +314,7 @@ function buildOverviewPayload(rows) {
         .filter((device) => device.base_type !== "master" && device.device_class !== "master");
     const masterCount = rows && rows.length ? Number(rows[0].master_count || 0) : 0;
     return {
-        page: { key: "overview", title: "Ger├ñte├╝bersicht" },
+        page: { key: "overview", title: "Geräteübersicht" },
         summary: {
             device_count: devices.length,
             master_count: masterCount

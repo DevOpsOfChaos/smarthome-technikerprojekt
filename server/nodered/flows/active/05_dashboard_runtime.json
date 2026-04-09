@@ -41,7 +41,7 @@
   {
     "id": "cfg_ui_page_overview_v1",
     "type": "ui-page",
-    "name": "├£bersicht",
+    "name": "Übersicht",
     "ui": "cfg_ui_base_v1",
     "path": "/",
     "icon": "view-dashboard",
@@ -77,7 +77,7 @@
   {
     "id": "cfg_ui_page_detail_v1",
     "type": "ui-page",
-    "name": "Ger├ñtedetail",
+    "name": "Gerätedetail",
     "ui": "cfg_ui_base_v1",
     "path": "/geraet",
     "icon": "card-text-outline",
@@ -113,7 +113,7 @@
   {
     "id": "cfg_ui_group_overview_v1",
     "type": "ui-group",
-    "name": "├£bersicht",
+    "name": "Übersicht",
     "page": "cfg_ui_page_overview_v1",
     "width": 12,
     "height": 0,
