@@ -6,7 +6,7 @@
 // BME280 + VEML7700 + PIR + Relais
 // Fokus: robuste Motion-/Lux-/Nachlauf-Logik ohne Debug-Sonderpfad.
 
-#define NET_ERL_DEVICE_ID "net_erl_01"
+#define NET_ERL_DEVICE_ID "NET-ERL-001"
 #define NET_ERL_DEVICE_NAME "NET-ERL Hall Light"
 #define NET_ERL_FW_VARIANT "net_erl_hall_light"
 
