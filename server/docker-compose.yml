@@ -78,6 +78,11 @@ services:
           });
         }
         async function ensurePhase1Migrations(db) {
+          const deviceColumns = await queryAll(db, "PRAGMA table_info(devices)");
+          const hasDashboardDisplayName = deviceColumns.some((column) => column && column.name === 'dashboard_display_name');
+          if (!hasDashboardDisplayName) {
+            await runSql(db, "ALTER TABLE devices ADD COLUMN dashboard_display_name TEXT");
+          }
           const stateColumns = await queryAll(db, "PRAGMA table_info(device_state_latest)");
           const hasCoverDirection = stateColumns.some((column) => column && column.name === 'cover_direction');
           const hasCoverCalibrated = stateColumns.some((column) => column && column.name === 'cover_calibrated');

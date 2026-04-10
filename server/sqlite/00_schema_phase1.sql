@@ -3,6 +3,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS devices (
     device_id TEXT PRIMARY KEY,
     device_name TEXT,
+    dashboard_display_name TEXT,
     device_class TEXT,
     power_type TEXT,
     fw_version TEXT,

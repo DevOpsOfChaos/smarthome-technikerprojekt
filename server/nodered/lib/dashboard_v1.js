@@ -92,6 +92,16 @@ function formatNumber(rawValue, divisor, suffix) {
     return suffix ? text + " " + suffix : text;
 }
 
+function normalizeCoverPosition(value, isCalibrated) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
+        return null;
+    }
+    if (!isCalibrated && value !== 0 && value !== 100) {
+        return null;
+    }
+    return value;
+}
+
 function formatStateValue(key, value) {
     if (value === null || value === undefined) return "-";
     if (["relay_1", "relay_2"].includes(key)) return value ? "An" : "Aus";
@@ -228,6 +238,16 @@ function buildStateFromRow(row) {
         state.cover_moving = ["opening", "closing", "moving"].includes(coverState);
     }
 
+    const coverCalibrated = state.cover_calibrated === true || state.is_calibrated === true;
+    if (Object.prototype.hasOwnProperty.call(state, "cover_position")) {
+        const normalizedCoverPosition = normalizeCoverPosition(state.cover_position, coverCalibrated);
+        if (normalizedCoverPosition === null) {
+            delete state.cover_position;
+        } else {
+            state.cover_position = normalizedCoverPosition;
+        }
+    }
+
     return state;
 }
 
@@ -330,8 +350,8 @@ function pickHighlights(device, state, meta) {
 
 function buildControls(device, state, meta) {
     if (isCoverDevice(device, state, meta)) {
-        const positionValue = typeof state.cover_position === "number" ? Math.max(0, Math.min(100, state.cover_position)) : null;
         const positionCalibrated = state.cover_calibrated === true || state.is_calibrated === true;
+        const positionValue = normalizeCoverPosition(state.cover_position, positionCalibrated);
         const allowIntermediatePositions = positionValue !== null && positionCalibrated;
         const moving = state.cover_moving === true;
         const direction = normalizeString(state.cover_direction).toLowerCase();
@@ -402,13 +422,14 @@ function describeDevice(row) {
         device_updated_at: row.device_updated_at || null,
         state_updated_at: row.state_updated_at || null
     };
-    const customName = normalizeString(row.device_name);
+    const customName = normalizeString(row.dashboard_display_name);
+    const metaName = normalizeString(row.device_name);
     const device = {
         device_id: row.device_id,
         base_type: normalizeBaseType(row.device_class || row.device_id),
         device_class: normalizeBaseType(row.device_class || row.device_id),
         profile: normalizeString(row.config_profile),
-        display_name: customName || row.device_id,
+        display_name: customName || metaName || row.device_id,
         custom_name: customName,
         has_custom_name: Boolean(customName),
         meta,
@@ -457,6 +478,7 @@ function buildOverviewQuery() {
         "SELECT",
         "    d.device_id,",
         "    d.device_name,",
+        "    d.dashboard_display_name,",
         "    d.device_class,",
         "    d.power_type,",
         "    d.fw_version,",
@@ -551,6 +573,7 @@ function buildDeviceDetailQuery(deviceId) {
         "SELECT",
         "    d.device_id,",
         "    d.device_name,",
+        "    d.dashboard_display_name,",
         "    d.device_class,",
         "    d.power_type,",
         "    d.fw_version,",
