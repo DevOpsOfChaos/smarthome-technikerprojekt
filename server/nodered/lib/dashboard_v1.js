@@ -102,6 +102,16 @@ function normalizeCoverPosition(value, isCalibrated) {
     return value;
 }
 
+function coverCalibrationHint(positionCalibrated, positionValue) {
+    if (!positionCalibrated) {
+        return "Nicht kalibriert";
+    }
+    if (positionValue === null) {
+        return "Kalibriert, Position aktuell unbekannt";
+    }
+    return "";
+}
+
 function formatStateValue(key, value) {
     if (value === null || value === undefined) return "-";
     if (["relay_1", "relay_2"].includes(key)) return value ? "An" : "Aus";
@@ -353,6 +363,7 @@ function buildControls(device, state, meta) {
         const positionCalibrated = state.cover_calibrated === true || state.is_calibrated === true;
         const positionValue = normalizeCoverPosition(state.cover_position, positionCalibrated);
         const allowIntermediatePositions = positionValue !== null && positionCalibrated;
+        const calibrationHintText = coverCalibrationHint(positionCalibrated, positionValue);
         const moving = state.cover_moving === true;
         const direction = normalizeString(state.cover_direction).toLowerCase();
         return {
@@ -365,6 +376,7 @@ function buildControls(device, state, meta) {
             position_known: positionValue !== null,
             position_calibrated: positionCalibrated,
             allow_intermediate_positions: allowIntermediatePositions,
+            calibration_hint_text: calibrationHintText,
             // Endlagen bleiben auch ohne Kalibrierung bedienbar. Nur Zwischenwerte hängen an verlässlicher Positionskalibrierung.
             allow_end_positions: true,
             // Die Übersicht bekommt bewusst nur die kompakte Direktbedienung; der volle Positionszugriff bleibt in der Detailseite.
