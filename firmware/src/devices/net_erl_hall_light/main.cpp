@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ShNodeProvisioning.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
@@ -26,7 +27,7 @@
 
 constexpr bool DEBUG_LOKAL_AKTIV = (NET_ERL_DEBUG_ENABLED != 0) && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "NET-ERL";
-constexpr char DATEI_VERSION[] = "0.4.0";
+constexpr char DATEI_VERSION[] = "0.5.0";
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 constexpr char DEVICE_ID[] = NET_ERL_DEVICE_ID;
@@ -42,9 +43,19 @@ constexpr int WLAN_KANAL = NET_ERL_WLAN_CHANNEL;
 constexpr unsigned long HELLO_RETRY_INTERVAL_MS = NET_ERL_HELLO_RETRY_INTERVAL_MS;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = NET_ERL_HEARTBEAT_INTERVAL_MS;
 constexpr unsigned long LOOP_INTERVAL_MS = NET_ERL_LOOP_INTERVAL_MS;
-constexpr uint16_t MIN_REPORT_INTERVAL_S = NET_ERL_MIN_REPORT_INTERVAL_S;
-constexpr uint16_t MAX_REPORT_INTERVAL_S = NET_ERL_MAX_REPORT_INTERVAL_S;
+constexpr uint32_t MIN_REPORT_INTERVAL_S = NET_ERL_MIN_REPORT_INTERVAL_S;
+constexpr uint32_t MAX_REPORT_INTERVAL_S = NET_ERL_MAX_REPORT_INTERVAL_S;
+constexpr uint32_t DEFAULT_SENSOR_SEND_INTERVAL_S = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
 constexpr uint32_t BOOT_COUNTER = NET_ERL_BOOT_COUNTER;
+
+constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
+constexpr const char* STORAGE_NAMESPACE = "net_erl_hl";
+constexpr const char* STORAGE_KEY_NODE_BASIS = "node_basis_v1";
+constexpr const char* STORAGE_KEY_HALL_SETUP = "hall_setup_v1";
+constexpr const char* SETUP_AP_PREFIX = "NET-ERL-SETUP";
+constexpr int SETUP_AP_CHANNEL = 1;
+constexpr uint32_t NET_ERL_HALL_SETUP_MAGIC = 0x484C4C31UL;
+constexpr uint16_t NET_ERL_HALL_SETUP_VERSION = 1U;
 
 Adafruit_BME280 bme280;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
@@ -58,6 +69,11 @@ struct SensorState {
 };
 
 struct HallRuntime {
+    bool provisioning_bereit;
+    bool setup_mode;
+    bool setup_ap_aktiv;
+    bool restart_pending;
+    bool funk_bereit;
     bool motion_aktiv;
     bool relay_1;
     bool fault;
@@ -68,6 +84,7 @@ struct HallRuntime {
     bool blocked_by_lux;
     bool pending_auto_on_decision;
     uint8_t pending_motion_event_state;
+    unsigned long restart_requested_at_ms;
     unsigned long letztes_hello_ms;
     unsigned long letzter_heartbeat_ms;
     unsigned long letzter_state_ms;
@@ -81,13 +98,67 @@ struct HallRuntime {
     bool master_bekannt;
     bool master_mac_gueltig;
     bool state_report_offen;
-    uint16_t report_interval_s;
+    uint32_t report_interval_s;
+    uint32_t sensor_send_interval_s;
     uint16_t auto_on_lux_threshold;
     uint16_t auto_off_delay_s;
+    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
     SensorState sensor;
 };
 
+struct HallPersistedSetupData {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint16_t autoOnLuxThreshold;
+    uint16_t autoOffDelayS;
+};
+
+struct HallProvisioningSnapshot {
+    uint16_t auto_on_lux_threshold;
+    uint16_t auto_off_delay_s;
+};
+
 HallRuntime runtime = {};
+
+bool parseUIntValue(const char* text, uint32_t& outValue) {
+    if (text == nullptr || *text == '\0') return false;
+
+    uint32_t parsed = 0UL;
+    for (const char* current = text; *current != '\0'; ++current) {
+        if (*current < '0' || *current > '9') {
+            return false;
+        }
+
+        const uint32_t digit = (uint32_t)(*current - '0');
+        if (parsed > ((0xFFFFFFFFUL - digit) / 10UL)) {
+            return false;
+        }
+        parsed = (parsed * 10UL) + digit;
+    }
+
+    outValue = parsed;
+    return true;
+}
+
+String htmlEscapeLocal(const String& text) {
+    String escaped;
+    escaped.reserve(text.length() + 16U);
+
+    for (size_t i = 0U; i < text.length(); ++i) {
+        const char current = text[i];
+        switch (current) {
+            case '&': escaped += F("&amp;"); break;
+            case '<': escaped += F("&lt;"); break;
+            case '>': escaped += F("&gt;"); break;
+            case '"': escaped += F("&quot;"); break;
+            case '\'': escaped += F("&#39;"); break;
+            default: escaped += current; break;
+        }
+    }
+
+    return escaped;
+}
 
 uint16_t clampToU16(long value) {
     if (value < 0L) return 0U;
@@ -108,6 +179,15 @@ void logf(const char* level, const char* format, ...) {
     Serial.println(message);
 }
 
+void provisioningLog(const char* level, const char* message) {
+    if (!DEBUG_LOKAL_AKTIV || level == nullptr || message == nullptr) return;
+
+    Serial.print("[");
+    Serial.print(level);
+    Serial.print("] ");
+    Serial.println(message);
+}
+
 void copyText(char* target, size_t targetSize, const char* source) {
     if (!target || targetSize == 0U) return;
     if (!source) {
@@ -122,8 +202,48 @@ bool istBroadcastMac(const uint8_t* mac) {
     return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
 }
 
+bool senderIstBekannterMaster(const uint8_t* senderMac) {
+    return runtime.master_mac_gueltig &&
+           senderMac != nullptr &&
+           memcmp(senderMac, runtime.master_mac, sizeof(runtime.master_mac)) == 0;
+}
+
 const uint8_t* holeHelloZielMac() {
     return runtime.master_mac_gueltig ? runtime.master_mac : BROADCAST_MAC;
+}
+
+void wendeReportIntervalAn(uint32_t wertS) {
+    runtime.report_interval_s = wertS;
+    runtime.state_interval_ms = (unsigned long)runtime.report_interval_s * 1000UL;
+}
+
+void holeHallProvisioningSnapshot(HallProvisioningSnapshot& snapshot) {
+    snapshot.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
+    snapshot.auto_off_delay_s = runtime.auto_off_delay_s;
+}
+
+void wendeHallProvisioningSnapshotAn(const HallProvisioningSnapshot& snapshot) {
+    runtime.auto_on_lux_threshold = snapshot.auto_on_lux_threshold;
+    runtime.auto_off_delay_s = snapshot.auto_off_delay_s;
+}
+
+bool hallPersistenzdatenGueltig(const HallPersistedSetupData& data) {
+    return data.magic == NET_ERL_HALL_SETUP_MAGIC &&
+           data.version == NET_ERL_HALL_SETUP_VERSION;
+}
+
+HallPersistedSetupData baueHallPersistenzdatenAusRuntime() {
+    HallPersistedSetupData data = {};
+    data.magic = NET_ERL_HALL_SETUP_MAGIC;
+    data.version = NET_ERL_HALL_SETUP_VERSION;
+    data.autoOnLuxThreshold = runtime.auto_on_lux_threshold;
+    data.autoOffDelayS = runtime.auto_off_delay_s;
+    return data;
+}
+
+void wendeHallPersistenzdatenAn(const HallPersistedSetupData& data) {
+    runtime.auto_on_lux_threshold = data.autoOnLuxThreshold;
+    runtime.auto_off_delay_s = data.autoOffDelayS;
 }
 
 void setzeRelayAusgang(bool an, const char* grund) {
@@ -141,8 +261,148 @@ void setzeRelayAusgang(bool an, const char* grund) {
     logf("INFO", "GPIO%d relay_1 -> %s (%s)", PIN_RELAY_1, an ? "HIGH" : "LOW", grund ? grund : "unbekannt");
 }
 
+class NetErlHallProvisioningHandler final
+    : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
+  public:
+    const char* pageTitle() const override { return "NET-ERL Hall Light Provisioning"; }
+    const char* pageIntro() const override {
+        return "Node-Basis oben, Hall-Light-Laufzeitwerte unten.";
+    }
+    const char* deviceSectionTitle() const override { return "Hall-Light-Spezifisch"; }
+    const char* deviceSectionIntro() const override {
+        return "Nur Lux-Schwelle und Nachlauf lokal provisionieren.";
+    }
+
+    void loadDeviceDefaults() override {
+        runtime.auto_on_lux_threshold = NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD;
+        runtime.auto_off_delay_s = NET_ERL_DEFAULT_AUTO_OFF_DELAY_S;
+    }
+
+    bool loadDeviceSettings(Preferences& prefs) override {
+        HallPersistedSetupData data = {};
+        if (prefs.getBytesLength(STORAGE_KEY_HALL_SETUP) != sizeof(HallPersistedSetupData)) {
+            return false;
+        }
+
+        if (prefs.getBytes(STORAGE_KEY_HALL_SETUP, &data, sizeof(data)) != sizeof(data)) {
+            return false;
+        }
+
+        if (!hallPersistenzdatenGueltig(data)) {
+            return false;
+        }
+
+        wendeHallPersistenzdatenAn(data);
+        return true;
+    }
+
+    bool saveDeviceSettings(Preferences& prefs) override {
+        const HallPersistedSetupData data = baueHallPersistenzdatenAusRuntime();
+        return prefs.putBytes(STORAGE_KEY_HALL_SETUP, &data, sizeof(data)) == sizeof(data);
+    }
+
+    bool clearDeviceSettings(Preferences& prefs) override {
+        prefs.remove(STORAGE_KEY_HALL_SETUP);
+        return true;
+    }
+
+    void captureDeviceSnapshot() override { holeHallProvisioningSnapshot(snapshot_); }
+    void restoreDeviceSnapshot() override { wendeHallProvisioningSnapshotAn(snapshot_); }
+
+    bool parseDeviceSave(WebServer& server, String& errorText) override {
+        pending_ = {};
+
+        uint32_t autoOnLuxThreshold = 0UL;
+        if (!parseUIntValue(server.arg("auto_on_lux_threshold").c_str(), autoOnLuxThreshold) ||
+            autoOnLuxThreshold > 65535UL) {
+            errorText = F("auto_on_lux_threshold ist ungueltig. Erlaubt sind 0 bis 65535.");
+            return false;
+        }
+
+        uint32_t autoOffDelayS = 0UL;
+        if (!parseUIntValue(server.arg("auto_off_delay_s").c_str(), autoOffDelayS) ||
+            autoOffDelayS > 65535UL) {
+            errorText = F("auto_off_delay_s ist ungueltig. Erlaubt sind 0 bis 65535.");
+            return false;
+        }
+
+        pending_.auto_on_lux_threshold = (uint16_t)autoOnLuxThreshold;
+        pending_.auto_off_delay_s = (uint16_t)autoOffDelayS;
+        pending_.gueltig = true;
+        return true;
+    }
+
+    void applyParsedDeviceSettings() override {
+        if (!pending_.gueltig) return;
+        runtime.auto_on_lux_threshold = pending_.auto_on_lux_threshold;
+        runtime.auto_off_delay_s = pending_.auto_off_delay_s;
+    }
+
+    void discardParsedDeviceSettings() override { pending_ = {}; }
+
+    void appendDeviceFieldsHtml(String& page, WebServer* sourceServer) const override {
+        const String autoOnLuxThresholdText =
+            sourceServer != nullptr && sourceServer->hasArg("auto_on_lux_threshold")
+                ? sourceServer->arg("auto_on_lux_threshold")
+                : String(runtime.auto_on_lux_threshold);
+        const String autoOffDelayText =
+            sourceServer != nullptr && sourceServer->hasArg("auto_off_delay_s")
+                ? sourceServer->arg("auto_off_delay_s")
+                : String(runtime.auto_off_delay_s);
+
+        page += F("<div class=\"field\"><label for=\"auto_on_lux_threshold\">auto_on_lux_threshold</label>");
+        page += F("<input id=\"auto_on_lux_threshold\" name=\"auto_on_lux_threshold\" type=\"number\" min=\"0\" max=\"65535\" step=\"1\" inputmode=\"numeric\" value=\"");
+        page += htmlEscapeLocal(autoOnLuxThresholdText);
+        page += F("\"><div class=\"hint\">Lux-Schwelle fuer automatisches Einschalten.</div></div>");
+
+        page += F("<div class=\"field\"><label for=\"auto_off_delay_s\">auto_off_delay_s</label>");
+        page += F("<input id=\"auto_off_delay_s\" name=\"auto_off_delay_s\" type=\"number\" min=\"0\" max=\"65535\" step=\"1\" inputmode=\"numeric\" value=\"");
+        page += htmlEscapeLocal(autoOffDelayText);
+        page += F("\"><div class=\"hint\">Nachlaufzeit nach letzter Bewegung in Sekunden.</div></div>");
+    }
+
+  private:
+    struct PendingValues {
+        bool gueltig;
+        uint16_t auto_on_lux_threshold;
+        uint16_t auto_off_delay_s;
+    };
+
+    PendingValues pending_ = {};
+    HallProvisioningSnapshot snapshot_ = {};
+};
+
+SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
+NetErlHallProvisioningHandler netErlHallProvisioningHandler;
+
+void holeSetupSnapshot(
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
+    HallProvisioningSnapshot& deviceSnapshot) {
+    nodeProvisioning.captureBasisSnapshot(basisSnapshot);
+    holeHallProvisioningSnapshot(deviceSnapshot);
+}
+
+void wendeSetupSnapshotAn(
+    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
+    const HallProvisioningSnapshot& deviceSnapshot) {
+    nodeProvisioning.restoreBasisSnapshot(basisSnapshot);
+    wendeHallProvisioningSnapshotAn(deviceSnapshot);
+    wendeReportIntervalAn(runtime.report_interval_s);
+}
+
+bool speicherePersistenzMitRollback(
+    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
+    const HallProvisioningSnapshot& deviceSnapshot) {
+    if (nodeProvisioning.saveCurrentState()) {
+        return true;
+    }
+
+    wendeSetupSnapshotAn(basisSnapshot, deviceSnapshot);
+    return false;
+}
+
 bool stellePeerSicher(const uint8_t* mac) {
-    if (mac == nullptr) return false;
+    if (!runtime.funk_bereit || mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
 
@@ -168,7 +428,7 @@ bool sendePaketMitOptionen(
     uint8_t flags,
     uint8_t* verwendeteSeq)
 {
-    if (zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
+    if (!runtime.funk_bereit || zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
     if (!stellePeerSicher(zielMac)) return false;
 
     uint8_t packet[SH_ESPNOW_MAX_BYTES] = {0};
@@ -240,7 +500,7 @@ bool sendeHello() {
 }
 
 bool sendeHeartbeat() {
-    if (!runtime.master_mac_gueltig) return false;
+    if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
 
     SmartHome::HeartbeatPayload payload = {};
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
@@ -255,7 +515,7 @@ bool sendeHeartbeat() {
 }
 
 bool sendeState() {
-    if (!runtime.master_mac_gueltig) return false;
+    if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
 
     SmartHome::RelayComfortConfigStateReportPayload payload = {};
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
@@ -270,7 +530,7 @@ bool sendeState() {
     payload.motion = runtime.motion_aktiv ? 1U : 0U;
     payload.auto_flags = holeAutoFlags();
     payload.fault = runtime.fault ? 1U : 0U;
-    payload.report_interval_s = runtime.report_interval_s;
+    payload.report_interval_s = (uint16_t)runtime.report_interval_s;
     payload.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
 
     if (!sendePaket(runtime.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
@@ -283,7 +543,7 @@ bool sendeState() {
 }
 
 bool sendeMotionEvent(bool motionState) {
-    if (!runtime.master_mac_gueltig) return false;
+    if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
 
     SmartHome::EventReportPayload payload = {};
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
@@ -296,7 +556,7 @@ bool sendeMotionEvent(bool motionState) {
 }
 
 void sendeAusstehendesMotionEvent() {
-    if (!runtime.master_mac_gueltig || runtime.pending_motion_event_state == 0U) return;
+    if (!runtime.master_bekannt || !runtime.master_mac_gueltig || runtime.pending_motion_event_state == 0U) return;
 
     const bool motionState = (runtime.pending_motion_event_state == 1U);
     if (sendeMotionEvent(motionState)) {
@@ -305,7 +565,7 @@ void sendeAusstehendesMotionEvent() {
 }
 
 bool sendeRelayEvent(uint8_t trigger) {
-    if (!runtime.master_mac_gueltig) return false;
+    if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
 
     SmartHome::EventReportPayload payload = {};
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
@@ -323,8 +583,16 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
         return;
     }
 
-    memcpy(runtime.master_mac, senderMac, sizeof(runtime.master_mac));
-    runtime.master_mac_gueltig = true;
+    if (!runtime.master_mac_gueltig) {
+        logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
+        return;
+    }
+
+    if (!senderIstBekannterMaster(senderMac)) {
+        logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     runtime.master_bekannt = true;
     runtime.state_report_offen = true;
     stellePeerSicher(runtime.master_mac);
@@ -332,26 +600,68 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     logf("INFO", "HELLO_ACK empfangen");
 }
 
+bool speichereReportIntervalAusCfg(uint32_t valueS) {
+    if (!nodeProvisioning.isSendIntervalValid(valueS)) return false;
+
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+    HallProvisioningSnapshot deviceSnapshot = {};
+    holeSetupSnapshot(basisSnapshot, deviceSnapshot);
+
+    wendeReportIntervalAn(valueS);
+    runtime.state_report_offen = true;
+    if (!speicherePersistenzMitRollback(basisSnapshot, deviceSnapshot)) {
+        logf("WARN", "report_interval_s konnte nicht persistiert werden");
+        return false;
+    }
+
+    return true;
+}
+
+bool speichereAutoOnLuxThresholdAusCfg(uint16_t value) {
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+    HallProvisioningSnapshot deviceSnapshot = {};
+    holeSetupSnapshot(basisSnapshot, deviceSnapshot);
+
+    runtime.auto_on_lux_threshold = value;
+    runtime.state_report_offen = true;
+    if (!speicherePersistenzMitRollback(basisSnapshot, deviceSnapshot)) {
+        logf("WARN", "auto_on_lux_threshold konnte nicht persistiert werden");
+        return false;
+    }
+
+    return true;
+}
+
+bool speichereAutoOffDelayAusCfg(uint16_t value) {
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+    HallProvisioningSnapshot deviceSnapshot = {};
+    holeSetupSnapshot(basisSnapshot, deviceSnapshot);
+
+    runtime.auto_off_delay_s = value;
+    runtime.state_report_offen = true;
+    if (!speicherePersistenzMitRollback(basisSnapshot, deviceSnapshot)) {
+        logf("WARN", "auto_off_delay_s konnte nicht persistiert werden");
+        return false;
+    }
+
+    return true;
+}
+
 bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
     switch (payload.param_id) {
         case SH_CFG_REPORT_INTERVAL_S:
-            if (payload.value < MIN_REPORT_INTERVAL_S || payload.value > MAX_REPORT_INTERVAL_S) return false;
-            runtime.report_interval_s = payload.value;
-            runtime.state_interval_ms = (unsigned long)runtime.report_interval_s * 1000UL;
+            if (!speichereReportIntervalAusCfg(payload.value)) return false;
             logf("INFO", "report_interval_s -> %u", (unsigned)runtime.report_interval_s);
-            runtime.state_report_offen = true;
             return true;
 
         case SH_CFG_LIGHT_THRESHOLD_ON:
-            runtime.auto_on_lux_threshold = payload.value;
+            if (!speichereAutoOnLuxThresholdAusCfg(payload.value)) return false;
             logf("INFO", "auto_on_lux_threshold -> %u", (unsigned)runtime.auto_on_lux_threshold);
-            runtime.state_report_offen = true;
             return true;
 
         case SH_CFG_AUTO_OFF_DELAY_S:
-            runtime.auto_off_delay_s = payload.value;
+            if (!speichereAutoOffDelayAusCfg(payload.value)) return false;
             logf("INFO", "auto_off_delay_s -> %u", (unsigned)runtime.auto_off_delay_s);
-            runtime.state_report_offen = true;
             return true;
 
         default:
@@ -360,6 +670,11 @@ bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
 }
 
 void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    if (!senderIstBekannterMaster(senderMac)) {
+        logf("WARN", "CFG ignoriert: Sender ist nicht der bekannte Master");
+        return;
+    }
+
     const bool ok = uebernehmeCfg(payload);
     if (header.flags & SH_FLAG_ACK_REQUEST) {
         sendeAck(senderMac, header.seq, header.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
@@ -367,6 +682,11 @@ void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 }
 
 void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
+    if (!senderIstBekannterMaster(senderMac)) {
+        logf("WARN", "CMD ignoriert: Sender ist nicht der bekannte Master");
+        return;
+    }
+
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         runtime.state_report_offen = true;
         return;
@@ -450,6 +770,8 @@ void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
 }
 
 void initialisiereFunk() {
+    if (runtime.funk_bereit || runtime.setup_mode) return;
+
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     WiFi.setSleep(false);
@@ -466,7 +788,11 @@ void initialisiereFunk() {
 
     esp_now_register_send_cb(onEspNowSend);
     esp_now_register_recv_cb(onEspNowReceive);
+    runtime.funk_bereit = true;
     stellePeerSicher(BROADCAST_MAC);
+    if (runtime.master_mac_gueltig) {
+        stellePeerSicher(runtime.master_mac);
+    }
 }
 
 void initialisiereSensorik() {
@@ -649,9 +975,9 @@ void setup() {
 
     runtime = {};
     runtime.report_interval_s = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
+    runtime.sensor_send_interval_s = DEFAULT_SENSOR_SEND_INTERVAL_S;
     runtime.auto_on_lux_threshold = NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD;
     runtime.auto_off_delay_s = NET_ERL_DEFAULT_AUTO_OFF_DELAY_S;
-    runtime.state_interval_ms = (unsigned long)runtime.report_interval_s * 1000UL;
     runtime.state_report_offen = true;
 
     setzeSensorDefaults();
@@ -664,12 +990,58 @@ void setup() {
     digitalWrite(PIN_STATUS_LED, LOW);
 #endif
 
+    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig = {
+        SETUP_AP_PREFIX,
+        STORAGE_NAMESPACE,
+        STORAGE_KEY_NODE_BASIS,
+        NET_ERL_DEFAULT_REPORT_INTERVAL_S,
+        DEFAULT_SENSOR_SEND_INTERVAL_S,
+        MIN_REPORT_INTERVAL_S,
+        MAX_REPORT_INTERVAL_S,
+        1500UL,
+        SETUP_AP_CHANNEL,
+    };
+
+    runtime.provisioning_bereit = nodeProvisioning.begin(
+        provisioningConfig,
+        &runtime.master_mac_gueltig,
+        runtime.master_mac,
+        &runtime.report_interval_s,
+        &runtime.sensor_send_interval_s,
+        &runtime.setup_mode,
+        &runtime.setup_ap_aktiv,
+        &runtime.restart_pending,
+        &runtime.restart_requested_at_ms,
+        runtime.setup_ap_ssid,
+        sizeof(runtime.setup_ap_ssid),
+        &netErlHallProvisioningHandler,
+        provisioningLog);
+
+    if (!runtime.provisioning_bereit) {
+        logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
+        return;
+    }
+
+    wendeReportIntervalAn(nodeProvisioning.sanitizeStatusSendInterval(runtime.report_interval_s));
+    runtime.sensor_send_interval_s =
+        nodeProvisioning.sanitizeSensorSendInterval(runtime.sensor_send_interval_s);
+
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
     logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
-    logf("INFO", "config report_interval_s=%u auto_off_delay_s=%u lux_threshold=%u",
+    logf("INFO", "config report_interval_s=%u sensor_send_interval_s=%u auto_off_delay_s=%u lux_threshold=%u",
          (unsigned)runtime.report_interval_s,
+         (unsigned)runtime.sensor_send_interval_s,
          (unsigned)runtime.auto_off_delay_s,
          (unsigned)runtime.auto_on_lux_threshold);
+
+    // Hall-Light hat keine lokale Setup-Tastatur.
+    // Ohne persistierte Master-Bindung geht der Geraetepfad deshalb direkt
+    // in den projektweiten Provisioning-Modus statt blind normal weiterzulaufen.
+    if (!nodeProvisioning.hasStoredMasterMac()) {
+        logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
+        nodeProvisioning.enterSetupMode();
+        return;
+    }
 
     initialisiereSensorik();
     initialisiereFunk();
@@ -677,6 +1049,17 @@ void setup() {
 }
 
 void loop() {
+    nodeProvisioning.update();
+
+    if (!runtime.provisioning_bereit || runtime.setup_mode) {
+        delay(LOOP_INTERVAL_MS);
+        return;
+    }
+
+    if (!runtime.funk_bereit) {
+        initialisiereFunk();
+    }
+
     const unsigned long jetzt = millis();
 
     leseUmweltsensoren(jetzt);
@@ -685,18 +1068,22 @@ void loop() {
     sendeAusstehendesMotionEvent();
 
     if (!runtime.master_bekannt &&
-        (jetzt - runtime.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) {
+        (runtime.letztes_hello_ms == 0UL ||
+         (jetzt - runtime.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS)) {
         sendeHello();
     }
 
     if (runtime.master_bekannt &&
-        (jetzt - runtime.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS) {
+        (runtime.letzter_heartbeat_ms == 0UL ||
+         (jetzt - runtime.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS)) {
         sendeHeartbeat();
     }
 
     const bool stateFaellig =
+        runtime.master_bekannt &&
         runtime.master_mac_gueltig &&
         (runtime.state_report_offen ||
+         runtime.letzter_state_ms == 0UL ||
          (runtime.state_interval_ms > 0UL &&
           (jetzt - runtime.letzter_state_ms) >= runtime.state_interval_ms));
 
