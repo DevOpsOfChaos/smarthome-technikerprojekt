@@ -634,12 +634,12 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             return;
 
         case SH_CLASS_NET_ZRL:
+            schreibeUIntOrNull(
+                coverPositionText,
+                sizeof(coverPositionText),
+                nodeStates[nodeIndex].cover_position,
+                COVER_POSITION_UNBEKANNT);
             if (nodeStates[nodeIndex].cover_calibrated) {
-                schreibeUIntOrNull(
-                    coverPositionText,
-                    sizeof(coverPositionText),
-                    nodeStates[nodeIndex].cover_position,
-                    COVER_POSITION_UNBEKANNT);
                 snprintf(
                     buffer,
                     bufferSize,
@@ -651,30 +651,20 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                     coverStateText(nodeStates[nodeIndex].cover_state, true, nodeStates[nodeIndex].cover_position),
                     coverPositionText,
                     nodeStates[nodeIndex].fault ? "true" : "false");
-            } else if (istCoverPositionBekannt(nodeStates[nodeIndex].cover_position)) {
-                // Unkalibrierte 0/100-Endlagen werden nur gezeigt, wenn das Geraet sie
-                // selbst als bekannte grobe Endlage gemeldet hat. Unbekannt bleibt verborgen.
+            } else {
+                // Unkalibrierte Unknown-Lagen muessen hier explizit als null erscheinen.
+                // Wenn der Master das Feld nur wegglaesst, bleibt serverseitig der alte 0/100-Wert haengen.
+                // Das ist keine neue Positionslogik, sondern nur ehrliche Unknown-Semantik fuer den Store.
                 snprintf(
                     buffer,
                     bufferSize,
-                    "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":\"%s\",\"cover_position\":%u,\"cover_calibrated\":false,\"fault\":%s}",
+                    "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":\"%s\",\"cover_position\":%s,\"cover_calibrated\":false,\"fault\":%s}",
                     nodeStates[nodeIndex].device_id,
                     nodeStates[nodeIndex].relay_1 ? "true" : "false",
                     nodeStates[nodeIndex].relay_2 ? "true" : "false",
                     nodeStates[nodeIndex].cover_mode ? "true" : "false",
                     coverStateText(nodeStates[nodeIndex].cover_state, false, nodeStates[nodeIndex].cover_position),
-                    (unsigned int)nodeStates[nodeIndex].cover_position,
-                    nodeStates[nodeIndex].fault ? "true" : "false");
-            } else {
-                snprintf(
-                    buffer,
-                    bufferSize,
-                    "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":\"%s\",\"cover_calibrated\":false,\"fault\":%s}",
-                    nodeStates[nodeIndex].device_id,
-                    nodeStates[nodeIndex].relay_1 ? "true" : "false",
-                    nodeStates[nodeIndex].relay_2 ? "true" : "false",
-                    nodeStates[nodeIndex].cover_mode ? "true" : "false",
-                    coverStateText(nodeStates[nodeIndex].cover_state, false, 0U),
+                    coverPositionText,
                     nodeStates[nodeIndex].fault ? "true" : "false");
             }
             return;
