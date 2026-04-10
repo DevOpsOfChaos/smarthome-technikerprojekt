@@ -6,7 +6,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <math.h>
-#include <DHT.h>
+#include <Adafruit_BME280.h>
 #include <Adafruit_VEML7700.h>
 
 #if __has_include(<esp_arduino_version.h>)
@@ -46,7 +46,7 @@ constexpr uint16_t MIN_REPORT_INTERVAL_S = NET_ERL_MIN_REPORT_INTERVAL_S;
 constexpr uint16_t MAX_REPORT_INTERVAL_S = NET_ERL_MAX_REPORT_INTERVAL_S;
 constexpr uint32_t BOOT_COUNTER = NET_ERL_BOOT_COUNTER;
 
-DHT dht(PIN_DHT22, DHT22);
+Adafruit_BME280 bme280;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
 
 struct SensorState {
@@ -61,7 +61,7 @@ struct HallRuntime {
     bool motion_aktiv;
     bool relay_1;
     bool fault;
-    bool dht_ok;
+    bool bme_ok;
     bool lux_ok;
     bool pir_raw;
     bool relay_auto_owned;
@@ -88,6 +88,12 @@ struct HallRuntime {
 };
 
 HallRuntime runtime = {};
+
+uint16_t clampToU16(long value) {
+    if (value < 0L) return 0U;
+    if (value > 65535L) return 65535U;
+    return (uint16_t)value;
+}
 
 void logf(const char* level, const char* format, ...) {
     if (!DEBUG_LOKAL_AKTIV) return;
@@ -253,6 +259,10 @@ bool sendeState() {
 
     SmartHome::RelayComfortConfigStateReportPayload payload = {};
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+
+    // Hall-Light bleibt absichtlich beim kleinen Aussenvertrag.
+    // BME280 kann Druck liefern, aber dieser Pfad meldet weiter nur Temperatur,
+    // Feuchte, Lux, Motion und Relay nach oben.
     payload.relay_1 = runtime.relay_1 ? 1U : 0U;
     payload.temp_01c = runtime.sensor.temp_01c;
     payload.hum_01pct = runtime.sensor.hum_01pct;
@@ -461,9 +471,13 @@ void initialisiereFunk() {
 
 void initialisiereSensorik() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
-    dht.begin();
+    runtime.bme_ok = bme280.begin((uint8_t)NET_ERL_BME280_ADDRESS, &Wire);
+    if (!runtime.bme_ok) {
+        logf("WARN", "BME280 Init fehlgeschlagen (addr=0x%02X)", NET_ERL_BME280_ADDRESS);
+    } else {
+        logf("INFO", "BME280 bereit");
+    }
 
-    runtime.dht_ok = true;
     if (!veml.begin()) {
         runtime.lux_ok = false;
         logf("WARN", "VEML7700 Init fehlgeschlagen");
@@ -489,15 +503,20 @@ void leseUmweltsensoren(unsigned long jetzt) {
     if ((jetzt - runtime.letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     runtime.letztes_env_sample_ms = jetzt;
 
-    const float temp = dht.readTemperature();
-    const float hum = dht.readHumidity();
-    if (isnan(temp) || isnan(hum)) {
-        runtime.dht_ok = false;
-        logf("WARN", "DHT22 Read fehlgeschlagen");
+    bool bmeMesswertOk = runtime.bme_ok;
+
+    if (!runtime.bme_ok) {
+        logf("WARN", "BME280 weiterhin nicht bereit");
     } else {
-        runtime.dht_ok = true;
-        runtime.sensor.temp_01c = (int16_t)lroundf(temp * 10.0f);
-        runtime.sensor.hum_01pct = (uint16_t)lroundf(hum * 10.0f);
+        const float temp = bme280.readTemperature();
+        const float hum = bme280.readHumidity();
+        if (!isfinite(temp) || !isfinite(hum)) {
+            bmeMesswertOk = false;
+            logf("WARN", "BME280 Read fehlgeschlagen");
+        } else {
+            runtime.sensor.temp_01c = (int16_t)lroundf(temp * 10.0f);
+            runtime.sensor.hum_01pct = clampToU16((long)lroundf(hum * 10.0f));
+        }
     }
 
     if (runtime.lux_ok) {
@@ -510,7 +529,7 @@ void leseUmweltsensoren(unsigned long jetzt) {
         }
     }
 
-    runtime.fault = !(runtime.dht_ok && runtime.lux_ok);
+    runtime.fault = !(bmeMesswertOk && runtime.lux_ok);
     runtime.sensor.fault = runtime.fault;
 
     if (runtime.motion_aktiv &&
