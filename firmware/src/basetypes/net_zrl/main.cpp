@@ -219,7 +219,7 @@ struct RuntimeState {
     uint32_t sensorSendIntervalS;
     CalibrationPhase calibrationPhase;
     unsigned long movementStartedAtMs;
-    unsigned long movementDeadlineAtMs;
+    unsigned long movementAutoStopMs;
     unsigned long restartRequestedAtMs;
     unsigned long letztesHelloMs;
     unsigned long letzterHeartbeatMs;
@@ -258,7 +258,8 @@ struct RuntimeState {
     LedMode ledModeAfterAck;
     bool ledBlinkState;
     unsigned long ledLastTickMs;
-    unsigned long ledAckUntilMs;
+    bool ledAckActive;
+    unsigned long ledAckStartedAtMs;
     uint8_t successBlinkToggleCount;
 
     PendingAction pendingAction;
@@ -568,14 +569,31 @@ void setzeLedMode(LedMode mode) {
     runtime.ledLastTickMs = millis();
 }
 
+bool istZeitfensterAbgelaufen(unsigned long startedAtMs, unsigned long durationMs, unsigned long jetztMs) {
+    return durationMs > 0UL && (jetztMs - startedAtMs) >= durationMs;
+}
+
 void bestaetigeMitBeidenLeds(LedMode nextMode) {
-    runtime.ledAckUntilMs = millis() + LED_ACK_DURATION_MS;
+    runtime.ledAckActive = true;
+    runtime.ledAckStartedAtMs = millis();
     runtime.ledModeAfterAck = nextMode;
     setzeLedPins(true, true);
 }
 
 bool hatAusstehendeAktion() {
     return runtime.pendingAction != PendingAction::None;
+}
+
+void setzeLedNachNormalemStop() {
+    // stoppeFahrt() kennt nur Relais- und Bewegungszustand.
+    // Sonderpfade wie Kalibrierung oder Blink-Bestaetigungen muessen ihre LEDs bewusst behalten koennen.
+    // Deshalb wird der LED-Reset nur in echten Normal-Stop-Pfaden explizit ausgeloest.
+    runtime.ledAckActive = false;
+    runtime.ledModeAfterAck = LedMode::Off;
+    if (!runtime.setupMode && !runtime.calibrationMode && !hatAusstehendeAktion()) {
+        setzeLedMode(LedMode::Off);
+        setzeLedPins(false, false);
+    }
 }
 
 bool resetBestaetigungAktiv() {
@@ -1130,7 +1148,7 @@ void stoppeFahrt(const char* grund) {
     runtime.coverState = CoverState::Stopped;
     runtime.coverDirection = CoverDirection::None;
     runtime.movementStartedAtMs = 0UL;
-    runtime.movementDeadlineAtMs = 0UL;
+    runtime.movementAutoStopMs = 0UL;
     runtime.movementStartPosition = runtime.coverPosition;
     runtime.movementTargetsEndPosition = false;
     runtime.movementTargetsIntermediatePosition = false;
@@ -1148,7 +1166,7 @@ bool starteFahrt(CoverDirection direction, const char* grund, unsigned long auto
     runtime.coverDirection = direction;
     runtime.coverState = CoverState::Moving;
     runtime.movementStartedAtMs = millis();
-    runtime.movementDeadlineAtMs = autoStopMs > 0UL ? runtime.movementStartedAtMs + autoStopMs : 0UL;
+    runtime.movementAutoStopMs = autoStopMs;
     runtime.movementStartPosition = runtime.isCalibrated ? runtime.coverPosition : 0;
     runtime.movementTargetsEndPosition = targetsEnd;
     runtime.movementTargetsIntermediatePosition = false;
@@ -1184,6 +1202,9 @@ bool startePositionsfahrt(int16_t zielPosition, const char* grund) {
 
     runtime.movementTargetsIntermediatePosition = true;
     runtime.movementTargetPosition = gekapptesZiel;
+    if (!runtime.setupMode && !runtime.calibrationMode) {
+        setzeLedMode(richtung == CoverDirection::Up ? LedMode::UpOn : LedMode::DownOn);
+    }
     return true;
 }
 
@@ -1321,7 +1342,7 @@ void starteKalibriermodus() {
             false)) {
         runtime.calibrationMode = false;
         runtime.calibrationPhase = CalibrationPhase::Idle;
-        setzeLedMode(runtime.setupMode ? LedMode::Off : LedMode::Off);
+        setzeLedMode(LedMode::Off);
     }
 }
 
@@ -1355,12 +1376,13 @@ void uebernehmeKalibrierMessung(CoverDirection direction) {
 void tickLeds() {
     const unsigned long jetztMs = millis();
 
-    if (runtime.ledAckUntilMs > 0UL) {
-        if (jetztMs < runtime.ledAckUntilMs) {
+    if (runtime.ledAckActive) {
+        // Delta-Vergleich bleibt auch nach millis()-Wrap korrekt und verhindert haengende ACK-Phasen.
+        if (!istZeitfensterAbgelaufen(runtime.ledAckStartedAtMs, LED_ACK_DURATION_MS, jetztMs)) {
             setzeLedPins(true, true);
             return;
         }
-        runtime.ledAckUntilMs = 0UL;
+        runtime.ledAckActive = false;
         setzeLedMode(runtime.ledModeAfterAck);
     }
 
@@ -1654,7 +1676,7 @@ void verarbeiteBefehl(char* line) {
             beendeKalibriermodus("serieller kalibrierabbruch", false);
         } else {
             stoppeFahrtMitEvent("serieller stop", SH_TRIGGER_CONFIG);
-            if (!runtime.setupMode && !hatAusstehendeAktion()) setzeLedMode(LedMode::Off);
+            setzeLedNachNormalemStop();
         }
         return;
     }
@@ -1755,8 +1777,11 @@ void verarbeiteSerielleBefehle() {
 
 void verarbeiteBewegungsTimeouts() {
     if (runtime.coverState != CoverState::Moving) return;
-    if (runtime.movementDeadlineAtMs == 0UL) return;
-    if (millis() < runtime.movementDeadlineAtMs) return;
+    if (runtime.movementAutoStopMs == 0UL) return;
+
+    const unsigned long jetztMs = millis();
+    // Delta-Logik ist fuer Langzeitbetrieb noetig, weil Absolut-Deadlines am millis()-Wrap kippen.
+    if (!istZeitfensterAbgelaufen(runtime.movementStartedAtMs, runtime.movementAutoStopMs, jetztMs)) return;
 
     if (runtime.calibrationMode && runtime.calibrationPhase == CalibrationPhase::MovingToTop) {
         stoppeFahrt("kalibrierung ausgangslage erreicht");
@@ -1779,9 +1804,7 @@ void verarbeiteBewegungsTimeouts() {
         setzePositionAufEndlage(runtime.coverDirection);
     }
     stoppeFahrt("fahrzeit erreicht");
-    if (!runtime.setupMode && !runtime.calibrationMode && !hatAusstehendeAktion()) {
-        setzeLedMode(LedMode::Off);
-    }
+    setzeLedNachNormalemStop();
 }
 
 void behandleStopButton(bool stopActive, unsigned long jetztMs) {
@@ -1800,7 +1823,7 @@ void behandleStopButton(bool stopActive, unsigned long jetztMs) {
                 uebernehmeKalibrierMessung(runtime.coverDirection);
             } else {
                 stoppeFahrtMitEvent("lokaler taster stop", SH_TRIGGER_MANUAL_BUTTON);
-                if (!runtime.setupMode && !hatAusstehendeAktion()) setzeLedMode(LedMode::Off);
+                setzeLedNachNormalemStop();
             }
             runtime.stopHoldConsumed = true;
         } else if (runtime.calibrationMode) {
@@ -2054,6 +2077,7 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 
                 case SH_COVER_CMD_STOP:
                     stoppeFahrtMitEvent("master stop", SH_TRIGGER_MASTER_CMD);
+                    setzeLedNachNormalemStop();
                     ackStatus = SH_ACK_OK;
                     break;
 
