@@ -343,7 +343,10 @@ function buildControls(device, state, meta) {
             position_known: positionValue !== null,
             position_calibrated: positionCalibrated,
             allow_intermediate_positions: allowIntermediatePositions,
+            // Endlagen bleiben auch ohne Kalibrierung bedienbar. Nur Zwischenwerte hängen an verlässlicher Positionskalibrierung.
             allow_end_positions: true,
+            // Die Übersicht bekommt bewusst nur die kompakte Direktbedienung; der volle Positionszugriff bleibt in der Detailseite.
+            allow_overview_controls: true,
             motion_class: moving ? (direction === "down" ? "is-moving-down" : "is-moving-up") : "",
             shutter_style: positionValue === null ? "" : "height:" + String(positionValue) + "%;"
         };
