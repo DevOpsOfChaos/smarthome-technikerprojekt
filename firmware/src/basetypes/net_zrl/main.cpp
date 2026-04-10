@@ -136,6 +136,7 @@ constexpr unsigned long BUTTON_POLL_MS = 20UL;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 35UL;
 constexpr unsigned long HOLD_MS = 5000UL;
 constexpr unsigned long DEFAULT_ESTIMATED_TRAVEL_TIME_MS = 100000UL;
+constexpr int16_t COVER_POSITION_UNBEKANNT = 255;
 constexpr unsigned long LED_BLINK_INTERVAL_MS = 300UL;
 constexpr unsigned long LED_SUCCESS_INTERVAL_MS = 180UL;
 constexpr unsigned long LED_ACK_DURATION_MS = 180UL;
@@ -401,6 +402,20 @@ int16_t begrenzePosition(int32_t position) {
     return (int16_t)position;
 }
 
+bool istCoverPositionBekannt(int32_t position) {
+    return position >= 0 && position <= 100;
+}
+
+void setzeCoverPositionUnbekannt() {
+    runtime.coverPosition = COVER_POSITION_UNBEKANNT;
+}
+
+uint8_t coverPositionFuerPayload() {
+    return istCoverPositionBekannt(runtime.coverPosition)
+               ? (uint8_t)begrenzePosition(runtime.coverPosition)
+               : 255U;
+}
+
 uint8_t coverStateCodeAusRuntime() {
     if (runtime.coverState != CoverState::Moving) return SH_COVER_STATE_STOPPED;
     if (runtime.coverDirection == CoverDirection::Up) return SH_COVER_STATE_MOVING_UP;
@@ -641,7 +656,9 @@ void berechneKalibrierstatus() {
     runtime.isCalibrated =
         isTravelTimeValid(runtime.travelTimeUpMs) && isTravelTimeValid(runtime.travelTimeDownMs);
     if (!runtime.isCalibrated) {
-        runtime.coverPosition = 0;
+        // Ohne Kalibrierung darf keine Zwischenlage erfunden werden.
+        // Sichere 0/100-Endlagen entstehen nur nach sauber beendeter Vollfahrt.
+        setzeCoverPositionUnbekannt();
     }
 }
 
@@ -651,7 +668,7 @@ void loescheKalibrierungszustandImRuntime() {
     runtime.candidateTravelTimeUpMs = 0UL;
     runtime.candidateTravelTimeDownMs = 0UL;
     runtime.isCalibrated = false;
-    runtime.coverPosition = 0;
+    setzeCoverPositionUnbekannt();
     berechneKalibrierstatus();
 }
 
@@ -1062,7 +1079,7 @@ bool sendeState() {
     payload.relay_2 = runtime.relayBActive ? 1U : 0U;
     payload.cover_mode = 1U;
     payload.cover_state = coverStateCodeAusRuntime();
-    payload.cover_position = (uint8_t)begrenzePosition(runtime.coverPosition);
+    payload.cover_position = coverPositionFuerPayload();
     payload.cover_calibrated = runtime.isCalibrated ? 1U : 0U;
     payload.fault = 0U;
     payload.report_interval_s = (uint16_t)sanitizeStatusSendInterval(runtime.statusSendIntervalS);
@@ -1122,10 +1139,7 @@ uint32_t fahrzeitFuerRichtung(CoverDirection direction) {
 }
 
 void aktualisierePositionsschaetzung(unsigned long jetztMs) {
-    if (!runtime.isCalibrated) {
-        runtime.coverPosition = 0;
-        return;
-    }
+    if (!runtime.isCalibrated) return;
 
     if (runtime.coverState != CoverState::Moving || runtime.coverDirection == CoverDirection::None) return;
 
@@ -1142,8 +1156,12 @@ void aktualisierePositionsschaetzung(unsigned long jetztMs) {
     runtime.coverPosition = (int16_t)nextPosition;
 }
 
-void stoppeFahrt(const char* grund) {
+void stoppeFahrt(const char* grund, bool unkalibrierteEndlageBestaetigt = false) {
     aktualisierePositionsschaetzung(millis());
+    if (!runtime.isCalibrated && !unkalibrierteEndlageBestaetigt) {
+        // Nach manuellem Stop oder unklarem Abbruch bleibt die unkalibrierte Lage unbekannt.
+        setzeCoverPositionUnbekannt();
+    }
     setzeRelaisNeutral(grund);
     runtime.coverState = CoverState::Stopped;
     runtime.coverDirection = CoverDirection::None;
@@ -1157,7 +1175,7 @@ void stoppeFahrt(const char* grund) {
 }
 
 void setzePositionAufEndlage(CoverDirection direction) {
-    runtime.coverPosition = (!runtime.isCalibrated) ? 0 : (direction == CoverDirection::Up ? 100 : 0);
+    runtime.coverPosition = direction == CoverDirection::Up ? 100 : 0;
 }
 
 bool starteFahrt(CoverDirection direction, const char* grund, unsigned long autoStopMs, bool targetsEnd) {
@@ -1167,10 +1185,17 @@ bool starteFahrt(CoverDirection direction, const char* grund, unsigned long auto
     runtime.coverState = CoverState::Moving;
     runtime.movementStartedAtMs = millis();
     runtime.movementAutoStopMs = autoStopMs;
-    runtime.movementStartPosition = runtime.isCalibrated ? runtime.coverPosition : 0;
+    runtime.movementStartPosition =
+        runtime.isCalibrated && istCoverPositionBekannt(runtime.coverPosition) ? runtime.coverPosition : 0;
     runtime.movementTargetsEndPosition = targetsEnd;
     runtime.movementTargetsIntermediatePosition = false;
     runtime.movementTargetPosition = runtime.coverPosition;
+    if (!runtime.isCalibrated) {
+        // Ohne Kalibrierung verlaesst die Fahrt die letzte sichere Endlage sofort.
+        // Bis zum normalen Fahrtende bleibt die Position deshalb unbekannt.
+        setzeCoverPositionUnbekannt();
+        runtime.movementTargetPosition = COVER_POSITION_UNBEKANNT;
+    }
     setzeRelaisFuerRichtung(direction, grund);
     setzeStateReportOffen();
     return true;
@@ -1210,8 +1235,8 @@ bool startePositionsfahrt(int16_t zielPosition, const char* grund) {
 
 void stoppeFahrtMitEvent(const char* grund, uint8_t trigger) {
     if (runtime.coverState != CoverState::Moving) return;
-    stoppeFahrt(grund);
-    sendeCoverEvent(SH_EVENT_COVER_STOP, trigger, (uint8_t)begrenzePosition(runtime.coverPosition), 0U);
+    stoppeFahrt(grund, false);
+    sendeCoverEvent(SH_EVENT_COVER_STOP, trigger, coverPositionFuerPayload(), 0U);
 }
 
 void setzeKalibrierungUngueltig() {
@@ -1263,7 +1288,7 @@ void beendeKalibriermodus(const char* grund, bool messwerteUebernehmen) {
     NetZrlSetupSnapshot previousDeviceSnapshot = {};
     holeSetupSnapshot(previousBasisSnapshot, previousDeviceSnapshot);
 
-    stoppeFahrt(grund);
+    stoppeFahrt(grund, false);
 
     if (messwerteUebernehmen &&
         isTravelTimeValid(runtime.candidateTravelTimeUpMs) &&
@@ -1299,7 +1324,7 @@ void fuehreFactoryResetAus() {
     NetZrlSetupSnapshot previousDeviceSnapshot = {};
     holeSetupSnapshot(previousBasisSnapshot, previousDeviceSnapshot);
 
-    stoppeFahrt("factory reset");
+    stoppeFahrt("factory reset", false);
     runtime.calibrationMode = false;
     runtime.calibrationPhase = CalibrationPhase::Idle;
     runtime.candidateTravelTimeUpMs = 0UL;
@@ -1307,7 +1332,7 @@ void fuehreFactoryResetAus() {
     nodeProvisioning.applyDefaultBasisValues();
     netZrlProvisioningHandler.loadDeviceDefaults();
     runtime.coverDirection = CoverDirection::None;
-    runtime.coverPosition = 0;
+    setzeCoverPositionUnbekannt();
     runtime.isCalibrated = false;
     runtime.masterBound = false;
     setzeStateReportOffen();
@@ -1358,12 +1383,12 @@ void uebernehmeKalibrierMessung(CoverDirection direction) {
 
     if (direction == CoverDirection::Down) {
         runtime.candidateTravelTimeDownMs = elapsedMs;
-        stoppeFahrt("kalibrierung down gestoppt");
+        stoppeFahrt("kalibrierung down gestoppt", false);
         runtime.calibrationPhase = CalibrationPhase::WaitForUpStart;
         setzeLedMode(LedMode::UpBlink);
     } else {
         runtime.candidateTravelTimeUpMs = elapsedMs;
-        stoppeFahrt("kalibrierung up gestoppt");
+        stoppeFahrt("kalibrierung up gestoppt", false);
         runtime.calibrationPhase = CalibrationPhase::SuccessBlink;
         runtime.coverPosition = 100;
         runtime.successBlinkToggleCount = CALIBRATION_SUCCESS_BLINK_PULSES * 2U;
@@ -1473,7 +1498,7 @@ bool starteNormaleFahrtNachOben(const char* grund, uint8_t trigger = SH_TRIGGER_
         starteFahrt(CoverDirection::Up, grund, autoStopMs, autoStopMs > 0UL);
     if (gestartet && !runtime.setupMode && !runtime.calibrationMode) {
         setzeLedMode(LedMode::UpOn);
-        sendeCoverEvent(SH_EVENT_COVER_UP, trigger, (uint8_t)begrenzePosition(runtime.coverPosition), 100U);
+        sendeCoverEvent(SH_EVENT_COVER_UP, trigger, coverPositionFuerPayload(), 100U);
     }
     return gestartet;
 }
@@ -1490,9 +1515,22 @@ bool starteNormaleFahrtNachUnten(const char* grund, uint8_t trigger = SH_TRIGGER
         starteFahrt(CoverDirection::Down, grund, autoStopMs, autoStopMs > 0UL);
     if (gestartet && !runtime.setupMode && !runtime.calibrationMode) {
         setzeLedMode(LedMode::DownOn);
-        sendeCoverEvent(SH_EVENT_COVER_DOWN, trigger, (uint8_t)begrenzePosition(runtime.coverPosition), 0U);
+        sendeCoverEvent(SH_EVENT_COVER_DOWN, trigger, coverPositionFuerPayload(), 0U);
     }
     return gestartet;
+}
+
+bool starteEndlagenfahrtOhneKalibrierung(int16_t zielPosition, const char* grund, uint8_t trigger) {
+    const int16_t gekapptesZiel = begrenzePosition(zielPosition);
+    if (gekapptesZiel == 100) {
+        // Ohne Kalibrierung ist 100 keine echte Zielposition, sondern nur die volle Auf-Fahrt.
+        return starteNormaleFahrtNachOben(grund, trigger);
+    }
+    if (gekapptesZiel == 0) {
+        // Zwischenwerte bleiben ohne Kalibrierung gesperrt; 0 steht nur fuer die volle Ab-Fahrt.
+        return starteNormaleFahrtNachUnten(grund, trigger);
+    }
+    return false;
 }
 
 bool parseUIntValue(const char* text, uint32_t& outValue) {
@@ -1509,12 +1547,18 @@ bool parseUIntValue(const char* text, uint32_t& outValue) {
 void gibStatusAus() {
     char masterMacText[MASTER_MAC_TEXT_LEN] = {0};
     formatMacText(runtime.masterMac, runtime.masterMacValid, masterMacText, sizeof(masterMacText));
+    char coverPositionText[16] = {0};
+    if (istCoverPositionBekannt(runtime.coverPosition)) {
+        snprintf(coverPositionText, sizeof(coverPositionText), "%d", runtime.coverPosition);
+    } else {
+        copyText(coverPositionText, sizeof(coverPositionText), "unknown");
+    }
 
     char buffer[560];
     snprintf(
         buffer,
         sizeof(buffer),
-        "state=%s direction=%s relay_a=%s relay_b=%s calibration_mode=%s calibration_phase=%s setup_mode=%s setup_ap=%s setup_ssid=%s pending_action=%s pending_blinks=%u is_calibrated=%s master_mac=%s travel_time_up_ms=%lu travel_time_down_ms=%lu default_estimated_travel_time_ms=%lu relay_up_mapping=%s status_send_interval_s=%lu sensor_send_interval_s=%lu cover_position=%d",
+        "state=%s direction=%s relay_a=%s relay_b=%s calibration_mode=%s calibration_phase=%s setup_mode=%s setup_ap=%s setup_ssid=%s pending_action=%s pending_blinks=%u is_calibrated=%s master_mac=%s travel_time_up_ms=%lu travel_time_down_ms=%lu default_estimated_travel_time_ms=%lu relay_up_mapping=%s status_send_interval_s=%lu sensor_send_interval_s=%lu cover_position=%s",
         toText(runtime.coverState),
         toText(runtime.coverDirection),
         runtime.relayAActive ? "true" : "false",
@@ -1534,7 +1578,7 @@ void gibStatusAus() {
         runtime.relayUpUsesRelayA ? "relay_a" : "relay_b",
         (unsigned long)runtime.statusSendIntervalS,
         (unsigned long)runtime.sensorSendIntervalS,
-        runtime.isCalibrated ? runtime.coverPosition : 0);
+        coverPositionText);
     Serial.println(buffer);
 }
 
@@ -1784,7 +1828,7 @@ void verarbeiteBewegungsTimeouts() {
     if (!istZeitfensterAbgelaufen(runtime.movementStartedAtMs, runtime.movementAutoStopMs, jetztMs)) return;
 
     if (runtime.calibrationMode && runtime.calibrationPhase == CalibrationPhase::MovingToTop) {
-        stoppeFahrt("kalibrierung ausgangslage erreicht");
+        stoppeFahrt("kalibrierung ausgangslage erreicht", false);
         runtime.calibrationPhase = CalibrationPhase::WaitForDownStart;
         setzeLedMode(LedMode::DownBlink);
         return;
@@ -1803,7 +1847,8 @@ void verarbeiteBewegungsTimeouts() {
     if (runtime.movementTargetsEndPosition) {
         setzePositionAufEndlage(runtime.coverDirection);
     }
-    stoppeFahrt("fahrzeit erreicht");
+    // Die grobe 0/100-Anzeige ist ohne Kalibrierung nur nach normalem Fahrtende belastbar.
+    stoppeFahrt("fahrzeit erreicht", runtime.movementTargetsEndPosition);
     setzeLedNachNormalemStop();
 }
 
@@ -2083,13 +2128,16 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 
                 case SH_COVER_CMD_SET_POSITION:
                     if (!runtime.isCalibrated) {
-                        ackStatus = SH_ACK_REJECTED;
+                        ackStatus =
+                            starteEndlagenfahrtOhneKalibrierung((int16_t)payload.param2, "master set_position", SH_TRIGGER_MASTER_CMD)
+                                ? SH_ACK_OK
+                                : SH_ACK_REJECTED;
                     } else if (startePositionsfahrt((int16_t)payload.param2, "master set_position")) {
                         if (runtime.coverState == CoverState::Moving) {
                             sendeCoverEvent(
                                 runtime.coverDirection == CoverDirection::Up ? SH_EVENT_COVER_UP : SH_EVENT_COVER_DOWN,
                                 SH_TRIGGER_MASTER_CMD,
-                                (uint8_t)begrenzePosition(runtime.coverPosition),
+                                coverPositionFuerPayload(),
                                 (uint16_t)payload.param2);
                         }
                         ackStatus = SH_ACK_OK;
@@ -2260,7 +2308,7 @@ void setup() {
     runtime = {};
     runtime.coverState = CoverState::Stopped;
     runtime.coverDirection = CoverDirection::None;
-    runtime.coverPosition = 0;
+    runtime.coverPosition = COVER_POSITION_UNBEKANNT;
     runtime.calibrationPhase = CalibrationPhase::Idle;
     runtime.ledMode = LedMode::Off;
     runtime.ledModeAfterAck = LedMode::Off;
