@@ -210,11 +210,15 @@ function buildCoverCommand(runtime, input, timestamp = nowIso()) {
     }
 
     const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
+    const coverCalibratedHint = payload.cover_calibrated ?? payload.is_calibrated;
     const coverCalibrated = device && device.state
-      ? (device.state.cover_calibrated ?? device.state.is_calibrated)
-      : undefined;
-    if (coverCalibrated === false) {
-      return buildError(409, "not_calibrated", "set_position requires a calibrated cover");
+      ? (device.state.cover_calibrated ?? device.state.is_calibrated ?? coverCalibratedHint)
+      : coverCalibratedHint;
+    const coverIsCalibrated = coverCalibrated === true || coverCalibrated === 1;
+    const coverIsExplicitlyUncalibrated = coverCalibrated === false || coverCalibrated === 0;
+    if (coverIsExplicitlyUncalibrated && !coverIsCalibrated && ![0, 100].includes(normalizedPosition.value)) {
+      // Ohne Kalibrierung bleiben nur die Endlagen belastbar. Zwischenwerte waeren hier technisch geraten.
+      return buildError(409, "not_calibrated", "set_position without calibration only allows 0 or 100");
     }
 
     commandPayload.position = normalizedPosition.value;
