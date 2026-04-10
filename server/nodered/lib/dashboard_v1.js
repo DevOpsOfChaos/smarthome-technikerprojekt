@@ -62,6 +62,10 @@ function isRelayDevice(device, state, meta) {
         || ["net_erl", "net_zrl"].includes(normalizeBaseType(device.base_type || device.device_class || device.device_id));
 }
 
+function isNetErlDevice(device) {
+    return normalizeBaseType(device.base_type || device.device_class || device.device_id) === "net_erl";
+}
+
 function availabilityInfo(availability) {
     const state = normalizeString(availability && availability.availability).toLowerCase();
     if (!state) {
@@ -325,21 +329,34 @@ function pickHighlights(device, state, meta) {
 function buildControls(device, state, meta) {
     if (isCoverDevice(device, state, meta)) {
         const positionValue = typeof state.cover_position === "number" ? Math.max(0, Math.min(100, state.cover_position)) : null;
+        const positionCalibrated = state.cover_calibrated === true || state.is_calibrated === true;
+        const allowIntermediatePositions = positionValue !== null && positionCalibrated;
         const moving = state.cover_moving === true;
         const direction = normalizeString(state.cover_direction).toLowerCase();
         return {
             kind: "cover",
+            device_id: device.device_id,
+            command_url: "/api/phase1/cover/command",
             position_text: positionValue === null ? "unbekannt" : String(positionValue) + " %",
             state_text: moving ? (direction === "down" ? "fährt ab" : direction === "up" ? "fährt auf" : "in Bewegung") : "gestoppt",
-            position_value: positionValue === null ? 55 : positionValue,
+            position_value: positionValue === null ? 0 : positionValue,
             position_known: positionValue !== null,
+            position_calibrated: positionCalibrated,
+            allow_intermediate_positions: allowIntermediatePositions,
+            allow_end_positions: true,
             motion_class: moving ? (direction === "down" ? "is-moving-down" : "is-moving-up") : "",
             shutter_style: positionValue === null ? "" : "height:" + String(positionValue) + "%;"
         };
     }
     if (isRelayDevice(device, state, meta)) {
+        const hasRelay1 = Object.prototype.hasOwnProperty.call(state, "relay_1");
+        const relay1Value = hasRelay1 ? state.relay_1 === true : null;
         return {
             kind: "relay",
+            device_id: device.device_id,
+            command_url: "/api/phase1/net-erl/relay-1",
+            relay_1_value: relay1Value,
+            allow_overview_toggle: isNetErlDevice(device) && hasRelay1,
             relays: ["relay_1", "relay_2"]
                 .filter((key) => Object.prototype.hasOwnProperty.call(state, key))
                 .map((key) => ({
