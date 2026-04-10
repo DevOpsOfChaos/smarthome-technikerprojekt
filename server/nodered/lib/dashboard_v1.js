@@ -317,6 +317,8 @@ function pickHighlights(device, state, meta) {
     keys.push("temp_01c", "hum_01pct", "lux", "battery_pct", "battery_mv", "motion", "presence", "contact_open", "window_open");
     return keys
         .filter((key, index) => keys.indexOf(key) === index)
+        // Der große Lampen-Button zeigt relay_1 bei net_erl schon eindeutig an. Ein zweiter Ein/Aus-Hinweis bläht die Karte nur auf.
+        .filter((key) => !(isNetErlDevice(device) && key === "relay_1"))
         .filter((key) => Object.prototype.hasOwnProperty.call(state, key))
         .slice(0, 4)
         .map((key) => ({
@@ -400,12 +402,15 @@ function describeDevice(row) {
         device_updated_at: row.device_updated_at || null,
         state_updated_at: row.state_updated_at || null
     };
+    const customName = normalizeString(row.device_name);
     const device = {
         device_id: row.device_id,
         base_type: normalizeBaseType(row.device_class || row.device_id),
         device_class: normalizeBaseType(row.device_class || row.device_id),
         profile: normalizeString(row.config_profile),
-        display_name: normalizeString(row.device_name || row.device_id) || row.device_id,
+        display_name: customName || row.device_id,
+        custom_name: customName,
+        has_custom_name: Boolean(customName),
         meta,
         availability,
         state,

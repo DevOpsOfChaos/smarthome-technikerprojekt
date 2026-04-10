@@ -1,0 +1,113 @@
+[
+  {
+    "id": "comment_42_device_name_update",
+    "type": "comment",
+    "z": "tab_40_command_minimal",
+    "name": "Dashboard Anzeigenamen",
+    "info": "Kleiner Schreibpfad fuer editierbare Anzeigenamen im Dashboard. Leerer Name setzt auf Device-ID als Fallback zurueck.",
+    "x": 180,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "httpin_42_device_name_update",
+    "type": "http in",
+    "z": "tab_40_command_minimal",
+    "name": "POST dashboard display name",
+    "url": "/api/phase1/dashboard/display-name",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 500,
+    "wires": [
+      [
+        "json_42_device_name_update"
+      ]
+    ]
+  },
+  {
+    "id": "json_42_device_name_update",
+    "type": "json",
+    "z": "tab_40_command_minimal",
+    "name": "Display Name JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 390,
+    "y": 500,
+    "wires": [
+      [
+        "func_42_device_name_update"
+      ]
+    ]
+  },
+  {
+    "id": "func_42_device_name_update",
+    "type": "function",
+    "z": "tab_40_command_minimal",
+    "name": "Validate display name update",
+    "func": "function sqlStringLiteral(value) {\n    return \"'\" + String(value).replace(/'/g, \"''\") + \"'\";\n}\n\nfunction readPayloadObject(payload) {\n    if (payload && typeof payload === \"object\" && !Buffer.isBuffer(payload)) {\n        return payload;\n    }\n\n    if (Buffer.isBuffer(payload)) {\n        payload = payload.toString(\"utf8\");\n    }\n\n    if (typeof payload === \"string\") {\n        const trimmed = payload.trim();\n        if (!trimmed) {\n            return {};\n        }\n        try {\n            const parsed = JSON.parse(trimmed);\n            return parsed && typeof parsed === \"object\" ? parsed : {};\n        } catch (error) {\n            return {};\n        }\n    }\n\n    return {};\n}\n\nconst payload = readPayloadObject(msg.payload);\nconst deviceId = typeof payload.device_id === \"string\" ? payload.device_id.trim() : \"\";\nconst rawName = typeof payload.display_name === \"string\"\n    ? payload.display_name\n    : typeof payload.device_name === \"string\"\n        ? payload.device_name\n        : \"\";\nconst normalizedName = rawName.trim();\n\nif (!deviceId) {\n    msg.statusCode = 400;\n    msg.payload = {\n        error: \"device_id_required\",\n        message: \"device_id is required\"\n    };\n    return [null, msg];\n}\n\nif (normalizedName.length > 80) {\n    msg.statusCode = 400;\n    msg.payload = {\n        error: \"display_name_too_long\",\n        message: \"display_name must be 80 characters or fewer\"\n    };\n    return [null, msg];\n}\n\nconst updatedAt = new Date().toISOString();\nconst nameSql = normalizedName ? sqlStringLiteral(normalizedName) : \"NULL\";\nmsg.dashboardDisplayNameUpdate = {\n    device_id: deviceId,\n    display_name: normalizedName || null,\n    updated_at: updatedAt\n};\nmsg.topic = \"UPDATE devices SET device_name = \" + nameSql + \", updated_at = \" + sqlStringLiteral(updatedAt) + \" WHERE device_id = \" + sqlStringLiteral(deviceId) + \";\";\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 500,
+    "wires": [
+      [
+        "sqlite_42_device_name_update"
+      ],
+      [
+        "httpresp_42_device_name_update"
+      ]
+    ]
+  },
+  {
+    "id": "sqlite_42_device_name_update",
+    "type": "sqlite",
+    "z": "tab_40_command_minimal",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Write display name",
+    "x": 900,
+    "y": 480,
+    "wires": [
+      [
+        "func_42_device_name_response"
+      ]
+    ]
+  },
+  {
+    "id": "func_42_device_name_response",
+    "type": "function",
+    "z": "tab_40_command_minimal",
+    "name": "Build display name response",
+    "func": "const update = msg.dashboardDisplayNameUpdate || {};\nmsg.statusCode = 200;\nmsg.payload = {\n    device_id: update.device_id || null,\n    display_name: update.display_name,\n    updated_at: update.updated_at || new Date().toISOString()\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1160,
+    "y": 480,
+    "wires": [
+      [
+        "httpresp_42_device_name_update"
+      ]
+    ]
+  },
+  {
+    "id": "httpresp_42_device_name_update",
+    "type": "http response",
+    "z": "tab_40_command_minimal",
+    "name": "HTTP response",
+    "statusCode": "",
+    "headers": {},
+    "x": 1170,
+    "y": 540,
+    "wires": []
+  }
+]
