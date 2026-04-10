@@ -86,6 +86,7 @@ constexpr uint8_t BATTERY_PCT_UNGUELTIG = 0xFFU;
 constexpr uint16_t BATTERY_MV_UNGUELTIG = 0U;
 constexpr uint8_t WINDOW_STATE_UNGUELTIG = 0xFFU;
 constexpr uint16_t RAIN_RAW_UNGUELTIG = 0xFFFFU;
+constexpr uint8_t COVER_POSITION_UNBEKANNT = 0xFFU;
 constexpr int STATUS_CODE_NOT_CALIBRATED = -5;
 constexpr int STATUS_CODE_UNKNOWN_DEVICE = -6;
 constexpr int STATUS_CODE_REGISTRY_FULL = -7;
@@ -273,6 +274,10 @@ const char* coverStateText(uint8_t coverStateCode, bool calibrated, uint8_t posi
     }
 }
 
+bool istCoverPositionBekannt(uint8_t position) {
+    return position <= 100U;
+}
+
 bool istDeviceClassGueltig(uint8_t deviceClass) {
     switch (deviceClass) {
         case SH_CLASS_NET_ERL:
@@ -296,7 +301,7 @@ unsigned long offlineTimeoutMsForPowerType(uint8_t powerType) {
 void initialisiereNodeSlot(NodeRuntime& node) {
     node = {};
     node.cover_state = SH_COVER_STATE_STOPPED;
-    node.cover_position = 0U;
+    node.cover_position = COVER_POSITION_UNBEKANNT;
     node.temp_01c = INT16_MIN;
     node.hum_01pct = 0xFFFFU;
     node.lux = 0xFFFFU;
@@ -393,7 +398,7 @@ void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
     if (!nodeHasCap(nodeIndex, SH_CAP_COVER)) {
         nodeStates[nodeIndex].cover_mode = false;
         nodeStates[nodeIndex].cover_state = SH_COVER_STATE_STOPPED;
-        nodeStates[nodeIndex].cover_position = 0U;
+        nodeStates[nodeIndex].cover_position = COVER_POSITION_UNBEKANNT;
         nodeStates[nodeIndex].cover_calibrated = false;
     }
 }
@@ -630,7 +635,11 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
 
         case SH_CLASS_NET_ZRL:
             if (nodeStates[nodeIndex].cover_calibrated) {
-                schreibeUIntOrNull(coverPositionText, sizeof(coverPositionText), nodeStates[nodeIndex].cover_position, 255U);
+                schreibeUIntOrNull(
+                    coverPositionText,
+                    sizeof(coverPositionText),
+                    nodeStates[nodeIndex].cover_position,
+                    COVER_POSITION_UNBEKANNT);
                 snprintf(
                     buffer,
                     bufferSize,
@@ -641,6 +650,20 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                     nodeStates[nodeIndex].cover_mode ? "true" : "false",
                     coverStateText(nodeStates[nodeIndex].cover_state, true, nodeStates[nodeIndex].cover_position),
                     coverPositionText,
+                    nodeStates[nodeIndex].fault ? "true" : "false");
+            } else if (istCoverPositionBekannt(nodeStates[nodeIndex].cover_position)) {
+                // Unkalibrierte 0/100-Endlagen werden nur gezeigt, wenn das Geraet sie
+                // selbst als bekannte grobe Endlage gemeldet hat. Unbekannt bleibt verborgen.
+                snprintf(
+                    buffer,
+                    bufferSize,
+                    "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":\"%s\",\"cover_position\":%u,\"cover_calibrated\":false,\"fault\":%s}",
+                    nodeStates[nodeIndex].device_id,
+                    nodeStates[nodeIndex].relay_1 ? "true" : "false",
+                    nodeStates[nodeIndex].relay_2 ? "true" : "false",
+                    nodeStates[nodeIndex].cover_mode ? "true" : "false",
+                    coverStateText(nodeStates[nodeIndex].cover_state, false, nodeStates[nodeIndex].cover_position),
+                    (unsigned int)nodeStates[nodeIndex].cover_position,
                     nodeStates[nodeIndex].fault ? "true" : "false");
             } else {
                 snprintf(
@@ -1590,7 +1613,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
             return;
         }
-        if (!nodeStates[nodeIndex].cover_calibrated) {
+        if (!nodeStates[nodeIndex].cover_calibrated && position != 0L && position != 100L) {
+            // Ohne Kalibrierung bleiben nur die echten Endlagen 0/100 erlaubt.
             publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "not_calibrated", STATUS_CODE_NOT_CALIBRATED, SH_MSG_CMD, 0U, "master_validation");
             return;
         }
