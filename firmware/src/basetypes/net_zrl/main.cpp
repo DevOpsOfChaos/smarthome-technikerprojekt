@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "NetZrlProvisioning.h"
 #if __has_include(<esp_arduino_version.h>)
   #include <esp_arduino_version.h>
 #endif
@@ -152,11 +153,10 @@ constexpr uint8_t RESET_CONFIRM_BLINK_PULSES = 10U;
 constexpr size_t SERIAL_BUFFER_SIZE = 128U;
 constexpr size_t MASTER_MAC_TEXT_LEN = SmartHome::ShNodeProvisioning::MASTER_MAC_TEXT_LEN;
 constexpr size_t SETUP_SSID_BUFFER_SIZE = 32U;
-constexpr const char* STORAGE_NAMESPACE = "net_zrl";
-constexpr const char* STORAGE_KEY_NODE_BASIS = "node_basis_v1";
 constexpr const char* STORAGE_KEY_NET_ZRL_BLOB = "net_zrl_v1";
-constexpr const char* SETUP_AP_PREFIX = "NET-ZRL-SETUP";
-constexpr int SETUP_AP_CHANNEL = 1;
+static_assert(
+    sizeof(DEVICE_ID) <= SETUP_SSID_BUFFER_SIZE,
+    "NET_ZRL_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
 constexpr uint32_t NET_ZRL_SETUP_MAGIC = 0x5A524C32UL;
 constexpr uint16_t NET_ZRL_SETUP_VERSION = 1U;
 
@@ -1009,20 +1009,17 @@ bool speichereRuntimeStandMitRollback() {
 bool uebernehmeMasterMacNachHelloAck(const uint8_t senderMac[6]) {
     if (senderMac == nullptr || !SmartHome::isValidMac(senderMac)) return false;
 
-    const bool geaendert = !runtime.masterMacValid ||
-                           memcmp(runtime.masterMac, senderMac, sizeof(runtime.masterMac)) != 0;
-    setStoredMasterMac(senderMac);
-    runtime.masterBound = true;
-
-    if (!geaendert) {
-        return true;
-    }
-
-    if (!speichereRuntimeStandMitRollback()) {
-        logf("WARN", "Master-MAC aus HELLO_ACK konnte nicht persistiert werden");
+    if (!runtime.masterMacValid) {
+        logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
         return false;
     }
 
+    if (memcmp(runtime.masterMac, senderMac, sizeof(runtime.masterMac)) != 0) {
+        logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
+        return false;
+    }
+
+    runtime.masterBound = true;
     return true;
 }
 
@@ -1343,9 +1340,7 @@ void fuehreFactoryResetAus() {
         return;
     }
 
-    exitSetupMode("factory reset");
-    setzeLedMode(LedMode::Off);
-    setzeLedPins(false, false);
+    enterSetupMode();
     logf("INFO", "Factory Reset ausgefuehrt");
 }
 
@@ -2331,17 +2326,13 @@ void setup() {
     initialisierePin(PIN_BUTTON_DOWN, INPUT);
     initialisierePin(PIN_BUTTON_STOP, INPUT);
 
-    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig = {
-        SETUP_AP_PREFIX,
-        STORAGE_NAMESPACE,
-        STORAGE_KEY_NODE_BASIS,
-        DEFAULT_STATUS_SEND_INTERVAL_S,
-        DEFAULT_SENSOR_SEND_INTERVAL_S,
-        MIN_SEND_INTERVAL_S,
-        MAX_SEND_INTERVAL_S,
-        1500UL,
-        SETUP_AP_CHANNEL,
-    };
+    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
+        SmartHome::NetZrlProvisioning::makeConfig(
+            DEVICE_ID,
+            DEFAULT_STATUS_SEND_INTERVAL_S,
+            DEFAULT_SENSOR_SEND_INTERVAL_S,
+            MIN_SEND_INTERVAL_S,
+            MAX_SEND_INTERVAL_S);
 
     if (!nodeProvisioning.begin(
             provisioningConfig,
@@ -2365,6 +2356,13 @@ void setup() {
     runtime.masterBound = false;
     runtime.funkBereit = false;
     runtime.naechsteSeq = 1U;
+
+    if (!nodeProvisioning.hasStoredMasterMac()) {
+        logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
+        enterSetupMode();
+        return;
+    }
+
     initialisiereFunk();
 
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);

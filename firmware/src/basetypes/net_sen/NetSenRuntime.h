@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "NetSenProvisioning.h"
 #if __has_include(<esp_arduino_version.h>)
   #include <esp_arduino_version.h>
 #endif
@@ -32,10 +33,9 @@ constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
-constexpr const char* STORAGE_NAMESPACE = "net_sen";
-constexpr const char* STORAGE_KEY_NODE_BASIS = "node_basis_v1";
-constexpr const char* SETUP_AP_PREFIX = "NET-SEN-SETUP";
-constexpr int SETUP_AP_CHANNEL = 1;
+static_assert(
+    sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
+    "NET_SEN_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
 
 #ifndef NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 0
@@ -618,17 +618,13 @@ void setup() {
         digitalWrite(PIN_STATUS_LED, LOW);
     }
 
-    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig = {
-        SETUP_AP_PREFIX,
-        STORAGE_NAMESPACE,
-        STORAGE_KEY_NODE_BASIS,
-        DEFAULT_REPORT_INTERVAL_S,
-        DEFAULT_SENSOR_SEND_INTERVAL_S,
-        MIN_REPORT_INTERVAL_S,
-        MAX_REPORT_INTERVAL_S,
-        1500UL,
-        SETUP_AP_CHANNEL,
-    };
+    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
+        SmartHome::NetSenProvisioning::makeConfig(
+            DEVICE_ID,
+            DEFAULT_REPORT_INTERVAL_S,
+            DEFAULT_SENSOR_SEND_INTERVAL_S,
+            MIN_REPORT_INTERVAL_S,
+            MAX_REPORT_INTERVAL_S);
 
     nodeStatus.provisioning_bereit = nodeProvisioning.begin(
         provisioningConfig,

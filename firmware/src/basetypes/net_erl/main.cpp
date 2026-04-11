@@ -1,10 +1,12 @@
 #include <Arduino.h>
+#include <ShNodeProvisioning.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <stdarg.h>
 #include <string.h>
 
+#include "NetErlProvisioning.h"
 #if __has_include(<esp_arduino_version.h>)
   #include <esp_arduino_version.h>
 #endif
@@ -37,24 +39,38 @@ constexpr uint8_t DEVICE_META_SCHEMA_VERSION = SH_META_SCHEMA_VERSION_CURRENT;
 constexpr int WLAN_KANAL = NET_ERL_WLAN_CHANNEL;
 constexpr unsigned long HELLO_RETRY_INTERVAL_MS = NET_ERL_HELLO_RETRY_INTERVAL_MS;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = NET_ERL_HEARTBEAT_INTERVAL_MS;
-constexpr unsigned long STATE_INTERVAL_MS_DEFAULT = NET_ERL_STATE_INTERVAL_MS;
 constexpr unsigned long LOOP_INTERVAL_MS = NET_ERL_LOOP_INTERVAL_MS;
 constexpr uint16_t MIN_REPORT_INTERVAL_S = NET_ERL_MIN_REPORT_INTERVAL_S;
 constexpr uint16_t MAX_REPORT_INTERVAL_S = NET_ERL_MAX_REPORT_INTERVAL_S;
 constexpr uint32_t BOOT_COUNTER = NET_ERL_BOOT_COUNTER;
+constexpr uint32_t DEFAULT_REPORT_INTERVAL_S = NET_ERL_STATE_INTERVAL_MS / 1000UL;
+constexpr uint32_t DEFAULT_SENSOR_SEND_INTERVAL_S = DEFAULT_REPORT_INTERVAL_S;
+constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
+static_assert(
+    sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
+    "NET_ERL_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
 
 struct NodeState {
+    bool provisioning_bereit;
+    bool setup_mode;
+    bool setup_ap_aktiv;
+    bool restart_pending;
     bool master_bekannt;
     bool master_mac_gueltig;
     bool state_report_offen;
+    bool funk_bereit;
     bool relay_1;
     bool fault;
     unsigned long letztes_hello_ms;
     unsigned long letzter_heartbeat_ms;
     unsigned long letzter_state_ms;
+    unsigned long restart_requested_at_ms;
     unsigned long state_interval_ms;
+    uint32_t report_interval_s;
+    uint32_t stored_sensor_send_interval_s;
     uint8_t master_mac[6];
     uint8_t naechste_seq;
+    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
 };
 
 NodeState nodeStatus = {};
@@ -67,6 +83,15 @@ void logf(const char* level, const char* format, ...) {
     va_start(args, format);
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
+
+    Serial.print("[");
+    Serial.print(level);
+    Serial.print("] ");
+    Serial.println(message);
+}
+
+void provisioningLog(const char* level, const char* message) {
+    if (!DEBUG_LOKAL_AKTIV || level == nullptr || message == nullptr) return;
 
     Serial.print("[");
     Serial.print(level);
@@ -89,8 +114,61 @@ bool istBroadcastMac(const uint8_t* mac) {
     return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
 }
 
+bool senderIstProvisionierterMaster(const uint8_t* senderMac) {
+    return nodeStatus.master_mac_gueltig &&
+           senderMac != nullptr &&
+           memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) == 0;
+}
+
 const uint8_t* holeHelloZielMac() {
     return nodeStatus.master_mac_gueltig ? nodeStatus.master_mac : BROADCAST_MAC;
+}
+
+void wendeReportIntervalAn(uint32_t wertS) {
+    nodeStatus.report_interval_s = wertS;
+    nodeStatus.state_interval_ms = (unsigned long)nodeStatus.report_interval_s * 1000UL;
+}
+
+class NetErlProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
+  public:
+    const char* pageTitle() const override { return "NET-ERL Provisioning"; }
+    const char* pageIntro() const override { return "Node-Basis fuer Master-Bindung und Statusintervall."; }
+    const char* deviceSectionTitle() const override { return "NET-ERL-Spezifisch"; }
+    const char* deviceSectionIntro() const override {
+        return "Dieser Basispfad hat aktuell keine zusaetzlichen lokalen Setup-Werte.";
+    }
+
+    void loadDeviceDefaults() override {}
+    bool loadDeviceSettings(Preferences& /*prefs*/) override { return false; }
+    bool saveDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    bool clearDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    void captureDeviceSnapshot() override {}
+    void restoreDeviceSnapshot() override {}
+    bool parseDeviceSave(WebServer& /*server*/, String& /*errorText*/) override { return true; }
+    void applyParsedDeviceSettings() override {}
+    void discardParsedDeviceSettings() override {}
+    void appendDeviceFieldsHtml(String& /*page*/, WebServer* /*sourceServer*/) const override {}
+};
+
+SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
+NetErlProvisioningHandler netErlProvisioningHandler;
+
+bool speichereReportIntervalMitRollback(uint32_t valueS) {
+    if (!nodeProvisioning.isSendIntervalValid(valueS)) return false;
+
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+    nodeProvisioning.captureBasisSnapshot(basisSnapshot);
+
+    wendeReportIntervalAn(valueS);
+    nodeStatus.state_report_offen = true;
+
+    if (nodeProvisioning.saveCurrentState()) {
+        return true;
+    }
+
+    nodeProvisioning.restoreBasisSnapshot(basisSnapshot);
+    wendeReportIntervalAn(nodeStatus.report_interval_s);
+    return false;
 }
 
 void setzeRelayAusgang(bool an) {
@@ -104,7 +182,7 @@ void setzeRelayAusgang(bool an) {
 }
 
 bool stellePeerSicher(const uint8_t* mac) {
-    if (mac == nullptr) return false;
+    if (!nodeStatus.funk_bereit || mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
 
@@ -131,7 +209,7 @@ bool sendePaketMitOptionen(
     uint8_t flags,
     uint8_t* verwendeteSeq)
 {
-    if (zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
+    if (!nodeStatus.funk_bereit || zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
     if (!stellePeerSicher(zielMac)) return false;
 
     uint8_t packet[SH_ESPNOW_MAX_BYTES] = {0};
@@ -244,8 +322,16 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
         return;
     }
 
-    memcpy(nodeStatus.master_mac, senderMac, sizeof(nodeStatus.master_mac));
-    nodeStatus.master_mac_gueltig = true;
+    if (!nodeStatus.master_mac_gueltig) {
+        logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
+        return;
+    }
+
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     nodeStatus.master_bekannt = true;
     nodeStatus.state_report_offen = true;
     stellePeerSicher(nodeStatus.master_mac);
@@ -254,15 +340,20 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
 
 bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
     if (payload.param_id != SH_CFG_REPORT_INTERVAL_S) return false;
-    if (payload.value < MIN_REPORT_INTERVAL_S || payload.value > MAX_REPORT_INTERVAL_S) return false;
 
-    nodeStatus.state_interval_ms = (unsigned long)payload.value * 1000UL;
-    nodeStatus.state_report_offen = true;
-    logf("INFO", "report_interval_s -> %u", (unsigned)payload.value);
-    return true;
+    const bool ok = speichereReportIntervalMitRollback(payload.value);
+    if (!ok) {
+        logf("WARN", "report_interval_s konnte nicht uebernommen werden");
+    }
+    return ok;
 }
 
 void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "CFG ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     const bool ok = uebernehmeCfg(payload);
     if (header.flags & SH_FLAG_ACK_REQUEST) {
         sendeAck(senderMac, header.seq, header.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
@@ -270,6 +361,11 @@ void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 }
 
 void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "CMD ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         nodeStatus.state_report_offen = true;
         return;
@@ -353,6 +449,8 @@ void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
 }
 
 void initialisiereFunk() {
+    if (nodeStatus.funk_bereit || nodeStatus.setup_mode) return;
+
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     WiFi.setSleep(false);
@@ -369,7 +467,11 @@ void initialisiereFunk() {
 
     esp_now_register_send_cb(onEspNowSend);
     esp_now_register_recv_cb(onEspNowReceive);
+    nodeStatus.funk_bereit = true;
     stellePeerSicher(BROADCAST_MAC);
+    if (nodeStatus.master_mac_gueltig) {
+        stellePeerSicher(nodeStatus.master_mac);
+    }
 }
 
 void setup() {
@@ -379,7 +481,9 @@ void setup() {
     }
 
     nodeStatus = {};
-    nodeStatus.state_interval_ms = STATE_INTERVAL_MS_DEFAULT;
+    nodeStatus.report_interval_s = DEFAULT_REPORT_INTERVAL_S;
+    nodeStatus.stored_sensor_send_interval_s = DEFAULT_SENSOR_SEND_INTERVAL_S;
+    wendeReportIntervalAn(nodeStatus.report_interval_s);
     nodeStatus.state_report_offen = true;
     nodeStatus.relay_1 = false;
     nodeStatus.fault = false;
@@ -392,14 +496,66 @@ void setup() {
     digitalWrite(PIN_STATUS_LED, LOW);
 #endif
 
+    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
+        SmartHome::NetErlProvisioning::makeConfig(
+            DEVICE_ID,
+            DEFAULT_REPORT_INTERVAL_S,
+            DEFAULT_SENSOR_SEND_INTERVAL_S,
+            MIN_REPORT_INTERVAL_S,
+            MAX_REPORT_INTERVAL_S);
+
+    nodeStatus.provisioning_bereit = nodeProvisioning.begin(
+        provisioningConfig,
+        &nodeStatus.master_mac_gueltig,
+        nodeStatus.master_mac,
+        &nodeStatus.report_interval_s,
+        &nodeStatus.stored_sensor_send_interval_s,
+        &nodeStatus.setup_mode,
+        &nodeStatus.setup_ap_aktiv,
+        &nodeStatus.restart_pending,
+        &nodeStatus.restart_requested_at_ms,
+        nodeStatus.setup_ap_ssid,
+        sizeof(nodeStatus.setup_ap_ssid),
+        &netErlProvisioningHandler,
+        provisioningLog);
+
+    if (!nodeStatus.provisioning_bereit) {
+        logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
+        return;
+    }
+
+    wendeReportIntervalAn(nodeProvisioning.sanitizeStatusSendInterval(nodeStatus.report_interval_s));
+    nodeStatus.stored_sensor_send_interval_s =
+        nodeProvisioning.sanitizeSensorSendInterval(nodeStatus.stored_sensor_send_interval_s);
+
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
     logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
+    logf("INFO", "config report_interval_s=%lu stored_sensor_send_interval_s=%lu",
+         (unsigned long)nodeStatus.report_interval_s,
+         (unsigned long)nodeStatus.stored_sensor_send_interval_s);
+
+    if (!nodeProvisioning.hasStoredMasterMac()) {
+        logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
+        nodeProvisioning.enterSetupMode();
+        return;
+    }
 
     initialisiereFunk();
     sendeHello();
 }
 
 void loop() {
+    nodeProvisioning.update();
+
+    if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode) {
+        delay(LOOP_INTERVAL_MS);
+        return;
+    }
+
+    if (!nodeStatus.funk_bereit) {
+        initialisiereFunk();
+    }
+
     const unsigned long jetzt = millis();
 
     if (!nodeStatus.master_bekannt &&
@@ -413,6 +569,7 @@ void loop() {
     }
 
     const bool stateFaellig =
+        nodeStatus.master_bekannt &&
         nodeStatus.master_mac_gueltig &&
         (nodeStatus.state_report_offen ||
          (nodeStatus.state_interval_ms > 0UL &&

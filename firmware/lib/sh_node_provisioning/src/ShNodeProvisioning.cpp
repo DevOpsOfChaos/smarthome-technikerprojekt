@@ -275,15 +275,18 @@ void NodeProvisioningController::enterSetupMode() {
     configureRoutes();
     *restartPending_ = false;
 
-    const uint64_t chipId = ESP.getEfuseMac();
-    snprintf(
-        setupApSsid_,
-        setupApSsidSize_,
-        "%s-%02X%02X%02X",
-        config_.setupApPrefix,
-        (unsigned)((chipId >> 16U) & 0xFFU),
-        (unsigned)((chipId >> 8U) & 0xFFU),
-        (unsigned)(chipId & 0xFFU));
+    if (config_.setupApSsid == nullptr || config_.setupApSsid[0] == '\0' ||
+        strlen(config_.setupApSsid) >= setupApSsidSize_) {
+        log("WARN", "Setup-SSID fehlt oder passt nicht in den SSID-Puffer.");
+        return;
+    }
+
+    const char* setupPassword =
+        config_.setupApPassword != nullptr && config_.setupApPassword[0] != '\0'
+            ? config_.setupApPassword
+            : nullptr;
+    strncpy(setupApSsid_, config_.setupApSsid, setupApSsidSize_ - 1U);
+    setupApSsid_[setupApSsidSize_ - 1U] = '\0';
 
     WiFi.persistent(false);
     WiFi.disconnect(true, true);
@@ -291,7 +294,7 @@ void NodeProvisioningController::enterSetupMode() {
     delay(25);
     WiFi.mode(WIFI_AP);
 
-    if (!WiFi.softAP(setupApSsid_, nullptr, config_.apChannel)) {
+    if (!WiFi.softAP(setupApSsid_, setupPassword, config_.apChannel)) {
         *setupMode_ = false;
         *setupApActive_ = false;
         setupApSsid_[0] = '\0';
@@ -307,8 +310,9 @@ void NodeProvisioningController::enterSetupMode() {
     *setupApActive_ = true;
     log(
         "INFO",
-        "Setup-AP aktiv: ssid=%s ip=%s url=http://%s/",
+        "Setup-AP aktiv: ssid=%s password=%s ip=%s url=http://%s/",
         setupApSsid_,
+        setupPassword ? setupPassword : "open",
         WiFi.softAPIP().toString().c_str(),
         WiFi.softAPIP().toString().c_str());
 }

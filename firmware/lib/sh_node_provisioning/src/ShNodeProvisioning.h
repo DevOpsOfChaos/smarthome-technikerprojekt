@@ -28,7 +28,8 @@ struct NodeBasisSnapshot {
 };
 
 struct NodeProvisioningConfig {
-    const char* setupApPrefix;
+    const char* setupApSsid;
+    const char* setupApPassword;
     const char* storageNamespace;
     const char* basisStorageKey;
     uint32_t defaultStatusSendIntervalS;

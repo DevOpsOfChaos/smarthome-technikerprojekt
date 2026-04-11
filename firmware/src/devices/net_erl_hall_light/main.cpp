@@ -20,6 +20,7 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "../../basetypes/net_erl/NetErlProvisioning.h"
 #include "../../../include/DebugConfig.h"
 #include "../../../include/ProjectVersion.h"
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
@@ -50,11 +51,11 @@ constexpr uint32_t DEFAULT_STORED_SENSOR_SEND_INTERVAL_S = NET_ERL_DEFAULT_REPOR
 constexpr uint32_t BOOT_COUNTER_PROTOCOL_PLACEHOLDER = NET_ERL_BOOT_COUNTER;
 
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
-constexpr const char* STORAGE_NAMESPACE = "net_erl_hl";
-constexpr const char* STORAGE_KEY_NODE_BASIS = "node_basis_v1";
+constexpr const char* NET_ERL_HALL_STORAGE_NAMESPACE = "net_erl_hl";
 constexpr const char* STORAGE_KEY_HALL_SETUP = "hall_setup_v1";
-constexpr const char* SETUP_AP_PREFIX = "NET-ERL-SETUP";
-constexpr int SETUP_AP_CHANNEL = 1;
+static_assert(
+    sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
+    "NET_ERL_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
 constexpr uint32_t NET_ERL_HALL_SETUP_MAGIC = 0x484C4C31UL;
 constexpr uint16_t NET_ERL_HALL_SETUP_VERSION = 1U;
 
@@ -1031,17 +1032,14 @@ void setup() {
     digitalWrite(PIN_STATUS_LED, LOW);
 #endif
 
-    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig = {
-        SETUP_AP_PREFIX,
-        STORAGE_NAMESPACE,
-        STORAGE_KEY_NODE_BASIS,
-        NET_ERL_DEFAULT_REPORT_INTERVAL_S,
-        DEFAULT_STORED_SENSOR_SEND_INTERVAL_S,
-        MIN_REPORT_INTERVAL_S,
-        MAX_REPORT_INTERVAL_S,
-        1500UL,
-        SETUP_AP_CHANNEL,
-    };
+    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
+        SmartHome::NetErlProvisioning::makeConfig(
+            DEVICE_ID,
+            NET_ERL_HALL_STORAGE_NAMESPACE,
+            NET_ERL_DEFAULT_REPORT_INTERVAL_S,
+            DEFAULT_STORED_SENSOR_SEND_INTERVAL_S,
+            MIN_REPORT_INTERVAL_S,
+            MAX_REPORT_INTERVAL_S);
 
     runtime.provisioning_bereit = nodeProvisioning.begin(
         provisioningConfig,
