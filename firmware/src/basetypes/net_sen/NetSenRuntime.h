@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ShNodeProvisioning.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
@@ -30,6 +31,11 @@ const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
+constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
+constexpr const char* STORAGE_NAMESPACE = "net_sen";
+constexpr const char* STORAGE_KEY_NODE_BASIS = "node_basis_v1";
+constexpr const char* SETUP_AP_PREFIX = "NET-SEN-SETUP";
+constexpr int SETUP_AP_CHANNEL = 1;
 
 #ifndef NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 0
@@ -37,6 +43,10 @@ constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
 
 #ifndef NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS
 #define NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS 0
+#endif
+
+#ifndef NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS
+#define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS 0
 #endif
 
 struct SensorState {
@@ -53,15 +63,24 @@ struct SensorState {
 };
 
 struct NodeState {
+    bool provisioning_bereit;
+    bool setup_mode;
+    bool setup_ap_aktiv;
+    bool restart_pending;
     bool master_bekannt;
     bool master_mac_gueltig;
     bool state_report_offen;
+    bool funk_bereit;
     unsigned long letztes_hello_ms;
     unsigned long letzter_heartbeat_ms;
     unsigned long letzter_state_ms;
+    unsigned long restart_requested_at_ms;
     unsigned long state_interval_ms;
+    uint32_t report_interval_s;
+    uint32_t stored_sensor_send_interval_s;
     uint8_t master_mac[6];
     uint8_t naechste_seq;
+    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
     SensorState sensor;
 };
 
@@ -111,6 +130,23 @@ bool netSenDeviceExtendedStatePoll(
 }
 #endif
 
+#if NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS
+bool netSenDevicePollEvent(
+    uint8_t* event_type,
+    uint8_t* trigger,
+    uint8_t* param1,
+    uint16_t* param2);
+#else
+bool netSenDevicePollEvent(
+    uint8_t* /*event_type*/,
+    uint8_t* /*trigger*/,
+    uint8_t* /*param1*/,
+    uint16_t* /*param2*/)
+{
+    return false;
+}
+#endif
+
 bool netSenVerwendetErweitertenState() {
     return (DEVICE_CAPS & (SH_CAP_PRESSURE | SH_CAP_AQI)) != 0U;
 }
@@ -144,6 +180,15 @@ void logf(const char* level, const char* format, ...) {
     Serial.println(message);
 }
 
+void provisioningLog(const char* level, const char* message) {
+    if (!DEBUG_LOKAL_AKTIV || level == nullptr || message == nullptr) return;
+
+    Serial.print("[");
+    Serial.print(level);
+    Serial.print("] ");
+    Serial.println(message);
+}
+
 void copyText(char* target, size_t targetSize, const char* source) {
     if (!target || targetSize == 0U) return;
     if (!source) {
@@ -159,8 +204,63 @@ bool istBroadcastMac(const uint8_t* mac) {
     return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
 }
 
+bool senderIstProvisionierterMaster(const uint8_t* senderMac) {
+    return nodeStatus.master_mac_gueltig &&
+           senderMac != nullptr &&
+           memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) == 0;
+}
+
 const uint8_t* holeHelloZielMac() {
     return nodeStatus.master_mac_gueltig ? nodeStatus.master_mac : BROADCAST_MAC;
+}
+
+void wendeReportIntervalAn(uint32_t wertS) {
+    nodeStatus.report_interval_s = wertS;
+    nodeStatus.state_interval_ms = (unsigned long)nodeStatus.report_interval_s * 1000UL;
+}
+
+class NetSenProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
+  public:
+    const char* pageTitle() const override { return "NET-SEN Provisioning"; }
+    const char* pageIntro() const override {
+        return "Node-Basis fuer Master-Bindung und Statusintervall.";
+    }
+    const char* deviceSectionTitle() const override { return "NET-SEN-Spezifisch"; }
+    const char* deviceSectionIntro() const override {
+        return "Dieser Basispfad hat aktuell keine zusaetzlichen lokalen Setup-Werte.";
+    }
+
+    void loadDeviceDefaults() override {}
+    bool loadDeviceSettings(Preferences& /*prefs*/) override { return false; }
+    bool saveDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    bool clearDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    void captureDeviceSnapshot() override {}
+    void restoreDeviceSnapshot() override {}
+    bool parseDeviceSave(WebServer& /*server*/, String& /*errorText*/) override { return true; }
+    void applyParsedDeviceSettings() override {}
+    void discardParsedDeviceSettings() override {}
+    void appendDeviceFieldsHtml(String& /*page*/, WebServer* /*sourceServer*/) const override {}
+};
+
+SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
+NetSenProvisioningHandler netSenProvisioningHandler;
+
+bool speichereReportIntervalMitRollback(uint32_t valueS) {
+    if (!nodeProvisioning.isSendIntervalValid(valueS)) return false;
+
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+    nodeProvisioning.captureBasisSnapshot(basisSnapshot);
+
+    wendeReportIntervalAn(valueS);
+    nodeStatus.state_report_offen = true;
+
+    if (nodeProvisioning.saveCurrentState()) {
+        return true;
+    }
+
+    nodeProvisioning.restoreBasisSnapshot(basisSnapshot);
+    wendeReportIntervalAn(nodeStatus.report_interval_s);
+    return false;
 }
 
 void buildSensorMask(char* target, size_t targetSize) {
@@ -180,7 +280,7 @@ void buildInputMask(char* target, size_t targetSize) {
 }
 
 bool stellePeerSicher(const uint8_t* mac) {
-    if (mac == nullptr) return false;
+    if (!nodeStatus.funk_bereit || mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
 
@@ -199,7 +299,7 @@ bool stellePeerSicher(const uint8_t* mac) {
 }
 
 bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
-    if (zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
+    if (!nodeStatus.funk_bereit || zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
     if (!stellePeerSicher(zielMac)) return false;
 
     uint8_t packet[SH_ESPNOW_MAX_BYTES] = {0};
@@ -259,7 +359,7 @@ bool sendeHello() {
 }
 
 bool sendeHeartbeat() {
-    if (!nodeStatus.master_mac_gueltig) return false;
+    if (!nodeStatus.master_bekannt || !nodeStatus.master_mac_gueltig) return false;
 
     SmartHome::HeartbeatPayload payload = {};
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
@@ -274,7 +374,7 @@ bool sendeHeartbeat() {
 }
 
 bool sendeState() {
-    if (!nodeStatus.master_mac_gueltig) return false;
+    if (!nodeStatus.master_bekannt || !nodeStatus.master_mac_gueltig) return false;
 
     const uint16_t reportIntervalS = (uint16_t)(nodeStatus.state_interval_ms / 1000UL);
     if (netSenVerwendetErweitertenState()) {
@@ -315,21 +415,59 @@ bool sendeState() {
     return true;
 }
 
+bool sendeDeviceEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16_t param2) {
+    if (!nodeStatus.master_bekannt || !nodeStatus.master_mac_gueltig) return false;
+
+    SmartHome::EventReportPayload payload = {};
+    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
+    payload.event_type = eventType;
+    payload.trigger = trigger;
+    payload.param1 = param1;
+    payload.param2 = param2;
+
+    return sendePaket(nodeStatus.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
+}
+
+void sendeAusstehendesDeviceEvent() {
+    uint8_t eventType = 0U;
+    uint8_t trigger = SH_TRIGGER_UNKNOWN;
+    uint8_t param1 = 0U;
+    uint16_t param2 = 0U;
+
+    if (!netSenDevicePollEvent(&eventType, &trigger, &param1, &param2)) return;
+    if (eventType == 0U) return;
+    sendeDeviceEvent(eventType, trigger, param1, param2);
+}
+
 void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
     if (payload.ack_status != SH_ACK_OK) {
         logf("WARN", "HELLO_ACK abgelehnt");
         return;
     }
 
-    memcpy(nodeStatus.master_mac, senderMac, sizeof(nodeStatus.master_mac));
-    nodeStatus.master_mac_gueltig = true;
+    if (!nodeStatus.master_mac_gueltig) {
+        logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
+        return;
+    }
+
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     nodeStatus.master_bekannt = true;
     nodeStatus.state_report_offen = true;
     stellePeerSicher(nodeStatus.master_mac);
+    sendeAusstehendesDeviceEvent();
     logf("INFO", "HELLO_ACK empfangen");
 }
 
-void verarbeiteCmd(const SmartHome::CmdPayload& payload) {
+void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::CmdPayload& payload) {
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "CMD ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         nodeStatus.state_report_offen = true;
     }
@@ -337,14 +475,20 @@ void verarbeiteCmd(const SmartHome::CmdPayload& payload) {
 
 bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
     if (payload.param_id != SH_CFG_REPORT_INTERVAL_S) return false;
-    if (payload.value < MIN_REPORT_INTERVAL_S || payload.value > MAX_REPORT_INTERVAL_S) return false;
 
-    nodeStatus.state_interval_ms = (unsigned long)payload.value * 1000UL;
-    nodeStatus.state_report_offen = true;
-    return true;
+    const bool ok = speichereReportIntervalMitRollback(payload.value);
+    if (!ok) {
+        logf("WARN", "report_interval_s konnte nicht uebernommen werden");
+    }
+    return ok;
 }
 
 void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "CFG ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     const bool ok = uebernehmeCfg(payload);
     if (header.flags & SH_FLAG_ACK_REQUEST) {
         sendeAck(senderMac, header.seq, header.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
@@ -367,7 +511,7 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
 
         case SH_MSG_CMD:
             if (header->payload_len == sizeof(SmartHome::CmdPayload)) {
-                verarbeiteCmd(*reinterpret_cast<const SmartHome::CmdPayload*>(payload));
+                verarbeiteCmd(senderMac, *reinterpret_cast<const SmartHome::CmdPayload*>(payload));
             }
             break;
 
@@ -400,6 +544,8 @@ void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
 }
 
 void initialisiereFunk() {
+    if (nodeStatus.funk_bereit || nodeStatus.setup_mode) return;
+
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     WiFi.setSleep(false);
@@ -416,7 +562,11 @@ void initialisiereFunk() {
 
     esp_now_register_send_cb(onEspNowSend);
     esp_now_register_recv_cb(onEspNowReceive);
+    nodeStatus.funk_bereit = true;
     stellePeerSicher(BROADCAST_MAC);
+    if (nodeStatus.master_mac_gueltig) {
+        stellePeerSicher(nodeStatus.master_mac);
+    }
 }
 
 void initialisiereSensorik() {
@@ -457,7 +607,9 @@ void setup() {
     }
 
     nodeStatus = {};
-    nodeStatus.state_interval_ms = STATE_INTERVAL_MS;
+    nodeStatus.report_interval_s = DEFAULT_REPORT_INTERVAL_S;
+    nodeStatus.stored_sensor_send_interval_s = DEFAULT_SENSOR_SEND_INTERVAL_S;
+    wendeReportIntervalAn(nodeStatus.report_interval_s);
     nodeStatus.state_report_offen = true;
     setzeSensorDefaults(&nodeStatus.sensor);
 
@@ -466,8 +618,53 @@ void setup() {
         digitalWrite(PIN_STATUS_LED, LOW);
     }
 
+    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig = {
+        SETUP_AP_PREFIX,
+        STORAGE_NAMESPACE,
+        STORAGE_KEY_NODE_BASIS,
+        DEFAULT_REPORT_INTERVAL_S,
+        DEFAULT_SENSOR_SEND_INTERVAL_S,
+        MIN_REPORT_INTERVAL_S,
+        MAX_REPORT_INTERVAL_S,
+        1500UL,
+        SETUP_AP_CHANNEL,
+    };
+
+    nodeStatus.provisioning_bereit = nodeProvisioning.begin(
+        provisioningConfig,
+        &nodeStatus.master_mac_gueltig,
+        nodeStatus.master_mac,
+        &nodeStatus.report_interval_s,
+        &nodeStatus.stored_sensor_send_interval_s,
+        &nodeStatus.setup_mode,
+        &nodeStatus.setup_ap_aktiv,
+        &nodeStatus.restart_pending,
+        &nodeStatus.restart_requested_at_ms,
+        nodeStatus.setup_ap_ssid,
+        sizeof(nodeStatus.setup_ap_ssid),
+        &netSenProvisioningHandler,
+        provisioningLog);
+
+    if (!nodeStatus.provisioning_bereit) {
+        logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
+        return;
+    }
+
+    wendeReportIntervalAn(nodeProvisioning.sanitizeStatusSendInterval(nodeStatus.report_interval_s));
+    nodeStatus.stored_sensor_send_interval_s =
+        nodeProvisioning.sanitizeSensorSendInterval(nodeStatus.stored_sensor_send_interval_s);
+
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
     logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
+    logf("INFO", "config report_interval_s=%lu stored_sensor_send_interval_s=%lu",
+         (unsigned long)nodeStatus.report_interval_s,
+         (unsigned long)nodeStatus.stored_sensor_send_interval_s);
+
+    if (!nodeProvisioning.hasStoredMasterMac()) {
+        logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
+        nodeProvisioning.enterSetupMode();
+        return;
+    }
 
     initialisiereSensorik();
     initialisiereFunk();
@@ -475,23 +672,41 @@ void setup() {
 }
 
 void loop() {
+    nodeProvisioning.update();
+
+    if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode) {
+        delay(LOOP_INTERVAL_MS);
+        return;
+    }
+
+    if (!nodeStatus.funk_bereit) {
+        initialisiereFunk();
+    }
+
     const unsigned long jetzt = millis();
 
     pollSensorik();
+    if (nodeStatus.master_bekannt && nodeStatus.master_mac_gueltig) {
+        sendeAusstehendesDeviceEvent();
+    }
 
     if (!nodeStatus.master_bekannt &&
-        (jetzt - nodeStatus.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) {
+        (nodeStatus.letztes_hello_ms == 0UL ||
+         (jetzt - nodeStatus.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS)) {
         sendeHello();
     }
 
     if (nodeStatus.master_bekannt &&
-        (jetzt - nodeStatus.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS) {
+        (nodeStatus.letzter_heartbeat_ms == 0UL ||
+         (jetzt - nodeStatus.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS)) {
         sendeHeartbeat();
     }
 
     const bool stateFaellig =
+        nodeStatus.master_bekannt &&
         nodeStatus.master_mac_gueltig &&
         (nodeStatus.state_report_offen ||
+         nodeStatus.letzter_state_ms == 0UL ||
          (nodeStatus.state_interval_ms > 0UL &&
           (jetzt - nodeStatus.letzter_state_ms) >= nodeStatus.state_interval_ms));
 
