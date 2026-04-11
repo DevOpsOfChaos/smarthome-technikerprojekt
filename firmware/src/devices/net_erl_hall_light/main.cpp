@@ -46,8 +46,8 @@ constexpr unsigned long LOOP_INTERVAL_MS = NET_ERL_LOOP_INTERVAL_MS;
 constexpr unsigned long SENSOR_RECOVERY_RETRY_INTERVAL_MS = NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS;
 constexpr uint32_t MIN_REPORT_INTERVAL_S = NET_ERL_MIN_REPORT_INTERVAL_S;
 constexpr uint32_t MAX_REPORT_INTERVAL_S = NET_ERL_MAX_REPORT_INTERVAL_S;
-constexpr uint32_t DEFAULT_SENSOR_SEND_INTERVAL_S = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
-constexpr uint32_t BOOT_COUNTER = NET_ERL_BOOT_COUNTER;
+constexpr uint32_t DEFAULT_STORED_SENSOR_SEND_INTERVAL_S = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
+constexpr uint32_t BOOT_COUNTER_PROTOCOL_PLACEHOLDER = NET_ERL_BOOT_COUNTER;
 
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
 constexpr const char* STORAGE_NAMESPACE = "net_erl_hl";
@@ -102,7 +102,9 @@ struct HallRuntime {
     bool master_mac_gueltig;
     bool state_report_offen;
     uint32_t report_interval_s;
-    uint32_t sensor_send_interval_s;
+    // Wird von der gemeinsamen Node-Basis gespeichert;
+    // Hall-Light nutzt fuer STATE report_interval_s.
+    uint32_t stored_sensor_send_interval_s;
     uint16_t auto_on_lux_threshold;
     uint16_t auto_off_delay_s;
     char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
@@ -269,7 +271,8 @@ class NetErlHallProvisioningHandler final
   public:
     const char* pageTitle() const override { return "NET-ERL Hall Light Provisioning"; }
     const char* pageIntro() const override {
-        return "Node-Basis oben, Hall-Light-Laufzeitwerte unten.";
+        return "Node-Basis oben. status_send_interval_s steuert Hall-Light-STATE; "
+               "sensor_send_interval_s wird nur als Basisfeld mitgespeichert.";
     }
     const char* deviceSectionTitle() const override { return "Hall-Light-Spezifisch"; }
     const char* deviceSectionIntro() const override {
@@ -490,7 +493,7 @@ bool sendeHello() {
     payload.caps_lo = (uint8_t)(DEVICE_CAPS & 0xFFU);
     payload.power_type = SH_POWER_MAINS;
     payload.fw_version = 1U;
-    payload.boot_counter = BOOT_COUNTER;
+    payload.boot_counter = BOOT_COUNTER_PROTOCOL_PLACEHOLDER;
     payload.meta_schema_version = DEVICE_META_SCHEMA_VERSION;
     payload.control_mode = DEVICE_CONTROL_MODE;
     payload.config_profile = DEVICE_CONFIG_PROFILE;
@@ -1013,7 +1016,7 @@ void setup() {
 
     runtime = {};
     runtime.report_interval_s = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
-    runtime.sensor_send_interval_s = DEFAULT_SENSOR_SEND_INTERVAL_S;
+    runtime.stored_sensor_send_interval_s = DEFAULT_STORED_SENSOR_SEND_INTERVAL_S;
     runtime.auto_on_lux_threshold = NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD;
     runtime.auto_off_delay_s = NET_ERL_DEFAULT_AUTO_OFF_DELAY_S;
     runtime.state_report_offen = true;
@@ -1033,7 +1036,7 @@ void setup() {
         STORAGE_NAMESPACE,
         STORAGE_KEY_NODE_BASIS,
         NET_ERL_DEFAULT_REPORT_INTERVAL_S,
-        DEFAULT_SENSOR_SEND_INTERVAL_S,
+        DEFAULT_STORED_SENSOR_SEND_INTERVAL_S,
         MIN_REPORT_INTERVAL_S,
         MAX_REPORT_INTERVAL_S,
         1500UL,
@@ -1045,7 +1048,7 @@ void setup() {
         &runtime.master_mac_gueltig,
         runtime.master_mac,
         &runtime.report_interval_s,
-        &runtime.sensor_send_interval_s,
+        &runtime.stored_sensor_send_interval_s,
         &runtime.setup_mode,
         &runtime.setup_ap_aktiv,
         &runtime.restart_pending,
@@ -1061,14 +1064,14 @@ void setup() {
     }
 
     wendeReportIntervalAn(nodeProvisioning.sanitizeStatusSendInterval(runtime.report_interval_s));
-    runtime.sensor_send_interval_s =
-        nodeProvisioning.sanitizeSensorSendInterval(runtime.sensor_send_interval_s);
+    runtime.stored_sensor_send_interval_s =
+        nodeProvisioning.sanitizeSensorSendInterval(runtime.stored_sensor_send_interval_s);
 
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
     logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
-    logf("INFO", "config report_interval_s=%u sensor_send_interval_s=%u auto_off_delay_s=%u lux_threshold=%u",
+    logf("INFO", "config report_interval_s=%u stored_sensor_send_interval_s=%u auto_off_delay_s=%u lux_threshold=%u",
          (unsigned)runtime.report_interval_s,
-         (unsigned)runtime.sensor_send_interval_s,
+         (unsigned)runtime.stored_sensor_send_interval_s,
          (unsigned)runtime.auto_off_delay_s,
          (unsigned)runtime.auto_on_lux_threshold);
 

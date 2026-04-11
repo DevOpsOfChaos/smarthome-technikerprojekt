@@ -26,7 +26,7 @@
 
 #define NET_ERL_MIN_REPORT_INTERVAL_S 5U
 #define NET_ERL_MAX_REPORT_INTERVAL_S 600U
-// Vertragsfeld, aktuell noch kein persistierter Laufzeitzaehler.
+// HELLO-Vertragsfeld: fester Platzhalter, kein persistenter Boot-Zaehler.
 #define NET_ERL_BOOT_COUNTER 1U
 
 #define NET_ERL_DEFAULT_REPORT_INTERVAL_S 10U
