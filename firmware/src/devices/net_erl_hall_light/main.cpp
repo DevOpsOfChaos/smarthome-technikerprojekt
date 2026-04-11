@@ -43,6 +43,7 @@ constexpr int WLAN_KANAL = NET_ERL_WLAN_CHANNEL;
 constexpr unsigned long HELLO_RETRY_INTERVAL_MS = NET_ERL_HELLO_RETRY_INTERVAL_MS;
 constexpr unsigned long HEARTBEAT_INTERVAL_MS = NET_ERL_HEARTBEAT_INTERVAL_MS;
 constexpr unsigned long LOOP_INTERVAL_MS = NET_ERL_LOOP_INTERVAL_MS;
+constexpr unsigned long SENSOR_RECOVERY_RETRY_INTERVAL_MS = NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS;
 constexpr uint32_t MIN_REPORT_INTERVAL_S = NET_ERL_MIN_REPORT_INTERVAL_S;
 constexpr uint32_t MAX_REPORT_INTERVAL_S = NET_ERL_MAX_REPORT_INTERVAL_S;
 constexpr uint32_t DEFAULT_SENSOR_SEND_INTERVAL_S = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
@@ -90,6 +91,8 @@ struct HallRuntime {
     unsigned long letzter_state_ms;
     unsigned long letztes_sensor_poll_ms;
     unsigned long letztes_env_sample_ms;
+    unsigned long letzter_bme_recovery_ms;
+    unsigned long letzter_lux_recovery_ms;
     unsigned long letztes_snapshot_log_ms;
     unsigned long motion_deadline_ms;
     unsigned long state_interval_ms;
@@ -725,6 +728,7 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
     if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
     if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) return;
 
+    // ESP-NOW-Callback und loop() teilen runtime; Handler deshalb kurz halten.
     const SmartHome::MsgHeader* header = reinterpret_cast<const SmartHome::MsgHeader*>(data);
     const uint8_t* payload = data + SH_HEADER_SIZE;
 
@@ -795,6 +799,11 @@ void initialisiereFunk() {
     }
 }
 
+void konfiguriereVeml7700() {
+    veml.setGain(VEML7700_GAIN_1);
+    veml.setIntegrationTime(VEML7700_IT_100MS);
+}
+
 void initialisiereSensorik() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
     runtime.bme_ok = bme280.begin((uint8_t)NET_ERL_BME280_ADDRESS, &Wire);
@@ -809,8 +818,7 @@ void initialisiereSensorik() {
         logf("WARN", "VEML7700 Init fehlgeschlagen");
     } else {
         runtime.lux_ok = true;
-        veml.setGain(VEML7700_GAIN_1);
-        veml.setIntegrationTime(VEML7700_IT_100MS);
+        konfiguriereVeml7700();
         logf("INFO", "VEML7700 bereit");
     }
 
@@ -825,19 +833,48 @@ void setzeSensorDefaults() {
     runtime.sensor.fault = false;
 }
 
+bool sensorRecoveryFaellig(unsigned long letzterVersuchMs, unsigned long jetzt) {
+    return letzterVersuchMs == 0UL ||
+           (jetzt - letzterVersuchMs) >= SENSOR_RECOVERY_RETRY_INTERVAL_MS;
+}
+
+void versucheBmeRecovery(unsigned long jetzt) {
+    if (runtime.bme_ok || !sensorRecoveryFaellig(runtime.letzter_bme_recovery_ms, jetzt)) return;
+
+    runtime.letzter_bme_recovery_ms = jetzt;
+    runtime.bme_ok = bme280.begin((uint8_t)NET_ERL_BME280_ADDRESS, &Wire);
+    logf(runtime.bme_ok ? "INFO" : "WARN",
+         runtime.bme_ok ? "BME280 Recovery erfolgreich" : "BME280 Recovery fehlgeschlagen");
+}
+
+void versucheLuxRecovery(unsigned long jetzt) {
+    if (runtime.lux_ok || !sensorRecoveryFaellig(runtime.letzter_lux_recovery_ms, jetzt)) return;
+
+    runtime.letzter_lux_recovery_ms = jetzt;
+    runtime.lux_ok = veml.begin();
+    if (runtime.lux_ok) {
+        konfiguriereVeml7700();
+    }
+    logf(runtime.lux_ok ? "INFO" : "WARN",
+         runtime.lux_ok ? "VEML7700 Recovery erfolgreich" : "VEML7700 Recovery fehlgeschlagen");
+}
+
 void leseUmweltsensoren(unsigned long jetzt) {
     if ((jetzt - runtime.letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     runtime.letztes_env_sample_ms = jetzt;
 
-    bool bmeMesswertOk = runtime.bme_ok;
+    versucheBmeRecovery(jetzt);
+    versucheLuxRecovery(jetzt);
 
+    bool bmeMesswertOk = runtime.bme_ok;
     if (!runtime.bme_ok) {
-        logf("WARN", "BME280 weiterhin nicht bereit");
+        bmeMesswertOk = false;
     } else {
         const float temp = bme280.readTemperature();
         const float hum = bme280.readHumidity();
         if (!isfinite(temp) || !isfinite(hum)) {
             bmeMesswertOk = false;
+            runtime.bme_ok = false;
             logf("WARN", "BME280 Read fehlgeschlagen");
         } else {
             runtime.sensor.temp_01c = (int16_t)lroundf(temp * 10.0f);
@@ -915,6 +952,7 @@ void motionAktivWerden(unsigned long jetzt) {
             sendeRelayEvent(SH_TRIGGER_AUTO);
             logf("INFO", "motion erkannt, lux=%u <= schwelle=%u, timer gestartet", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
         } else {
+            // Sinkende Lux waehrend laufender Praesenz schaltet nicht automatisch nach.
             runtime.blocked_by_lux = true;
             logf("INFO", "motion erkannt, auto_on durch lux blockiert (lux=%u schwelle=%u)", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
         }
