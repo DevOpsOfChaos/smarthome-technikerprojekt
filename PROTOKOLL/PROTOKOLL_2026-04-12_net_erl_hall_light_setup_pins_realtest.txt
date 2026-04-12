@@ -1,0 +1,119 @@
+PROTOKOLL 2026-04-12 - NET-ERL Hall-Light Setup-Pins Realtest
+
+Datum: 2026-04-12
+Hardwarepfad: NET-ERL Hall-Light
+Firmware-Environment: net_erl_hall_light
+
+Branch- und Commit-Kontext:
+- Branch: sidequest/realtests-hall-light-then-net-zrl
+- Basis: aktueller oeffentlicher main / origin/main
+- Commit: fd5602555750c9016eb246be8ab6c2321e125baa
+- Kurzlog: fix: wire concrete setup pins and bat_sen wake
+
+Vorab-Inspektion:
+- firmware/platformio.ini enthaelt den aktiven Env net_erl_hall_light mit build_src_filter auf devices/net_erl_hall_light.
+- firmware/src/devices/net_erl_hall_light/PinConfig.h setzt:
+  - PIN_RELAY_1 = 10
+  - PIN_SENSOR_SDA = 0
+  - PIN_SENSOR_SCL = 1
+  - PIN_PIR = 6
+  - PIN_STATUS_LED = -1
+  - SETUP_BUTTON_PIN = 2
+  - SETUP_BUTTON_ACTIVE_LOW = 1
+  - SETUP_INDICATOR_LED_PIN = 7
+  - SETUP_INDICATOR_LED_ACTIVE_HIGH = 1
+- firmware/src/devices/net_erl_hall_light/main.cpp uebergibt diese Setup-Pins an die gemeinsame Node-Provisioning-Basis.
+- Die Provisioning-Basis konfiguriert den Setup-Button bei active-low als INPUT_PULLUP und blinkt die Setup-LED nur im Setup-Modus.
+
+Geflasht:
+- net_erl_hall_light auf COM12
+- Upload-Befehl: pio run -e net_erl_hall_light -t upload --upload-port COM12
+- Upload-Ergebnis: erfolgreich
+- esptool-Nachweis:
+  - Port: COM12
+  - Chip: ESP32-C3
+  - MAC: 20:6e:f1:6a:df:5c
+
+Bewusst nicht geflasht:
+- Master wurde nicht geflasht.
+- NET-ZRL wurde in diesem Schritt nicht geflasht.
+- Keine weitere Geraetelinie wurde in diesem Schritt geflasht.
+
+COM-Port-Evidence:
+- COM3:
+  - USB VID:PID=303A:1001
+  - SER=20:6E:F1:6D:92:C0
+  - Serielle Ausgabe identifiziert den Port als Master:
+    - SmartHome ESP32
+    - MASTER v0.4.0
+    - FW: 0.4.0
+    - Variante: master
+- COM12:
+  - USB VID:PID=303A:1001
+  - SER=20:6E:F1:6A:DF:5C
+  - esptool meldete beim Hall-Light-Upload dieselbe MAC: 20:6e:f1:6a:df:5c
+  - Der Master sah diese MAC fuer NET-ERL-001.
+
+Build:
+- Befehl: pio run -e net_erl_hall_light
+- Ergebnis: SUCCESS
+- Speicher:
+  - RAM: 39932 bytes / 327680 bytes
+  - Flash: 822950 bytes / 1310720 bytes
+
+Serial-Evidence Hall-Light:
+- COM12 zeigte nach Reset den ESP32-C3 Boot-ROM-Start:
+  - ESP-ROM:esp32c3-api1-20210207
+  - rst:0x15 (USB_UART_CHIP_RESET),boot:0xd (SPI_FAST_FLASH_BOOT)
+  - entry 0x403cc710
+- Keine Applikationslogs auf COM12 beobachtet. Das passt zum aktiven Build, weil NET_ERL_DEBUG_ENABLED im Hall-Light-DeviceConfig.h auf 0 steht.
+
+Master-seitige Evidence nach Hall-Light-Flash:
+- Der Master bootete auf COM3 sauber:
+  - MASTER v0.4.0
+  - FW: 0.4.0
+  - Variante: master
+  - ESP-NOW bereit
+- Nach dem Hall-Light-Flash sah der Master:
+  - Node dynamisch registriert: NET-ERL-001 (net_erl)
+  - Peer aktiv: 20:6E:F1:6A:DF:5C
+  - NET-ERL-001 MAC aktualisiert: 20:6E:F1:6A:DF:5C
+  - Node NET-ERL-001 ist online
+  - HELLO_ACK gesendet an 20:6E:F1:6A:DF:5C
+  - HELLO von NET-ERL-001 (NET-ERL Hall Light)
+  - ESP-NOW Sendestatus an 20:6E:F1:6A:DF:5C: OK
+  - HEARTBEAT von NET-ERL-001 (uptime=0s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+  - HEARTBEAT von NET-ERL-001 (uptime=20s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+  - HEARTBEAT von NET-ERL-001 (uptime=40s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+  - HEARTBEAT von NET-ERL-001 (uptime=60s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+- Ein separater Reset-Capture zeigte erneut:
+  - Node dynamisch registriert: NET-ERL-001 (net_erl)
+  - HELLO_ACK gesendet an 20:6E:F1:6A:DF:5C
+  - HELLO von NET-ERL-001 (NET-ERL Hall Light)
+  - HEARTBEAT von NET-ERL-001 (uptime=5s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+  - HEARTBEAT von NET-ERL-001 (uptime=25s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+
+Beobachtetes Verhalten:
+- Hall-Light bootete nach dem Flash und nahm am normalen Master-gebundenen Pfad teil.
+- Kein unerwarteter Setup-Modus wurde beobachtet.
+- HELLO / HELLO_ACK funktionierten real gegen den Master.
+- STATE_REPORT wurde wiederholt vom Master verarbeitet.
+- HEARTBEAT wurde wiederholt vom Master verarbeitet.
+- Kein offensichtlicher Relais-, PIR-, Sensor- oder Setup-Pin-bedingter Laufzeitabbruch wurde in diesem Lauf sichtbar.
+- Der Master meldete wiederholt MQTT connect fehlgeschlagen mit state=-2 gegen 192.168.178.59:1883. Das ist ein Infrastruktur-/Broker-Befund im Master-Umfeld, nicht als Hall-Light-Setup-Pin-Regression gewertet.
+
+Setup-Pin-Check:
+- Der direkte manuelle Setup-Button-Test auf GPIO2 wurde in diesem Lauf nicht durchgefuehrt.
+- Die Setup-Indicator-LED auf GPIO7 wurde nicht manuell im Setup-Modus beobachtet.
+- Bewertbar war aber, dass die neuen Setup-Pins den normalen gespeicherten Master-Bindungspfad nicht offensichtlich stoeren: Hall-Light ging nicht unerwartet in den Setup-Modus und blieb im HELLO/STATE/HEARTBEAT-Pfad.
+
+Verdict:
+- Clean enough fuer den geforderten Hall-Light-Pflichtpfad.
+- Kein real beobachteter Defekt durch die neuen Setup-Pins im normalen Hall-Light-Lauf.
+- Einschraenkung: direkter manueller GPIO2/GPIO7-Setup-Pin-Bedientest nicht durchgefuehrt; MQTT-Broker im Umfeld nicht erreichbar.
