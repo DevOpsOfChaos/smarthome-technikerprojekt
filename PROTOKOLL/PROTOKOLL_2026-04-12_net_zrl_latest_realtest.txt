@@ -1,0 +1,131 @@
+PROTOKOLL 2026-04-12 - NET-ZRL latest Firmware Realtest
+
+Datum: 2026-04-12
+Hardwarepfad: NET-ZRL
+Firmware-Environment: net_zrl
+
+Branch- und Commit-Kontext:
+- Branch: sidequest/realtests-hall-light-then-net-zrl
+- Basis: aktueller oeffentlicher main / origin/main
+- Commit: fd5602555750c9016eb246be8ab6c2321e125baa
+- Kurzlog: fix: wire concrete setup pins and bat_sen wake
+
+Vorab-Inspektion:
+- firmware/platformio.ini enthaelt:
+  - env net_zrl mit build_src_filter auf basetypes/net_zrl
+  - env net_zrl_shutter mit build_src_filter auf devices/net_zrl_shutter
+- Der aktive Kandidat fuer diesen Lauf war net_zrl.
+- firmware/src/devices/net_zrl_shutter ist im aktuellen Stand nur ein Stub-Pfad und wurde nicht als aktiver Realtest-Kandidat verwendet.
+- firmware/src/basetypes/net_zrl/main.cpp setzt den aktiven NET-ZRL-Standardpfad:
+  - DEVICE_ID: NET-ZRL-001
+  - DEVICE_NAME: NET-ZRL Cover
+  - FW_VARIANT: net_zrl_base
+  - WLAN-Kanal: 6
+  - Relais: HardwarePinStandard::PIN_RELAY_1 und PIN_RELAY_2
+  - lokale Buttons: GPIO2, GPIO4, GPIO3
+  - LEDs: GPIO6 und GPIO7
+  - serielle Befehle: status, help, stop, up, down, setup enter, setup exit, setup reset_calibration
+
+Build:
+- Befehl: pio run -e net_zrl
+- Ergebnis: SUCCESS
+- Speicher:
+  - RAM: 39868 bytes / 327680 bytes
+  - Flash: 815182 bytes / 1310720 bytes
+
+COM-Port-Evidence:
+- Nach dem Hall-Light-Pflichtlauf wurde Hall-Light abgezogen. COM12 war danach nicht mehr sichtbar.
+- Neu sichtbar wurde:
+  - COM6
+  - USB VID:PID=303A:1001
+  - SER=8C:D0:B2:A8:80:BB
+- COM3 blieb Master:
+  - USB VID:PID=303A:1001
+  - SER=20:6E:F1:6D:92:C0
+  - serielle Ausgabe: MASTER v0.4.0, FW 0.4.0, Variante master
+- COM6 wurde vor dem Flash seriell als NET-ZRL identifiziert:
+  - NET-ZRL v0.4.0 startet (0.4.0)
+  - Node=NET-ZRL-001 Name=NET-ZRL Cover Variant=net_zrl_base
+  - master_mac=20:6E:F1:6D:92:C0
+- Der Master sah vor dem Flash denselben Node:
+  - Node dynamisch registriert: NET-ZRL-001 (net_zrl)
+  - Peer aktiv: 8C:D0:B2:A8:80:BB
+  - NET-ZRL-001 MAC aktualisiert: 8C:D0:B2:A8:80:BB
+
+Geflasht:
+- net_zrl auf COM6
+- Upload-Befehl: pio run -e net_zrl -t upload --upload-port COM6
+- Upload-Ergebnis: erfolgreich
+- esptool-Nachweis:
+  - Port: COM6
+  - Chip: ESP32-C3
+  - MAC: 8c:d0:b2:a8:80:bb
+
+Bewusst nicht geflasht:
+- Master wurde nicht geflasht.
+- Hall-Light wurde nach abgeschlossenem Hall-Light-Pflichtlauf nicht weiter angefasst.
+- net_zrl_shutter wurde nicht geflasht, weil es nicht der aktive NET-ZRL-Pfad dieses Laufs war.
+- Keine weitere Geraetelinie wurde geflasht.
+
+Serial-Evidence NET-ZRL nach Flash:
+- COM6 zeigte nach Reset:
+  - ESP-ROM:esp32c3-api1-20210207
+  - rst:0x15 (USB_UART_CHIP_RESET),boot:0xc (SPI_FAST_FLASH_BOOT)
+  - entry 0x403cc710
+  - [INFO] Relais neutral (boot)
+  - [INFO] Gemeinsame Node-Basis geladen.
+  - [INFO] Geraetespezifische Setup-Daten geladen.
+  - [INFO] NET-ZRL v0.4.0 startet (0.4.0)
+  - [INFO] Node=NET-ZRL-001 Name=NET-ZRL Cover Variant=net_zrl_base
+  - [INFO] Pins relay_a=10 relay_b=5 button_up=2 button_down=4 button_stop=3 led_up=6 led_down=7 button_active_low=false
+  - state=stopped direction=null relay_a=false relay_b=false calibration_mode=false calibration_phase=idle setup_mode=false setup_ap=false setup_ssid=- pending_action=none pending_blinks=0 is_calibrated=false master_mac=20:6E:F1:6D:92:C0 travel_time_up_ms=0 travel_time_down_ms=0 default_estimated_travel_time_ms=100000 relay_up_mapping=relay_a status_send_interval_s=60 sensor_send_interval_s=60 cover_position=unknown
+- Ein manuell gesendeter serieller status-Befehl auf COM6 bestaetigte denselben stationaeren Zustand:
+  - state=stopped
+  - direction=null
+  - relay_a=false
+  - relay_b=false
+  - calibration_mode=false
+  - calibration_phase=idle
+  - setup_mode=false
+  - is_calibrated=false
+  - cover_position=unknown
+  - default_estimated_travel_time_ms=100000
+
+Master-seitige Evidence nach Flash:
+- Der Master auf COM3 sah nach dem Flash:
+  - HELLO_ACK gesendet an 8C:D0:B2:A8:80:BB
+  - HELLO von NET-ZRL-001 (NET-ZRL Cover)
+  - ESP-NOW Sendestatus an 8C:D0:B2:A8:80:BB: OK
+  - STATE_REPORT von NET-ZRL-001 verarbeitet
+  - HEARTBEAT von NET-ZRL-001 (uptime=0s)
+  - HEARTBEAT von NET-ZRL-001 (uptime=20s)
+- Im separaten Nachlauf sah der Master wiederholt:
+  - Node dynamisch registriert: NET-ZRL-001 (net_zrl)
+  - Peer aktiv: 8C:D0:B2:A8:80:BB
+  - NET-ZRL-001 MAC aktualisiert: 8C:D0:B2:A8:80:BB
+  - Node NET-ZRL-001 ist online
+  - HELLO_ACK gesendet an 8C:D0:B2:A8:80:BB
+  - HELLO von NET-ZRL-001 (NET-ZRL Cover)
+  - STATE_REPORT von NET-ZRL-001 verarbeitet
+  - HEARTBEAT von NET-ZRL-001 (uptime=5s)
+  - HEARTBEAT von NET-ZRL-001 (uptime=25s)
+  - HEARTBEAT von NET-ZRL-001 (uptime=45s)
+
+Beobachtetes Verhalten:
+- NET-ZRL bootete sauber nach latest net_zrl-Flash.
+- Keine unerwartete Setup-Mode-Aktivierung.
+- Gespeicherte Master-Bindung blieb vorhanden.
+- HELLO / HELLO_ACK funktionierten real gegen den Master.
+- STATE_REPORT wurde wiederholt vom Master verarbeitet.
+- HEARTBEAT wurde wiederholt vom Master verarbeitet.
+- Relaisstatus blieb im geprueften stationaeren Zustand neutral: relay_a=false und relay_b=false.
+- Kalibrierung war nicht vorhanden: is_calibrated=false, cover_position=unknown.
+- Keine echte Kalibrierfahrt wurde durchgefuehrt und kein Kalibriererfolg behauptet.
+- Keine reale Fahrbewegung wurde ausgeloest; deshalb ist in diesem Lauf nur der stationaere Cover-/Relaiszustand plus Master-Kommunikation bewertet.
+- Der Master meldete wiederholt MQTT connect fehlgeschlagen mit state=-2 gegen 192.168.178.59:1883. Das ist ein Infrastruktur-/Broker-Befund im Master-Umfeld, nicht als NET-ZRL-Firmwaredefekt gewertet.
+
+Verdict:
+- Clean enough fuer den geforderten NET-ZRL-Pflichtpfad.
+- Latest net_zrl aus dem aktuellen oeffentlichen main wurde real auf NET-ZRL-Hardware geflasht und bootete.
+- Master-Kommunikation ueber HELLO / HELLO_ACK / STATE / HEARTBEAT war real sichtbar.
+- Einschraenkung: keine Kalibrierfahrt und keine aktive Cover-Fahrt getestet; MQTT-Broker im Umfeld nicht erreichbar.
