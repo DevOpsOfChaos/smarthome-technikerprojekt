@@ -1,0 +1,88 @@
+PROTOKOLL
+Datum: 2026-04-12
+Thema: Realtest net_erl_hall_light mit realem Master auf Provisioning-Standard-Branch
+
+1. Ziel
+Der produktive Hall-Light-Pfad `net_erl_hall_light` wurde auf dem Branch
+`sidequest/provisioning-standard-per-basetype` mit dem real angeschlossenen
+Master getestet. Schwerpunkt war, ob die Provisioning-Standardisierung den
+gespeicherten Master-Bindungspfad, HELLO / HELLO_ACK sowie STATE / HEARTBEAT
+im realen Funkbetrieb intakt laesst.
+
+2. Repo- und Branch-Stand
+- Repo: smarthome-technikerprojekt
+- Branch: sidequest/provisioning-standard-per-basetype
+- Vergleich gegen main: Provisioning-Standard-Aenderungen in gemeinsamer
+  Node-Provisioning-Basis, net_erl / net_sen / net_zrl und im
+  Hall-Light-Devicepfad.
+
+3. Hardware und Ports
+- Master: COM3
+  Begruendung: COM3 gab das Master-Startbanner aus und loggte
+  `MASTER v0.4.0`, `Variante: master`, `HELLO / HELLO_ACK / HEARTBEAT /
+  STATE / EVENT / ACK`.
+- Hall-Light: COM12
+  Begruendung: COM12 war das zweite ESP32-C3-USB-CDC-Geraet. Beim Upload auf
+  COM12 meldete esptool die MAC `20:6e:f1:6a:df:5c`; dieselbe MAC wurde vom
+  Master fuer `NET-ERL-001` gesehen.
+
+4. Build und Flash
+- Build: `pio run -e net_erl_hall_light`
+  Ergebnis: erfolgreich.
+- Flash: `pio run -e net_erl_hall_light -t upload --upload-port COM12`
+  Ergebnis: erfolgreich.
+- Zur besseren Log-Erfassung wurde Hall-Light mit derselben Firmware ein
+  zweites Mal auf COM12 geflasht, waehrend COM3 mitgeschnitten wurde.
+- Master wurde bewusst nicht geflasht.
+
+5. Beobachtetes Verhalten
+Hall-Light hatte eine gespeicherte Master-Bindung und ging nach dem Flash nicht
+in den Setup-Modus. Der normale Master-gebundene Pfad lief real weiter.
+
+Relevanter Master-Logauszug nach Hall-Light-Flash:
+- `[INFO] HELLO_ACK gesendet an 20:6E:F1:6A:DF:5C`
+- `[INFO] HELLO von NET-ERL-001 (NET-ERL Hall Light)`
+- `[INFO] ESP-NOW Sendestatus an 20:6E:F1:6A:DF:5C: OK`
+- `[INFO] HEARTBEAT von NET-ERL-001 (uptime=0s)`
+- `[INFO] STATE_REPORT von NET-ERL-001 verarbeitet`
+- `[INFO] HEARTBEAT von NET-ERL-001 (uptime=20s)`
+- `[INFO] STATE_REPORT von NET-ERL-001 verarbeitet`
+- `[INFO] HEARTBEAT von NET-ERL-001 (uptime=40s)`
+- `[INFO] STATE_REPORT von NET-ERL-001 verarbeitet`
+- `[INFO] HEARTBEAT von NET-ERL-001 (uptime=60s)`
+
+Hall-Light selbst gab auf COM12 keine Applikationslogs aus. Das passt zum
+aktuellen Produktpfad, weil `NET_ERL_DEBUG_ENABLED` in
+`firmware/src/devices/net_erl_hall_light/DeviceConfig.h` auf `0` steht.
+
+6. Setup-Modus
+Setup-Modus trat in diesem Lauf nicht auf. Es wurde deshalb kein Setup-WLAN
+verbunden und keine manuelle Provisionierung durchgefuehrt.
+
+Falls ein unprovisioniertes Hall-Light in einem separaten Lauf in den
+Setup-Modus faellt, waere nach aktueller Regel zu erwarten:
+- SSID: `NET-ERL-001`
+- Passwort: `net-erl-setup`
+
+7. Nebenbefunde
+Der Master meldete wiederholt:
+- `[WARN] MQTT connect fehlgeschlagen (state=-2, broker=192.168.178.59:1883, typ=ip)`
+
+Das wurde in diesem Test nicht als Hall-Light-Provisioning-Regression gewertet,
+weil der Funkpfad HELLO / HELLO_ACK / HEARTBEAT / STATE real funktionierte und
+Master-Firmware sowie MQTT-Infrastruktur nicht Ziel dieses engen Tests waren.
+
+8. Bewertung
+Der getestete reale Hall-Light-Pfad ist auf diesem Branch fuer den
+Provisioning-Standard-Schritt unauffaellig:
+- Build erfolgreich
+- Hall-Light-Flash auf COM12 erfolgreich
+- gespeicherte Master-Bindung blieb nutzbar
+- kein Setup-Modus im provisionierten Zustand
+- HELLO und HELLO_ACK real ueber den Master sichtbar
+- STATE_REPORT und HEARTBEAT real sichtbar
+- kein branchbedingter Defekt im getesteten Hall-Light-Pfad gefunden
+
+Auf Basis dieses Realtests ist die Provisioning-Standard-Welle fuer den
+getesteten Hall-Light-Pfad mergefaehig. Diese Aussage gilt nicht als breiter
+Freifahrtschein fuer ungepruefte Basetypes oder nicht getestete Setup-Flows.
