@@ -15,6 +15,12 @@ constexpr uint16_t NODE_BASIS_VERSION = 1U;
 constexpr uint32_t NODE_BASIS_FLAG_MASTER_MAC = 0x00000001UL;
 constexpr const char* MASTER_MAC_ARG_PRIMARY = "master_mac";
 constexpr const char* MASTER_MAC_ARG_ALIAS = "mac";
+constexpr const char* STATUS_INTERVAL_ARG_DEFAULT = "status_send_interval_s";
+constexpr const char* SENSOR_INTERVAL_ARG_DEFAULT = "sensor_send_interval_s";
+constexpr const char* STATUS_INTERVAL_HINT_DEFAULT = "Statusintervall in Sekunden.";
+constexpr const char* SENSOR_INTERVAL_HINT_DEFAULT = "Sensorintervall in Sekunden.";
+constexpr unsigned long SETUP_BUTTON_HOLD_MS_DEFAULT = 5000UL;
+constexpr unsigned long SETUP_INDICATOR_BLINK_MS_DEFAULT = 500UL;
 
 String htmlEscape(const String& text) {
     String escaped;
@@ -46,6 +52,10 @@ bool basisSettingsEqual(const NodeBasisSettings& left, const NodeBasisSettings& 
            left.sensorSendIntervalS == right.sensorSendIntervalS;
 }
 
+const char* fallbackText(const char* text, const char* fallback) {
+    return (text != nullptr && text[0] != '\0') ? text : fallback;
+}
+
 }  // namespace
 
 NodeProvisioningController::NodeProvisioningController()
@@ -64,7 +74,12 @@ NodeProvisioningController::NodeProvisioningController()
       logFn_(nullptr),
       server_(80),
       routesConfigured_(false),
-      initialized_(false) {}
+      initialized_(false),
+      setupButtonLastActive_(false),
+      setupButtonHoldConsumed_(false),
+      setupButtonPressedAtMs_(0UL),
+      setupIndicatorState_(false),
+      setupIndicatorLastBlinkMs_(0UL) {}
 
 bool NodeProvisioningController::begin(
     const NodeProvisioningConfig& config,
@@ -108,6 +123,13 @@ bool NodeProvisioningController::begin(
     *restartPending_ = false;
     *restartRequestedAtMs_ = 0UL;
     setupApSsid_[0] = '\0';
+    setupButtonLastActive_ = false;
+    setupButtonHoldConsumed_ = false;
+    setupButtonPressedAtMs_ = 0UL;
+    setupIndicatorState_ = false;
+    setupIndicatorLastBlinkMs_ = 0UL;
+
+    initializeSetupIo();
 
     applyDefaultBasisValues();
     deviceHandler_->loadDeviceDefaults();
@@ -161,7 +183,17 @@ uint32_t NodeProvisioningController::sanitizeStatusSendInterval(uint32_t valueS)
 }
 
 uint32_t NodeProvisioningController::sanitizeSensorSendInterval(uint32_t valueS) const {
-    return isSendIntervalValid(valueS) ? valueS : config_.defaultSensorSendIntervalS;
+    return valueS >= effectiveMinSensorSendIntervalS() && valueS <= effectiveMaxSensorSendIntervalS()
+               ? valueS
+               : config_.defaultSensorSendIntervalS;
+}
+
+uint32_t NodeProvisioningController::effectiveMinSensorSendIntervalS() const {
+    return config_.minSensorSendIntervalS > 0UL ? config_.minSensorSendIntervalS : config_.minSendIntervalS;
+}
+
+uint32_t NodeProvisioningController::effectiveMaxSensorSendIntervalS() const {
+    return config_.maxSensorSendIntervalS > 0UL ? config_.maxSensorSendIntervalS : config_.maxSendIntervalS;
 }
 
 bool NodeProvisioningController::parseMacText(const char* text, uint8_t outMac[6]) {
@@ -308,6 +340,7 @@ void NodeProvisioningController::enterSetupMode() {
     server_.begin();
     *setupMode_ = true;
     *setupApActive_ = true;
+    setupIndicatorLastBlinkMs_ = 0UL;
     log(
         "INFO",
         "Setup-AP aktiv: ssid=%s password=%s ip=%s url=http://%s/",
@@ -333,6 +366,7 @@ void NodeProvisioningController::exitSetupMode(const char* reason) {
     }
 
     setupApSsid_[0] = '\0';
+    writeSetupIndicator(false);
     log("INFO", "Setup-Modus beendet (%s)", reason ? reason : "ohne grund");
 }
 
@@ -455,22 +489,42 @@ String NodeProvisioningController::buildPage(
     page += F("<input id=\"master_mac\" name=\"master_mac\" type=\"text\" maxlength=\"17\" autocapitalize=\"characters\" autocomplete=\"off\" spellcheck=\"false\" placeholder=\"AA:BB:CC:DD:EE:FF\" value=\"");
     page += escapedMasterMac;
     page += F("\"><div class=\"hint\">Auch per <code>?master_mac=...</code> oder <code>?mac=...</code>.</div></div>");
-    page += F("<div class=\"field\"><label for=\"status_send_interval_s\">status_send_interval_s</label>");
-    page += F("<input id=\"status_send_interval_s\" name=\"status_send_interval_s\" type=\"number\" min=\"");
+    page += F("<div class=\"field\"><label for=\"");
+    page += htmlEscape(String(statusIntervalArgName()));
+    page += F("\">");
+    page += htmlEscape(String(statusIntervalLabel()));
+    page += F("</label>");
+    page += F("<input id=\"");
+    page += htmlEscape(String(statusIntervalArgName()));
+    page += F("\" name=\"");
+    page += htmlEscape(String(statusIntervalArgName()));
+    page += F("\" type=\"number\" min=\"");
     page += String(config_.minSendIntervalS);
     page += F("\" max=\"");
     page += String(config_.maxSendIntervalS);
     page += F("\" step=\"1\" inputmode=\"numeric\" value=\"");
     page += escapedStatusInterval;
-    page += F("\"><div class=\"hint\">Statusintervall in Sekunden.</div></div>");
-    page += F("<div class=\"field\"><label for=\"sensor_send_interval_s\">sensor_send_interval_s</label>");
-    page += F("<input id=\"sensor_send_interval_s\" name=\"sensor_send_interval_s\" type=\"number\" min=\"");
-    page += String(config_.minSendIntervalS);
+    page += F("\"><div class=\"hint\">");
+    page += htmlEscape(String(statusIntervalHint()));
+    page += F("</div></div>");
+    page += F("<div class=\"field\"><label for=\"");
+    page += htmlEscape(String(sensorIntervalArgName()));
+    page += F("\">");
+    page += htmlEscape(String(sensorIntervalLabel()));
+    page += F("</label>");
+    page += F("<input id=\"");
+    page += htmlEscape(String(sensorIntervalArgName()));
+    page += F("\" name=\"");
+    page += htmlEscape(String(sensorIntervalArgName()));
+    page += F("\" type=\"number\" min=\"");
+    page += String(effectiveMinSensorSendIntervalS());
     page += F("\" max=\"");
-    page += String(config_.maxSendIntervalS);
+    page += String(effectiveMaxSensorSendIntervalS());
     page += F("\" step=\"1\" inputmode=\"numeric\" value=\"");
     page += escapedSensorInterval;
-    page += F("\"><div class=\"hint\">Sensorintervall in Sekunden.</div></div>");
+    page += F("\"><div class=\"hint\">");
+    page += htmlEscape(String(sensorIntervalHint()));
+    page += F("</div></div>");
     page += F("</section><hr>");
 
     page += F("<section class=\"section\"><div class=\"section-head\"><h2>");
@@ -634,8 +688,8 @@ void NodeProvisioningController::handleSave() {
     }
 
     const String masterMacText = server_.arg(MASTER_MAC_ARG_PRIMARY);
-    const String statusIntervalText = server_.arg("status_send_interval_s");
-    const String sensorIntervalText = server_.arg("sensor_send_interval_s");
+    const String statusIntervalText = server_.arg(statusIntervalArgName());
+    const String sensorIntervalText = server_.arg(sensorIntervalArgName());
 
     uint8_t parsedMasterMac[6] = {0};
     if (!parseMacText(masterMacText.c_str(), parsedMasterMac)) {
@@ -658,7 +712,7 @@ void NodeProvisioningController::handleSave() {
         deviceHandler_->discardParsedDeviceSettings();
         sendResultPage(
             F("Eingabe ungueltig"),
-            F("status_send_interval_s ist ungueltig."),
+            String(statusIntervalLabel()) + F(" ist ungueltig."),
             true,
             400,
             true);
@@ -668,13 +722,13 @@ void NodeProvisioningController::handleSave() {
     uint32_t sensorIntervalS = 0UL;
     if (!parseUnsignedLongText(
             sensorIntervalText,
-            config_.minSendIntervalS,
-            config_.maxSendIntervalS,
+            effectiveMinSensorSendIntervalS(),
+            effectiveMaxSensorSendIntervalS(),
             sensorIntervalS)) {
         deviceHandler_->discardParsedDeviceSettings();
         sendResultPage(
             F("Eingabe ungueltig"),
-            F("sensor_send_interval_s ist ungueltig."),
+            String(sensorIntervalLabel()) + F(" ist ungueltig."),
             true,
             400,
             true);
@@ -878,9 +932,13 @@ bool NodeProvisioningController::clearStoredSettings() {
 void NodeProvisioningController::update() {
     if (!initialized_) return;
 
+    updateSetupButton();
+
     if (*setupApActive_) {
         server_.handleClient();
     }
+
+    updateSetupIndicator();
 
     if (*restartPending_ &&
         (millis() - *restartRequestedAtMs_) >= config_.restartDelayMs) {
@@ -894,6 +952,111 @@ void NodeProvisioningController::update() {
 
 bool NodeProvisioningController::isSetupModeActive() const {
     return setupMode_ != nullptr && *setupMode_;
+}
+
+bool NodeProvisioningController::setupButtonConfigured() const {
+    return config_.setupButtonPin >= 0;
+}
+
+bool NodeProvisioningController::setupIndicatorConfigured() const {
+    return config_.setupIndicatorLedPin >= 0;
+}
+
+const char* NodeProvisioningController::statusIntervalArgName() const {
+    return fallbackText(config_.statusSendIntervalFieldName, STATUS_INTERVAL_ARG_DEFAULT);
+}
+
+const char* NodeProvisioningController::sensorIntervalArgName() const {
+    return fallbackText(config_.sensorSendIntervalFieldName, SENSOR_INTERVAL_ARG_DEFAULT);
+}
+
+const char* NodeProvisioningController::statusIntervalLabel() const {
+    return fallbackText(config_.statusSendIntervalLabel, statusIntervalArgName());
+}
+
+const char* NodeProvisioningController::sensorIntervalLabel() const {
+    return fallbackText(config_.sensorSendIntervalLabel, sensorIntervalArgName());
+}
+
+const char* NodeProvisioningController::statusIntervalHint() const {
+    return fallbackText(config_.statusSendIntervalHint, STATUS_INTERVAL_HINT_DEFAULT);
+}
+
+const char* NodeProvisioningController::sensorIntervalHint() const {
+    return fallbackText(config_.sensorSendIntervalHint, SENSOR_INTERVAL_HINT_DEFAULT);
+}
+
+void NodeProvisioningController::initializeSetupIo() {
+    if (setupButtonConfigured()) {
+        pinMode(config_.setupButtonPin, config_.setupButtonActiveLow ? INPUT_PULLUP : INPUT);
+    }
+
+    if (setupIndicatorConfigured()) {
+        pinMode(config_.setupIndicatorLedPin, OUTPUT);
+        writeSetupIndicator(false);
+    }
+}
+
+void NodeProvisioningController::writeSetupIndicator(bool active) {
+    if (!setupIndicatorConfigured()) return;
+
+    digitalWrite(
+        config_.setupIndicatorLedPin,
+        active == config_.setupIndicatorLedActiveHigh ? HIGH : LOW);
+    setupIndicatorState_ = active;
+}
+
+void NodeProvisioningController::updateSetupButton() {
+    if (!setupButtonConfigured()) return;
+
+    const bool active =
+        config_.setupButtonActiveLow
+            ? (digitalRead(config_.setupButtonPin) == LOW)
+            : (digitalRead(config_.setupButtonPin) == HIGH);
+    const unsigned long jetztMs = millis();
+
+    if (active && !setupButtonLastActive_) {
+        setupButtonPressedAtMs_ = jetztMs;
+        setupButtonHoldConsumed_ = false;
+    }
+
+    if (active && !setupButtonHoldConsumed_ && !isSetupModeActive()) {
+        const unsigned long holdMs =
+            config_.setupButtonHoldMs > 0UL ? config_.setupButtonHoldMs : SETUP_BUTTON_HOLD_MS_DEFAULT;
+        if ((jetztMs - setupButtonPressedAtMs_) >= holdMs) {
+            setupButtonHoldConsumed_ = true;
+            log("INFO", "Setup-Taster gehalten, starte Setup-Modus");
+            enterSetupMode();
+        }
+    }
+
+    if (!active && setupButtonLastActive_) {
+        setupButtonPressedAtMs_ = 0UL;
+        setupButtonHoldConsumed_ = false;
+    }
+
+    setupButtonLastActive_ = active;
+}
+
+void NodeProvisioningController::updateSetupIndicator() {
+    if (!setupIndicatorConfigured()) return;
+
+    if (!isSetupModeActive()) {
+        if (setupIndicatorState_) {
+            writeSetupIndicator(false);
+        }
+        setupIndicatorLastBlinkMs_ = 0UL;
+        return;
+    }
+
+    const unsigned long blinkMs =
+        config_.setupIndicatorBlinkMs > 0UL ? config_.setupIndicatorBlinkMs : SETUP_INDICATOR_BLINK_MS_DEFAULT;
+    const unsigned long jetztMs = millis();
+    if (setupIndicatorLastBlinkMs_ == 0UL ||
+        (jetztMs - setupIndicatorLastBlinkMs_) >= blinkMs) {
+        writeSetupIndicator(!setupIndicatorState_);
+        setupIndicatorLastBlinkMs_ = jetztMs;
+    }
 }
 
 void NodeProvisioningController::log(const char* level, const char* format, ...) const {

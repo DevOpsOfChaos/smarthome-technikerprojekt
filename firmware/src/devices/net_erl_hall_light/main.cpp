@@ -1032,7 +1032,7 @@ void setup() {
     digitalWrite(PIN_STATUS_LED, LOW);
 #endif
 
-    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
+    SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
         SmartHome::NetErlProvisioning::makeConfig(
             DEVICE_ID,
             NET_ERL_HALL_STORAGE_NAMESPACE,
@@ -1040,6 +1040,12 @@ void setup() {
             DEFAULT_STORED_SENSOR_SEND_INTERVAL_S,
             MIN_REPORT_INTERVAL_S,
             MAX_REPORT_INTERVAL_S);
+    provisioningConfig.setupButtonPin = SETUP_BUTTON_PIN;
+    provisioningConfig.setupButtonActiveLow = SETUP_BUTTON_ACTIVE_LOW != 0;
+    provisioningConfig.setupButtonHoldMs = SETUP_BUTTON_HOLD_MS;
+    provisioningConfig.setupIndicatorLedPin = SETUP_INDICATOR_LED_PIN;
+    provisioningConfig.setupIndicatorLedActiveHigh = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0;
+    provisioningConfig.setupIndicatorBlinkMs = SETUP_INDICATOR_BLINK_MS;
 
     runtime.provisioning_bereit = nodeProvisioning.begin(
         provisioningConfig,

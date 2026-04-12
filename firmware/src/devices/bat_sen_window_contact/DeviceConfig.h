@@ -10,8 +10,8 @@
 
 #define BAT_SEN_REPORTING_MODE SH_REPORTING_SLEEP_EVENT
 
-// V1-Defaults: klar, klein, ohne Profil-Multiplex.
-#define BAT_SEN_DEFAULT_REPORT_INTERVAL_S 900U
+// V1-Defaults: klar, klein, Batterieprofil wird bewusst hier gewaehlt.
+#define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_CR2032
 #define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U
 #define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U
 

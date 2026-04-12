@@ -28,16 +28,54 @@ struct NodeBasisSnapshot {
 };
 
 struct NodeProvisioningConfig {
-    const char* setupApSsid;
-    const char* setupApPassword;
-    const char* storageNamespace;
-    const char* basisStorageKey;
-    uint32_t defaultStatusSendIntervalS;
-    uint32_t defaultSensorSendIntervalS;
-    uint32_t minSendIntervalS;
-    uint32_t maxSendIntervalS;
-    unsigned long restartDelayMs;
-    int apChannel;
+    NodeProvisioningConfig() = default;
+
+    NodeProvisioningConfig(
+        const char* setupApSsidValue,
+        const char* setupApPasswordValue,
+        const char* storageNamespaceValue,
+        const char* basisStorageKeyValue,
+        uint32_t defaultStatusSendIntervalSValue,
+        uint32_t defaultSensorSendIntervalSValue,
+        uint32_t minSendIntervalSValue,
+        uint32_t maxSendIntervalSValue,
+        unsigned long restartDelayMsValue,
+        int apChannelValue)
+        : setupApSsid(setupApSsidValue),
+          setupApPassword(setupApPasswordValue),
+          storageNamespace(storageNamespaceValue),
+          basisStorageKey(basisStorageKeyValue),
+          defaultStatusSendIntervalS(defaultStatusSendIntervalSValue),
+          defaultSensorSendIntervalS(defaultSensorSendIntervalSValue),
+          minSendIntervalS(minSendIntervalSValue),
+          maxSendIntervalS(maxSendIntervalSValue),
+          restartDelayMs(restartDelayMsValue),
+          apChannel(apChannelValue) {}
+
+    const char* setupApSsid = nullptr;
+    const char* setupApPassword = nullptr;
+    const char* storageNamespace = nullptr;
+    const char* basisStorageKey = nullptr;
+    uint32_t defaultStatusSendIntervalS = 0UL;
+    uint32_t defaultSensorSendIntervalS = 0UL;
+    uint32_t minSendIntervalS = 0UL;
+    uint32_t maxSendIntervalS = 0UL;
+    unsigned long restartDelayMs = 0UL;
+    int apChannel = 1;
+    const char* statusSendIntervalFieldName = "status_send_interval_s";
+    const char* sensorSendIntervalFieldName = "sensor_send_interval_s";
+    const char* statusSendIntervalLabel = "status_send_interval_s";
+    const char* sensorSendIntervalLabel = "sensor_send_interval_s";
+    const char* statusSendIntervalHint = "Statusintervall in Sekunden.";
+    const char* sensorSendIntervalHint = "Sensorintervall in Sekunden.";
+    uint32_t minSensorSendIntervalS = 0UL;
+    uint32_t maxSensorSendIntervalS = 0UL;
+    int setupButtonPin = -1;
+    bool setupButtonActiveLow = true;
+    unsigned long setupButtonHoldMs = 5000UL;
+    int setupIndicatorLedPin = -1;
+    bool setupIndicatorLedActiveHigh = true;
+    unsigned long setupIndicatorBlinkMs = 500UL;
 };
 
 using SetupLogFn = void (*)(const char* level, const char* message);
@@ -175,6 +213,20 @@ class NodeProvisioningController {
     void clearStoredMasterMac();
     void setStoredMasterMac(const uint8_t masterMac[6]);
     void log(const char* level, const char* format, ...) const;
+    void initializeSetupIo();
+    void updateSetupButton();
+    void updateSetupIndicator();
+    void writeSetupIndicator(bool active);
+    bool setupButtonConfigured() const;
+    bool setupIndicatorConfigured() const;
+    const char* statusIntervalArgName() const;
+    const char* sensorIntervalArgName() const;
+    const char* statusIntervalLabel() const;
+    const char* sensorIntervalLabel() const;
+    const char* statusIntervalHint() const;
+    const char* sensorIntervalHint() const;
+    uint32_t effectiveMinSensorSendIntervalS() const;
+    uint32_t effectiveMaxSensorSendIntervalS() const;
 
     NodeProvisioningConfig config_;
     bool* masterMacValid_;
@@ -192,6 +244,11 @@ class NodeProvisioningController {
     WebServer server_;
     bool routesConfigured_;
     bool initialized_;
+    bool setupButtonLastActive_;
+    bool setupButtonHoldConsumed_;
+    unsigned long setupButtonPressedAtMs_;
+    bool setupIndicatorState_;
+    unsigned long setupIndicatorLastBlinkMs_;
 };
 
 }  // namespace ShNodeProvisioning

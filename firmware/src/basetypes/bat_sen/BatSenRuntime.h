@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ShNodeProvisioning.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_sleep.h>
@@ -16,7 +17,8 @@
   #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-#include "AppConfig.h"
+#include "BatSenProvisioning.h"
+#include "DeviceConfig.h"
 #include "PinConfig.h"
 #include "../../../include/DebugConfig.h"
 #include "../../../include/ProjectVersion.h"
@@ -27,6 +29,10 @@ constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "BAT-SEN";
 constexpr char DATEI_VERSION[] = "0.1.0";
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
+static_assert(
+    sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
+    "BAT_SEN_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
 
 RTC_DATA_ATTR uint32_t RTC_BOOT_COUNTER = 0U;
 
@@ -54,6 +60,10 @@ struct GenericEventData {
 };
 
 struct NodeState {
+    bool provisioning_bereit;
+    bool setup_mode;
+    bool setup_ap_aktiv;
+    bool restart_pending;
     bool master_bekannt;
     bool master_mac_gueltig;
     bool state_report_offen;
@@ -63,9 +73,9 @@ struct NodeState {
     unsigned long letzter_state_ms;
     unsigned long letzte_batterie_probe_ms;
     unsigned long schlaf_ab_ms;
-    unsigned long report_interval_ms;
-    unsigned long wake_interval_s;
-    unsigned long rx_window_ms;
+    unsigned long restart_requested_at_ms;
+    uint32_t wake_interval_s;
+    uint32_t rx_window_ms;
     uint8_t master_mac[6];
     uint8_t naechste_seq;
     uint8_t battery_pct;
@@ -75,6 +85,7 @@ struct NodeState {
     uint32_t boot_counter;
     GenericStateChannels kanaele;
     GenericEventData event;
+    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
 };
 
 NodeState nodeStatus = {};
@@ -140,6 +151,15 @@ void logf(const char* level, const char* format, ...) {
     Serial.println(message);
 }
 
+void provisioningLog(const char* level, const char* message) {
+    if (!DEBUG_LOKAL_AKTIV || level == nullptr || message == nullptr) return;
+
+    Serial.print("[");
+    Serial.print(level);
+    Serial.print("] ");
+    Serial.println(message);
+}
+
 void copyText(char* target, size_t targetSize, const char* source) {
     if (!target || targetSize == 0U) return;
     if (!source) {
@@ -150,6 +170,33 @@ void copyText(char* target, size_t targetSize, const char* source) {
     strncpy(target, source, targetSize - 1U);
     target[targetSize - 1U] = '\0';
 }
+
+class BatSenProvisioningHandler final
+    : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
+  public:
+    const char* pageTitle() const override { return "BAT-SEN Provisioning"; }
+    const char* pageIntro() const override {
+        return "Master-Bindung, Wake-Takt und RX-Fenster fuer den Batteriepfad.";
+    }
+    const char* deviceSectionTitle() const override { return "BAT-SEN-Spezifisch"; }
+    const char* deviceSectionIntro() const override {
+        return "Batterieprofil und Pins sind Compile-Time-Geraetewerte.";
+    }
+
+    void loadDeviceDefaults() override {}
+    bool loadDeviceSettings(Preferences& /*prefs*/) override { return false; }
+    bool saveDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    bool clearDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    void captureDeviceSnapshot() override {}
+    void restoreDeviceSnapshot() override {}
+    bool parseDeviceSave(WebServer& /*server*/, String& /*errorText*/) override { return true; }
+    void applyParsedDeviceSettings() override {}
+    void discardParsedDeviceSettings() override {}
+    void appendDeviceFieldsHtml(String& /*page*/, WebServer* /*sourceServer*/) const override {}
+};
+
+SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
+BatSenProvisioningHandler batSenProvisioningHandler;
 
 uint16_t deltaU16(uint16_t a, uint16_t b) {
     return (a >= b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
@@ -405,7 +452,7 @@ bool sendeState() {
     payload.rain_raw = nodeStatus.kanaele.channel_u16_1;
     payload.button_flags = nodeStatus.kanaele.channel_mask_1;
     payload.fault = (nodeStatus.battery_fault || nodeStatus.kanaele.fault) ? 1U : 0U;
-    payload.report_interval_s = (uint16_t)(nodeStatus.report_interval_ms / 1000UL);
+    payload.report_interval_s = (uint16_t)nodeStatus.wake_interval_s;
 
     if (!sendePaket(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
         return false;
@@ -435,14 +482,65 @@ bool sendeEvent() {
     return true;
 }
 
+bool speichereNodeBasisMitRollback(
+    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& snapshot,
+    uint32_t vorherWakeIntervalS,
+    uint32_t vorherRxWindowMs) {
+    if (nodeProvisioning.saveCurrentState()) {
+        return true;
+    }
+
+    nodeProvisioning.restoreBasisSnapshot(snapshot);
+    nodeStatus.wake_interval_s = vorherWakeIntervalS;
+    nodeStatus.rx_window_ms = vorherRxWindowMs;
+    return false;
+}
+
+bool uebernehmeWakeInterval(uint32_t valueS) {
+    if (valueS < MIN_WAKE_INTERVAL_S || valueS > MAX_WAKE_INTERVAL_S) return false;
+
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot snapshot = {};
+    nodeProvisioning.captureBasisSnapshot(snapshot);
+    const uint32_t vorherWakeIntervalS = nodeStatus.wake_interval_s;
+    const uint32_t vorherRxWindowMs = nodeStatus.rx_window_ms;
+
+    nodeStatus.wake_interval_s = valueS;
+    nodeStatus.state_report_offen = true;
+    aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+    return speichereNodeBasisMitRollback(snapshot, vorherWakeIntervalS, vorherRxWindowMs);
+}
+
+bool uebernehmeRxWindow(uint32_t valueMs) {
+    if (valueMs < MIN_RX_WINDOW_MS || valueMs > MAX_RX_WINDOW_MS) return false;
+
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot snapshot = {};
+    nodeProvisioning.captureBasisSnapshot(snapshot);
+    const uint32_t vorherWakeIntervalS = nodeStatus.wake_interval_s;
+    const uint32_t vorherRxWindowMs = nodeStatus.rx_window_ms;
+
+    nodeStatus.rx_window_ms = valueMs;
+    nodeStatus.state_report_offen = true;
+    aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+    return speichereNodeBasisMitRollback(snapshot, vorherWakeIntervalS, vorherRxWindowMs);
+}
+
 void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
     if (payload.ack_status != SH_ACK_OK) {
         logf("WARN", "HELLO_ACK abgelehnt");
         return;
     }
 
-    memcpy(nodeStatus.master_mac, senderMac, sizeof(nodeStatus.master_mac));
-    nodeStatus.master_mac_gueltig = true;
+    if (!nodeStatus.master_mac_gueltig) {
+        logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
+        return;
+    }
+
+    if (senderMac == nullptr ||
+        memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) != 0) {
+        logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     nodeStatus.master_bekannt = true;
     nodeStatus.state_report_offen = true;
     stellePeerSicher(nodeStatus.master_mac);
@@ -450,7 +548,18 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     logf("INFO", "HELLO_ACK empfangen");
 }
 
-void verarbeiteCmd(const SmartHome::CmdPayload& payload) {
+bool senderIstProvisionierterMaster(const uint8_t* senderMac) {
+    return nodeStatus.master_mac_gueltig &&
+           senderMac != nullptr &&
+           memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) == 0;
+}
+
+void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::CmdPayload& payload) {
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "CMD ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         nodeStatus.state_report_offen = true;
         aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
@@ -460,31 +569,11 @@ void verarbeiteCmd(const SmartHome::CmdPayload& payload) {
 bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
     switch (payload.param_id) {
         case SH_CFG_REPORT_INTERVAL_S:
-            if (payload.value < MIN_REPORT_INTERVAL_S || payload.value > MAX_REPORT_INTERVAL_S) {
-                return false;
-            }
-            nodeStatus.report_interval_ms = (unsigned long)payload.value * 1000UL;
-            nodeStatus.state_report_offen = true;
-            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
-            return true;
-
         case SH_CFG_WAKE_INTERVAL_S:
-            if (payload.value < MIN_WAKE_INTERVAL_S || payload.value > MAX_WAKE_INTERVAL_S) {
-                return false;
-            }
-            nodeStatus.wake_interval_s = (unsigned long)payload.value;
-            nodeStatus.state_report_offen = true;
-            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
-            return true;
+            return uebernehmeWakeInterval(payload.value);
 
         case SH_CFG_RX_WINDOW_MS:
-            if (payload.value < MIN_RX_WINDOW_MS || payload.value > MAX_RX_WINDOW_MS) {
-                return false;
-            }
-            nodeStatus.rx_window_ms = (unsigned long)payload.value;
-            nodeStatus.state_report_offen = true;
-            aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
-            return true;
+            return uebernehmeRxWindow(payload.value);
 
         default:
             return false;
@@ -492,6 +581,11 @@ bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
 }
 
 void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    if (!senderIstProvisionierterMaster(senderMac)) {
+        logf("WARN", "CFG ignoriert: Sender ist nicht der provisionierte Master");
+        return;
+    }
+
     const bool ok = uebernehmeCfg(payload);
     if (header.flags & SH_FLAG_ACK_REQUEST) {
         sendeAck(senderMac, header.seq, header.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
@@ -514,7 +608,7 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
 
         case SH_MSG_CMD:
             if (header->payload_len == sizeof(SmartHome::CmdPayload)) {
-                verarbeiteCmd(*reinterpret_cast<const SmartHome::CmdPayload*>(payload));
+                verarbeiteCmd(senderMac, *reinterpret_cast<const SmartHome::CmdPayload*>(payload));
             }
             break;
 
@@ -564,6 +658,9 @@ void initialisiereFunk() {
     esp_now_register_send_cb(onEspNowSend);
     esp_now_register_recv_cb(onEspNowReceive);
     stellePeerSicher(BROADCAST_MAC);
+    if (nodeStatus.master_mac_gueltig) {
+        stellePeerSicher(nodeStatus.master_mac);
+    }
 }
 
 void initialisiereIO() {
@@ -595,6 +692,7 @@ void pollLokaleHooks() {
 
 bool darfInDeepSleep(unsigned long jetzt) {
     if (!DEEP_SLEEP_AKTIV) return false;
+    if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode || !nodeStatus.master_mac_gueltig) return false;
 
     if (nodeStatus.master_mac_gueltig &&
         (nodeStatus.state_report_offen || nodeStatus.event_report_offen || nodeStatus.event.vorhanden)) {
@@ -658,7 +756,6 @@ void setup() {
     nodeStatus = {};
     nodeStatus.boot_ms = millis();
     nodeStatus.letztes_hello_ms = nodeStatus.boot_ms - HELLO_RETRY_INTERVAL_MS;
-    nodeStatus.report_interval_ms = DEFAULT_REPORT_INTERVAL_S * 1000UL;
     nodeStatus.wake_interval_s = DEFAULT_WAKE_INTERVAL_S;
     nodeStatus.rx_window_ms = DEFAULT_RX_WINDOW_MS;
     nodeStatus.state_report_offen = true;
@@ -677,9 +774,60 @@ void setup() {
     nodeStatus.letzte_batterie_probe_ms = millis();
     aktualisiereSchlafFenster(DISCOVERY_WINDOW_MS);
 
+    SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
+        SmartHome::BatSenProvisioning::makeConfig(
+            DEVICE_ID,
+            DEFAULT_WAKE_INTERVAL_S,
+            DEFAULT_RX_WINDOW_MS,
+            MIN_WAKE_INTERVAL_S,
+            MAX_WAKE_INTERVAL_S,
+            MIN_RX_WINDOW_MS,
+            MAX_RX_WINDOW_MS);
+    provisioningConfig.setupButtonPin = SETUP_BUTTON_PIN;
+    provisioningConfig.setupButtonActiveLow = SETUP_BUTTON_ACTIVE_LOW != 0;
+    provisioningConfig.setupButtonHoldMs = SETUP_BUTTON_HOLD_MS;
+    provisioningConfig.setupIndicatorLedPin = SETUP_INDICATOR_LED_PIN;
+    provisioningConfig.setupIndicatorLedActiveHigh = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0;
+    provisioningConfig.setupIndicatorBlinkMs = SETUP_INDICATOR_BLINK_MS;
+
+    nodeStatus.provisioning_bereit = nodeProvisioning.begin(
+        provisioningConfig,
+        &nodeStatus.master_mac_gueltig,
+        nodeStatus.master_mac,
+        &nodeStatus.wake_interval_s,
+        &nodeStatus.rx_window_ms,
+        &nodeStatus.setup_mode,
+        &nodeStatus.setup_ap_aktiv,
+        &nodeStatus.restart_pending,
+        &nodeStatus.restart_requested_at_ms,
+        nodeStatus.setup_ap_ssid,
+        sizeof(nodeStatus.setup_ap_ssid),
+        &batSenProvisioningHandler,
+        provisioningLog);
+
+    if (!nodeStatus.provisioning_bereit) {
+        logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
+        return;
+    }
+
+    nodeStatus.wake_interval_s = nodeProvisioning.sanitizeStatusSendInterval(nodeStatus.wake_interval_s);
+    nodeStatus.rx_window_ms = nodeProvisioning.sanitizeSensorSendInterval(nodeStatus.rx_window_ms);
+
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
     logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
-    logf("INFO", "WakeReason=%u BootCounter=%lu", nodeStatus.wake_reason, (unsigned long)nodeStatus.boot_counter);
+    logf("INFO",
+         "WakeReason=%u BootCounter=%lu wake_interval_s=%lu rx_window_ms=%lu battery_profile=%u",
+         nodeStatus.wake_reason,
+         (unsigned long)nodeStatus.boot_counter,
+         (unsigned long)nodeStatus.wake_interval_s,
+         (unsigned long)nodeStatus.rx_window_ms,
+         (unsigned)BAT_SEN_BATTERY_PROFILE);
+
+    if (!nodeProvisioning.hasStoredMasterMac()) {
+        logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
+        nodeProvisioning.enterSetupMode();
+        return;
+    }
 
     initialisiereFunk();
     sendeHello();
@@ -687,6 +835,12 @@ void setup() {
 
 void loop() {
     const unsigned long jetzt = millis();
+
+    nodeProvisioning.update();
+    if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode) {
+        delay(LOOP_INTERVAL_MS);
+        return;
+    }
 
     pollLokaleHooks();
 
@@ -713,8 +867,9 @@ void loop() {
     const bool stateFaellig =
         nodeStatus.master_mac_gueltig &&
         (nodeStatus.state_report_offen ||
-         (nodeStatus.report_interval_ms > 0UL &&
-          (jetzt - nodeStatus.letzter_state_ms) >= nodeStatus.report_interval_ms));
+         (nodeStatus.wake_interval_s > 0UL &&
+          (jetzt - nodeStatus.letzter_state_ms) >=
+              ((unsigned long)nodeStatus.wake_interval_s * 1000UL)));
 
     if (stateFaellig) {
         if (sendeState()) {

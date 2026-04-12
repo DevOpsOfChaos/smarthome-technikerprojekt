@@ -18,7 +18,7 @@
   #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
-#include "AppConfig.h"
+#include "DeviceConfig.h"
 #include "PinConfig.h"
 #include "../../../include/DebugConfig.h"
 #include "../../../include/ProjectVersion.h"
@@ -618,13 +618,19 @@ void setup() {
         digitalWrite(PIN_STATUS_LED, LOW);
     }
 
-    const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
+    SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
         SmartHome::NetSenProvisioning::makeConfig(
             DEVICE_ID,
             DEFAULT_REPORT_INTERVAL_S,
             DEFAULT_SENSOR_SEND_INTERVAL_S,
             MIN_REPORT_INTERVAL_S,
             MAX_REPORT_INTERVAL_S);
+    provisioningConfig.setupButtonPin = SETUP_BUTTON_PIN;
+    provisioningConfig.setupButtonActiveLow = SETUP_BUTTON_ACTIVE_LOW != 0;
+    provisioningConfig.setupButtonHoldMs = SETUP_BUTTON_HOLD_MS;
+    provisioningConfig.setupIndicatorLedPin = SETUP_INDICATOR_LED_PIN;
+    provisioningConfig.setupIndicatorLedActiveHigh = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0;
+    provisioningConfig.setupIndicatorBlinkMs = SETUP_INDICATOR_BLINK_MS;
 
     nodeStatus.provisioning_bereit = nodeProvisioning.begin(
         provisioningConfig,

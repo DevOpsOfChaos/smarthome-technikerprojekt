@@ -40,24 +40,12 @@
 #define BAT_SEN_DISCOVERY_WINDOW_MS 25000UL
 #endif
 
-#ifndef BAT_SEN_DEFAULT_REPORT_INTERVAL_S
-#define BAT_SEN_DEFAULT_REPORT_INTERVAL_S 900U
-#endif
-
 #ifndef BAT_SEN_DEFAULT_WAKE_INTERVAL_S
 #define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U
 #endif
 
 #ifndef BAT_SEN_DEFAULT_RX_WINDOW_MS
 #define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U
-#endif
-
-#ifndef BAT_SEN_MIN_REPORT_INTERVAL_S
-#define BAT_SEN_MIN_REPORT_INTERVAL_S 30U
-#endif
-
-#ifndef BAT_SEN_MAX_REPORT_INTERVAL_S
-#define BAT_SEN_MAX_REPORT_INTERVAL_S 65535U
 #endif
 
 #ifndef BAT_SEN_MIN_WAKE_INTERVAL_S
@@ -92,12 +80,15 @@
 #define BAT_SEN_BATTERY_STATE_DELTA_PCT 1U
 #endif
 
-#ifndef BAT_SEN_BATTERY_EMPTY_MV
-#define BAT_SEN_BATTERY_EMPTY_MV 3000U
-#endif
+#define BAT_PROFILE_CR2032 1U
+#define BAT_PROFILE_2X_AA 2U
+#define BAT_PROFILE_3X_AA 3U
+#define BAT_PROFILE_2X_AAA 4U
+#define BAT_PROFILE_3X_AAA 5U
+#define BAT_PROFILE_LIION_1S 6U
 
-#ifndef BAT_SEN_BATTERY_FULL_MV
-#define BAT_SEN_BATTERY_FULL_MV 4200U
+#ifndef BAT_SEN_BATTERY_PROFILE
+#define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_LIION_1S
 #endif
 
 #ifndef BAT_SEN_BATTERY_DIVIDER_NUM
@@ -139,11 +130,8 @@ constexpr int WLAN_KANAL = BAT_SEN_WLAN_CHANNEL;
 
 constexpr unsigned long HELLO_RETRY_INTERVAL_MS = BAT_SEN_HELLO_RETRY_INTERVAL_MS;
 constexpr unsigned long DISCOVERY_WINDOW_MS = BAT_SEN_DISCOVERY_WINDOW_MS;
-constexpr unsigned long DEFAULT_REPORT_INTERVAL_S = BAT_SEN_DEFAULT_REPORT_INTERVAL_S;
 constexpr unsigned long DEFAULT_WAKE_INTERVAL_S = BAT_SEN_DEFAULT_WAKE_INTERVAL_S;
 constexpr unsigned long DEFAULT_RX_WINDOW_MS = BAT_SEN_DEFAULT_RX_WINDOW_MS;
-constexpr unsigned long MIN_REPORT_INTERVAL_S = BAT_SEN_MIN_REPORT_INTERVAL_S;
-constexpr unsigned long MAX_REPORT_INTERVAL_S = BAT_SEN_MAX_REPORT_INTERVAL_S;
 constexpr unsigned long MIN_WAKE_INTERVAL_S = BAT_SEN_MIN_WAKE_INTERVAL_S;
 constexpr unsigned long MAX_WAKE_INTERVAL_S = BAT_SEN_MAX_WAKE_INTERVAL_S;
 constexpr unsigned long MIN_RX_WINDOW_MS = BAT_SEN_MIN_RX_WINDOW_MS;
@@ -153,8 +141,28 @@ constexpr unsigned long BATTERY_SAMPLE_INTERVAL_MS = BAT_SEN_BATTERY_SAMPLE_INTE
 constexpr uint16_t BATTERY_STATE_DELTA_MV = BAT_SEN_BATTERY_STATE_DELTA_MV;
 constexpr uint8_t BATTERY_STATE_DELTA_PCT = BAT_SEN_BATTERY_STATE_DELTA_PCT;
 
-constexpr uint16_t BATTERY_EMPTY_MV = BAT_SEN_BATTERY_EMPTY_MV;
-constexpr uint16_t BATTERY_FULL_MV = BAT_SEN_BATTERY_FULL_MV;
+struct BatteryProfile {
+    uint16_t emptyMv;
+    uint16_t fullMv;
+};
+
+constexpr BatteryProfile batteryProfileFor(uint8_t profile) {
+    return profile == BAT_PROFILE_CR2032
+               ? BatteryProfile{2200U, 3000U}
+               : profile == BAT_PROFILE_2X_AA
+                     ? BatteryProfile{2000U, 3200U}
+                     : profile == BAT_PROFILE_3X_AA
+                           ? BatteryProfile{3000U, 4800U}
+                           : profile == BAT_PROFILE_2X_AAA
+                                 ? BatteryProfile{2000U, 3200U}
+                                 : profile == BAT_PROFILE_3X_AAA
+                                       ? BatteryProfile{3000U, 4800U}
+                                       : BatteryProfile{3000U, 4200U};
+}
+
+constexpr BatteryProfile SELECTED_BATTERY_PROFILE = batteryProfileFor(BAT_SEN_BATTERY_PROFILE);
+constexpr uint16_t BATTERY_EMPTY_MV = SELECTED_BATTERY_PROFILE.emptyMv;
+constexpr uint16_t BATTERY_FULL_MV = SELECTED_BATTERY_PROFILE.fullMv;
 constexpr uint16_t BATTERY_DIVIDER_NUM = BAT_SEN_BATTERY_DIVIDER_NUM;
 constexpr uint16_t BATTERY_DIVIDER_DEN = BAT_SEN_BATTERY_DIVIDER_DEN;
 constexpr uint8_t BATTERY_ADC_SAMPLE_COUNT = BAT_SEN_BATTERY_ADC_SAMPLE_COUNT;
@@ -165,9 +173,15 @@ constexpr bool GPIO_WAKE_AKTIV = BAT_SEN_ENABLE_GPIO_WAKE != 0;
 
 static_assert(BATTERY_DIVIDER_DEN > 0U, "BAT_SEN_BATTERY_DIVIDER_DEN darf nicht 0 sein.");
 static_assert(BATTERY_ADC_SAMPLE_COUNT > 0U, "BAT_SEN_BATTERY_ADC_SAMPLE_COUNT darf nicht 0 sein.");
-static_assert(BATTERY_FULL_MV > BATTERY_EMPTY_MV, "BAT_SEN_BATTERY_FULL_MV muss groesser sein als BAT_SEN_BATTERY_EMPTY_MV.");
-static_assert(DEFAULT_REPORT_INTERVAL_S >= MIN_REPORT_INTERVAL_S, "BAT_SEN_DEFAULT_REPORT_INTERVAL_S unter Minimum.");
-static_assert(DEFAULT_REPORT_INTERVAL_S <= MAX_REPORT_INTERVAL_S, "BAT_SEN_DEFAULT_REPORT_INTERVAL_S ueber Maximum.");
+static_assert(BATTERY_FULL_MV > BATTERY_EMPTY_MV, "BAT_SEN_BATTERY_PROFILE liefert ungueltige Spannungsgrenzen.");
+static_assert(
+    BAT_SEN_BATTERY_PROFILE == BAT_PROFILE_CR2032 ||
+        BAT_SEN_BATTERY_PROFILE == BAT_PROFILE_2X_AA ||
+        BAT_SEN_BATTERY_PROFILE == BAT_PROFILE_3X_AA ||
+        BAT_SEN_BATTERY_PROFILE == BAT_PROFILE_2X_AAA ||
+        BAT_SEN_BATTERY_PROFILE == BAT_PROFILE_3X_AAA ||
+        BAT_SEN_BATTERY_PROFILE == BAT_PROFILE_LIION_1S,
+    "BAT_SEN_BATTERY_PROFILE muss ein bekanntes BAT_PROFILE_* sein.");
 static_assert(DEFAULT_WAKE_INTERVAL_S >= MIN_WAKE_INTERVAL_S, "BAT_SEN_DEFAULT_WAKE_INTERVAL_S unter Minimum.");
 static_assert(DEFAULT_WAKE_INTERVAL_S <= MAX_WAKE_INTERVAL_S, "BAT_SEN_DEFAULT_WAKE_INTERVAL_S ueber Maximum.");
 static_assert(DEFAULT_RX_WINDOW_MS >= MIN_RX_WINDOW_MS, "BAT_SEN_DEFAULT_RX_WINDOW_MS unter Minimum.");
