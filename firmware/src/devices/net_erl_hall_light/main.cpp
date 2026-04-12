@@ -1079,8 +1079,7 @@ void setup() {
          (unsigned)runtime.auto_off_delay_s,
          (unsigned)runtime.auto_on_lux_threshold);
 
-    // Hall-Light hat keine lokale Setup-Tastatur.
-    // Ohne persistierte Master-Bindung geht der Geraetepfad deshalb direkt
+    // Ohne persistierte Master-Bindung geht der Geraetepfad direkt
     // in den projektweiten Provisioning-Modus statt blind normal weiterzulaufen.
     if (!nodeProvisioning.hasStoredMasterMac()) {
         logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");

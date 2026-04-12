@@ -246,6 +246,17 @@ uint64_t validiereWakeMask(uint64_t kandidatMask) {
     return gueltigMask;
 }
 
+void fuegeWakePinHinzu(uint64_t* highMask, uint64_t* lowMask, int pin, bool wakeHigh) {
+    if (highMask == nullptr || lowMask == nullptr) return;
+    if (pin < 0 || pin >= 64) return;
+
+    if (wakeHigh) {
+        *highMask |= (1ULL << (uint8_t)pin);
+    } else {
+        *lowMask |= (1ULL << (uint8_t)pin);
+    }
+}
+
 uint8_t berechneBatterieProzent(uint16_t batteryMv) {
     if (batteryMv <= BATTERY_EMPTY_MV) return 0U;
     if (batteryMv >= BATTERY_FULL_MV) return 100U;
@@ -710,24 +721,49 @@ void aktiviereWakeQuellen() {
     const uint64_t wakeUs = (uint64_t)nodeStatus.wake_interval_s * 1000000ULL;
     esp_sleep_enable_timer_wakeup(wakeUs);
 
-#if BAT_SEN_ENABLE_GPIO_WAKE
-    uint64_t wakeMask = device_wake_candidates();
-    if (PIN_WAKE_INPUT >= 0 && PIN_WAKE_INPUT < 64) {
-        wakeMask |= (1ULL << (uint8_t)PIN_WAKE_INPUT);
-    }
-    wakeMask = validiereWakeMask(wakeMask);
+#if BAT_SEN_ENABLE_GPIO_WAKE || SETUP_BUTTON_PIN >= 0
+    uint64_t wakeHighMask = 0ULL;
+    uint64_t wakeLowMask = 0ULL;
 
-    if (wakeMask == 0ULL) {
+#if BAT_SEN_ENABLE_GPIO_WAKE
+    if (BAT_SEN_GPIO_WAKE_LEVEL_HIGH) {
+        wakeHighMask |= device_wake_candidates();
+    } else {
+        wakeLowMask |= device_wake_candidates();
+    }
+    if (PIN_WAKE_INPUT >= 0 && PIN_WAKE_INPUT < 64) {
+        fuegeWakePinHinzu(&wakeHighMask, &wakeLowMask, PIN_WAKE_INPUT, BAT_SEN_GPIO_WAKE_LEVEL_HIGH != 0);
+    }
+#endif
+
+#if SETUP_BUTTON_PIN >= 0
+    fuegeWakePinHinzu(&wakeHighMask, &wakeLowMask, SETUP_BUTTON_PIN, SETUP_BUTTON_ACTIVE_LOW == 0);
+#endif
+
+    wakeHighMask = validiereWakeMask(wakeHighMask);
+    wakeLowMask = validiereWakeMask(wakeLowMask);
+
+    if (wakeHighMask == 0ULL && wakeLowMask == 0ULL) {
         logf("WARN", "GPIO-Wake aktiv, aber kein gueltiger Wake-Pin konfiguriert");
         return;
     }
 
 #if CONFIG_IDF_TARGET_ESP32C3
-    const esp_deepsleep_gpio_wake_up_mode_t wakeMode =
-        BAT_SEN_GPIO_WAKE_LEVEL_HIGH ? ESP_GPIO_WAKEUP_GPIO_HIGH : ESP_GPIO_WAKEUP_GPIO_LOW;
-    const esp_err_t wakeErr = esp_deep_sleep_enable_gpio_wakeup(wakeMask, wakeMode);
+    esp_err_t wakeErr = ESP_OK;
+    if (wakeHighMask != 0ULL) {
+        wakeErr = esp_deep_sleep_enable_gpio_wakeup(wakeHighMask, ESP_GPIO_WAKEUP_GPIO_HIGH);
+    }
+    if (wakeLowMask != 0ULL && wakeErr == ESP_OK) {
+        wakeErr = esp_deep_sleep_enable_gpio_wakeup(wakeLowMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+    }
 #else
-    const esp_err_t wakeErr = esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_HIGH);
+    esp_err_t wakeErr = ESP_OK;
+    if (wakeHighMask != 0ULL) {
+        wakeErr = esp_sleep_enable_ext1_wakeup(wakeHighMask, ESP_EXT1_WAKEUP_ANY_HIGH);
+    }
+    if (wakeLowMask != 0ULL) {
+        logf("WARN", "LOW-Level-GPIO-Wake ist fuer dieses Ziel nicht verdrahtet");
+    }
 #endif
 
     if (wakeErr != ESP_OK) {
