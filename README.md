@@ -67,15 +67,15 @@ Bereits sichtbar und nachweisbar sind unter anderem:
 - Server-Phase-1-Basis mit MQTT-Ingest für Geräte und Master
 - gemeinsames Geräteobjekt und separater Masterpfad
 - minimales SQLite-Schema für Zustände und Nachweise
-- minimaler Command-/ACK-Pfad für `net_erl_01`
-- realer Roundtrip-Nachweis für den offiziellen Minimalpfad
-- Restart-/Kaltstart-Nachweis desselben Pfads
-- Recovery-Nachweise für Node- und Master-Pfad
-- fachlich korrigiertes Master-Recovery-Gate
-- nachgewiesener Master-Fix gegen den früheren Null-/Minimal-State nach Master-Recovery
+- Dashboard V1 als belastbare öffentliche Serverlinie
+- realer Gerätepfad `net_erl_hall_light` mit überprüftem Normalbetrieb
+- real nachgewiesener Setup-Pfad für Hall-Light
+- realer Gerätepfad `net_sen_env_bme280_veml_rain` mit BME280, VEML7700 und digitalem Regenpfad
+- real nachgewiesener Setup-Pfad für `net_sen`
+- reale Entwicklungs- und Verifikationsnachweise unter `PROTOKOLL/`
 
 Wichtig:
-Das Repo zeigt damit bereits einen **real belastbaren technischen Kern**, ohne künstlich zu behaupten, dass das Gesamtsystem schon vollständig fertig wäre.
+Das Repo zeigt damit bereits einen **real belastbaren technischen Kern** aus Server, Master und konkreten Gerätepfaden, ohne künstlich zu behaupten, dass das Gesamtsystem schon vollständig fertig wäre.
 
 ## Einstieg für Leser
 

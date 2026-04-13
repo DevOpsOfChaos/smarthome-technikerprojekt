@@ -1,10 +1,11 @@
 # Aktueller Status und nächste Schritte
 
 ## Öffentlicher Stand
-Das öffentliche Repo enthält bereits eine klar erkennbare und real belegte Grundlinie für:
+Das öffentliche Repo enthält inzwischen eine klar erkennbare und real belegte technische Linie für:
 - Projektstruktur
 - öffentliche technische Dokumentation
 - Server-Phase-1-Basis
+- konkrete reale Gerätepfade
 - Tests und Nachweise
 
 Im Serverbereich ist aktuell eine belastbare Phase-1-Linie sichtbar:
@@ -12,22 +13,40 @@ Im Serverbereich ist aktuell eine belastbare Phase-1-Linie sichtbar:
 - gemeinsames Geräteobjekt
 - separater Masterpfad
 - minimales SQLite-Schema als Grundlage
-- Dashboard V1 mit Geräteübersicht und versteckter Detailseite
+- Dashboard V1 mit Geräteübersicht und Detailpfad
 
 ## Bereits real nachgewiesen
 Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Protokolle und Testläufe belegt:
 
+### Server / Master / NET-ZRL
 - realer Command-/ACK-/State-Roundtrip für `net_erl_01`
 - erfolgreicher Restart-/Kaltstart-Nachweis des Minimalpfads
 - erfolgreicher Node-Recovery-Nachweis für denselben Pfad
 - Diagnose eines zu strengen Master-Recovery-Gates
 - fachlich korrigierte Bewertung von Master-Recovery über frischen Master-Status plus frische `availability` und `state`
-- grüner gegateter Mehrstufenlauf nach Gate-Korrektur
 - Diagnose eines echten Master-Fehlers hinter Null-/Minimal-States nach Master-Recovery
 - kleinster gezielter Fix im Master gegen dieses Wegsanitisieren valider State-Werte
 - realer Hardware-Rerun des Master-Fixes auf `MASTER-001`
+- belastbarer Dashboard-/`net_zrl`-Stand als öffentliche V1-Linie
+- erneuter Latest-Flash-/Kommunikationsnachweis für `net_zrl`
 
-Damit ist der öffentliche Stand kein bloßer Strukturentwurf mehr, sondern ein bereits belastbar nachgewiesener technischer Kern.
+### NET-ERL Hall-Light
+- realer Gerätepfad `net_erl_hall_light`
+- überprüfter Normalbetrieb gegen den echten Master
+- real nachgewiesener Setup-Pfad über den konkreten Gerätepfad
+- Provisioning und Rückkehr in den Normalmodus praktisch belegt
+
+### NET-SEN Außensensor
+- realer Gerätepfad `net_sen_env_bme280_veml_rain`
+- enger Device-ID-Fix auf protokollgültigen Gerätepfad
+- realer Build-/Flash-/Kommunikationsnachweis
+- BME280 real belegt
+- VEML7700 real belegt
+- digitaler Regenpfad real belegt
+- MQTT-State real belegt
+- Setup-Pfad real belegt
+
+Damit ist der öffentliche Stand kein bloßer Strukturentwurf mehr, sondern ein bereits belastbar nachgewiesener technischer Kern aus Server, Master und konkreten Gerätepfaden.
 
 ## Was dieser Stand bedeutet
 Der öffentliche Stand ist **nicht** als vollständiges Endsystem zu verstehen.
@@ -35,39 +54,39 @@ Er ist die aktuelle offizielle technische Linie, auf die weitere Arbeit sauber a
 
 Wichtig ist dabei:
 - zuerst fachliche Mitte stabil
-- dann saubere Persistenz und sichere Ableitungen
-- dann Bedienpfade und Ansichten breiter ausbauen
+- dann konkrete Gerätepfade sauber und ehrlich belegen
+- dann Persistenz, UI-Ableitungen und zusätzliche Pfade kontrolliert erweitern
 - Komfortfunktionen erst danach
 
 ## Bereits sichtbar im Repo
 - grundlegende öffentliche Projektdokumentation
 - technische Trennung von Geräteschicht, Master und Server
 - erste Server-Phase für Ingest, Zustandsmodell und kleines Dashboard V1
+- reale Nachweise für Hall-Light, `net_zrl` und `net_sen`
+- bestätigte Setup-Pfade für Hall-Light und `net_sen`
 - offizielle Nachweis- und Teststruktur
-- reale Recovery- und Roundtrip-Protokolle
-- bestätigter Master-Fix im belegten Hardwarepfad
 
 ## Bewusst noch nicht voll ausgebaut
 - breite Server-UI
 - Zeitreihenpfad als vollständige Sicht
-- breitere Command-Welt über den engen Minimalpfad hinaus
+- breite Command-Welt über den engen Kern hinaus
 - Komfortfunktionen, Automationen oder Zusatzwelten
-- Vollabdeckung aller Geräteklassen durch denselben Hardware-Nachweis
+- endgültiger `bat_sen`-Hardwarepfad
 
 Das ist keine Schwäche, sondern bewusste Scope-Kontrolle.
 
 ## Nächste sinnvolle technische Schritte
-1. belegten Phase-1-Kern weiter konsolidieren
-2. Persistenzpfad sauber und fachlich eng erweitern
-3. erst danach Commands, UI-Ableitungen und Zeitreihen breiter aufziehen
-4. zusätzliche Gerätepfade kontrolliert und nachweisbar ergänzen
+1. belegten Hauptkern weiter konsolidieren
+2. dokumentierte Gerätepfade und Nachweise sauber verdichten
+3. `bat_sen` erst wieder öffnen, wenn die passende Versorgung real vorliegt
+4. danach weitere Gerätepfade kontrolliert und nachweisbar ergänzen
 
 ## Öffentliche Repo-Perspektive
 Für Außenstehende soll das Repo jetzt schon professionell lesbar sein:
 - klare Projektlinie
 - sauberer Einstieg
-- keine unnötige interne Unordnung
-- nachvollziehbare Trennung zwischen bestätigtem Stand und späteren Ausbaustufen
+- nachvollziehbarer Unterschied zwischen belastbarem Stand und späteren Ausbaustufen
+- reale Nachweise statt bloßer Implementierungsbehauptung
 
 ## Empfehlung für Leser
 Wer den aktuellen technischen Kern verstehen will, liest als Nächstes:
