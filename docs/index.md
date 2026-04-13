@@ -32,16 +32,18 @@ Direkte Einstiege:
 
 ## Aktuell bestätigter öffentlicher Stand
 
-Der aktuelle öffentliche Stand zeigt bereits eine belastbare Phase-1-Linie mit:
+Der aktuelle öffentliche Stand zeigt bereits eine belastbare Linie aus Serverkern **und** konkreten real belegten Gerätepfaden.
 
+Belastbar sichtbar sind:
 - MQTT-Ingest für Geräte und Master
-- gemeinsamem Geräteobjekt
-- minimalem SQLite-Pfad
-- minimalem Command-/ACK-Pfad für `net_erl_01`
-- realem Roundtrip-Nachweis
-- Restart- und Recovery-Nachweisen für den Minimalpfad
-- fachlich korrigiertem Master-Recovery-Gate
-- nachgewiesenem Master-Fix gegen Null-/Minimal-State nach Master-Recovery
+- gemeinsames Geräteobjekt
+- minimales SQLite-Fundament
+- Dashboard-V1-Grundlinie
+- realer Gerätepfad `net_erl_hall_light`
+- real bestätigter Setup-Pfad für Hall-Light
+- realer Gerätepfad `net_sen_env_bme280_veml_rain`
+- real bestätigter Setup-Pfad für `net_sen`
+- reale Nachweise unter `PROTOKOLL/`
 
 Wichtig:
 Dies ist **keine fertige Produktplattform**, sondern ein kontrolliert wachsender, nachvollziehbarer Projektstand.
