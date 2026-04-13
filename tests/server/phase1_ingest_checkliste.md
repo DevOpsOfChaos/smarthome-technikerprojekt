@@ -14,17 +14,55 @@ Diese Checkliste prueft nur den Phase-1-Kern:
 
 ## Vorbereitung
 
-1. `cd server`
-2. `docker compose up -d`
-3. Node-RED unter `http://localhost:1880` oeffnen
-4. Debug-Ansicht beobachten
-5. warten, bis der SQLite-Node ohne Install-/Build-Fehler gestartet ist
+1. aus dem Repo-Root arbeiten
+2. fuer manuelle MQTT-Publishes in Windows PowerShell einmal den Container-Publish-Helfer setzen:
+
+```powershell
+function Publish-ServerMqtt {
+    param(
+        [string]$Topic,
+        [string]$Payload,
+        [switch]$Retain
+    )
+
+    $payloadBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Payload))
+    $retainFlag = if ($Retain) { "1" } else { "" }
+    $publishScript = 'if [ -n "$MQTT_RETAIN" ]; then printf "%s" "$MQTT_PAYLOAD_B64" | base64 -d | mosquitto_pub -h localhost -t "$MQTT_TOPIC" -r -s; else printf "%s" "$MQTT_PAYLOAD_B64" | base64 -d | mosquitto_pub -h localhost -t "$MQTT_TOPIC" -s; fi'
+
+    docker compose -f server/docker-compose.yml exec -T `
+        -e "MQTT_TOPIC=$Topic" `
+        -e "MQTT_PAYLOAD_B64=$payloadBase64" `
+        -e "MQTT_RETAIN=$retainFlag" `
+        mosquitto sh -lc $publishScript
+}
+```
+
+3. `docker compose -f server/docker-compose.yml up -d`
+4. Node-RED unter `http://localhost:1880` oeffnen
+5. Debug-Ansicht beobachten
+6. warten, bis der SQLite-Node ohne Install-/Build-Fehler gestartet ist
+
+## Enger Server-Vertrag-Smoke-Test unter PowerShell
+
+Dieser Smoke-Test prueft gezielt den aktuellen Server-Vertrag fuer numerische `caps`, `button_flags`, ACK-`source` und SQL-/Migrationsfehler beim Stack-Start. Er braucht keine lokal installierten Mosquitto-Tools auf dem Host, weil die MQTT-Publishes ueber den laufenden Compose-Service `mosquitto` laufen.
+
+Aus dem Repo-Root:
+
+```powershell
+.\tests\server\server_contract_smoke.ps1
+```
+
+Wenn der Stack bereits laeuft:
+
+```powershell
+.\tests\server\server_contract_smoke.ps1 -SkipStart
+```
 
 ## Entdopplung vorab pruefen
 
 Vor den MQTT-Tests kurz kontrollieren:
 
-```bash
+```powershell
 rg -n "global.get\\(\"topicRouter\"\\)|global.get\\(\"topicHandlers\"\\)|global.get\\(\"deviceStore\"\\)|global.get\\(\"sqliteWrites\"\\)" server/nodered/flows/active
 ```
 
@@ -37,7 +75,7 @@ Erwartung:
 
 Zusatzcheck:
 
-```bash
+```powershell
 rg -n "aliasMap|stateFields|configFields|coerceBoolean\\(|createDevice\\(|INSERT INTO devices|INSERT INTO device_state_latest" server/nodered/flows/active
 ```
 
@@ -50,16 +88,16 @@ Erwartung:
 
 Nach dem Start muss die Datenbankdatei vorhanden sein:
 
-```bash
-test -f server/sqlite/smarthome_phase1.db && echo ok
+```powershell
+Test-Path .\server\sqlite\smarthome_phase1.db
 ```
 
 ## Testgerät anlegen
 
 ### Meta senden
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/meta -r -m "{\"device_id\":\"net_erl_hall_light\",\"device_name\":\"Flurlicht\",\"device_class\":\"net_erl\",\"power_type\":\"mains\",\"caps\":81,\"fw_version\":\"0.1.0\",\"meta_schema_version\":1,\"control_mode\":\"relay_light\",\"config_profile\":\"hall_light\",\"reporting_mode\":\"hybrid\",\"sensor_mask\":\"TPL_______\",\"input_mask\":\"B____\"}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/meta" -Retain -Payload '{"device_id":"net_erl_hall_light","device_name":"Flurlicht","device_class":"net_erl","power_type":"mains","caps":81,"fw_version":"0.1.0","meta_schema_version":1,"control_mode":"relay_light","config_profile":"hall_light","reporting_mode":"hybrid","sensor_mask":"TPL_______","input_mask":"B____"}'
 ```
 
 Erwartung:
@@ -71,8 +109,8 @@ Erwartung:
 
 ## Availability prüfen
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/availability -r -m "{\"device_id\":\"net_erl_hall_light\",\"availability\":\"online\",\"online\":true}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/availability" -Retain -Payload '{"device_id":"net_erl_hall_light","availability":"online","online":true}'
 ```
 
 Erwartung:
@@ -86,8 +124,8 @@ Erwartung:
 
 ### Erster State
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/state -r -m "{\"device_id\":\"net_erl_hall_light\",\"relay_1\":true,\"motion\":true,\"lux\":120,\"fault\":false,\"report_interval_s\":60}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/state" -Retain -Payload '{"device_id":"net_erl_hall_light","relay_1":true,"motion":true,"lux":120,"fault":false,"report_interval_s":60}'
 ```
 
 Erwartung:
@@ -103,8 +141,8 @@ Erwartung:
 
 ### Cover-Meta senden
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/meta -r -m "{\"device_id\":\"net_zrl_demo\",\"device_name\":\"Rolladen Demo\",\"device_class\":\"net_zrl\",\"power_type\":\"mains\",\"caps\":8195,\"fw_version\":\"0.1.0\",\"meta_schema_version\":1,\"control_mode\":\"cover\",\"config_profile\":\"cover_basic\",\"reporting_mode\":\"hybrid\",\"sensor_mask\":\"__________\",\"input_mask\":\"B____\"}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_zrl_demo/meta" -Retain -Payload '{"device_id":"net_zrl_demo","device_name":"Rolladen Demo","device_class":"net_zrl","power_type":"mains","caps":8195,"fw_version":"0.1.0","meta_schema_version":1,"control_mode":"cover","config_profile":"cover_basic","reporting_mode":"hybrid","sensor_mask":"__________","input_mask":"B____"}'
 ```
 
 Erwartung:
@@ -115,8 +153,8 @@ Erwartung:
 
 ### Cover-State senden
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/state -r -m "{\"device_id\":\"net_zrl_demo\",\"cover_state\":\"closing\",\"cover_position\":35,\"cover_calibrated\":true}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_zrl_demo/state" -Retain -Payload '{"device_id":"net_zrl_demo","cover_state":"closing","cover_position":35,"cover_calibrated":true}'
 ```
 
 Erwartung:
@@ -131,8 +169,8 @@ Erwartung:
 
 ### Partiellen Cover-State pruefen
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/state -r -m "{\"device_id\":\"net_zrl_demo\",\"cover_state\":\"stopped\"}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_zrl_demo/state" -Retain -Payload '{"device_id":"net_zrl_demo","cover_state":"stopped"}'
 ```
 
 Erwartung:
@@ -144,8 +182,8 @@ Erwartung:
 
 ### Partieller State
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/state -r -m "{\"device_id\":\"net_erl_hall_light\",\"motion\":false}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/state" -Retain -Payload '{"device_id":"net_erl_hall_light","motion":false}'
 ```
 
 Erwartung:
@@ -158,8 +196,8 @@ Erwartung:
 
 ## Event prüfen
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/event -m "{\"device_id\":\"net_erl_hall_light\",\"event\":\"motion_detected\",\"event_type\":2,\"trigger\":1,\"param1\":0,\"param2\":0}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/event" -Payload '{"device_id":"net_erl_hall_light","event":"motion_detected","event_type":2,"trigger":1,"param1":0,"param2":0}'
 ```
 
 Erwartung:
@@ -173,8 +211,8 @@ Erwartung:
 
 ## ACK prüfen
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/ack -m "{\"device_id\":\"net_erl_hall_light\",\"request_id\":\"req-1\",\"channel\":\"command\",\"status\":\"ok\",\"status_code\":0,\"ack_msg_type\":5,\"ack_seq\":17,\"source\":\"node_ack\"}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/ack" -Payload '{"device_id":"net_erl_hall_light","request_id":"req-1","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":17,"source":"node_ack"}'
 ```
 
 Erwartung:
@@ -194,14 +232,14 @@ Der Platzhalter `net_erl_hall_light` taugt fuer den serverseitigen Ingest-Aufbau
 
 In einem zweiten Terminal vor dem HTTP-Aufruf den offiziellen Command-Capture starten:
 
-```bash
-mosquitto_sub -h localhost -t smarthome/device/net_erl_01/command -C 1 -v
+```powershell
+docker compose -f server/docker-compose.yml exec -T mosquitto mosquitto_sub -h localhost -t smarthome/device/net_erl_01/command -C 1 -v
 ```
 
 Dann den engen Server-Einstieg aufrufen:
 
-```bash
-curl -s -X POST http://localhost:1880/api/phase1/net-erl/relay-1 -H "Content-Type: application/json" -d "{\"device_id\":\"net_erl_01\",\"relay_1\":true}"
+```powershell
+curl.exe -s -X POST http://localhost:1880/api/phase1/net-erl/relay-1 -H "Content-Type: application/json" -d "{\"device_id\":\"net_erl_01\",\"relay_1\":true}"
 ```
 
 Erwartung:
@@ -213,14 +251,14 @@ Erwartung:
 
 Mit derselben `request_id` den ACK-Rueckweg pruefen:
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_01/ack -m "{\"device_id\":\"net_erl_01\",\"request_id\":\"<request_id_aus_http>\",\"channel\":\"command\",\"status\":\"ok\",\"status_code\":\"0\",\"ack_msg_type\":\"5\",\"ack_seq\":\"1\"}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_01/ack" -Payload '{"device_id":"net_erl_01","request_id":"<request_id_aus_http>","channel":"command","status":"ok","status_code":"0","ack_msg_type":"5","ack_seq":"1"}'
 ```
 
 Optional den sichtbaren Zielzustand nachziehen:
 
-```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_01/state -r -m "{\"device_id\":\"net_erl_01\",\"relay_1\":true}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_01/state" -Retain -Payload '{"device_id":"net_erl_01","relay_1":true}'
 ```
 
 Erwartung:
@@ -236,14 +274,14 @@ Fuer den Cover-Command-Pfad einen bekannten Cover-Node verwenden, zum Beispiel `
 
 In einem zweiten Terminal vor dem HTTP-Aufruf den offiziellen Command-Capture starten:
 
-```bash
-mosquitto_sub -h localhost -t smarthome/device/NET-ZRL-001/command -C 1 -v
+```powershell
+docker compose -f server/docker-compose.yml exec -T mosquitto mosquitto_sub -h localhost -t smarthome/device/NET-ZRL-001/command -C 1 -v
 ```
 
 Dann den engen Cover-Einstieg aufrufen:
 
-```bash
-curl -s -X POST http://localhost:1880/api/phase1/cover/command -H "Content-Type: application/json" -d "{\"device_id\":\"NET-ZRL-001\",\"command\":\"open\"}"
+```powershell
+curl.exe -s -X POST http://localhost:1880/api/phase1/cover/command -H "Content-Type: application/json" -d "{\"device_id\":\"NET-ZRL-001\",\"command\":\"open\"}"
 ```
 
 Erwartung:
@@ -255,8 +293,8 @@ Erwartung:
 
 Fuer Prozentanfahrt:
 
-```bash
-curl -s -X POST http://localhost:1880/api/phase1/cover/command -H "Content-Type: application/json" -d "{\"device_id\":\"NET-ZRL-001\",\"command\":\"set_position\",\"position\":42}"
+```powershell
+curl.exe -s -X POST http://localhost:1880/api/phase1/cover/command -H "Content-Type: application/json" -d "{\"device_id\":\"NET-ZRL-001\",\"command\":\"set_position\",\"position\":42}"
 ```
 
 Erwartung:
@@ -269,14 +307,14 @@ Erwartung:
 
 ### Masterstatus
 
-```bash
-mosquitto_pub -h localhost -t smarthome/master/master_1/status -r -m "{\"master_id\":\"master_1\",\"online\":true,\"wifi\":true,\"mqtt\":true,\"espnow\":true,\"fw\":\"0.1.0\"}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/master/master_1/status" -Retain -Payload '{"master_id":"master_1","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.1.0"}'
 ```
 
 ### Masterevent
 
-```bash
-mosquitto_pub -h localhost -t smarthome/master/master_1/event -m "{\"master_id\":\"master_1\",\"event\":\"mqtt_connected\",\"message\":\"broker online\",\"fw\":\"0.1.0\"}"
+```powershell
+Publish-ServerMqtt -Topic "smarthome/master/master_1/event" -Payload '{"master_id":"master_1","event":"mqtt_connected","message":"broker online","fw":"0.1.0"}'
 ```
 
 Erwartung:
@@ -289,25 +327,33 @@ Erwartung:
 
 ## SQLite-Inhalt stichprobenartig pruefen
 
-Ein kurzer Spot-Check gegen die lokale DB-Datei reicht:
+Ein kurzer Spot-Check im `nodered`-Container reicht:
 
-```bash
-python - <<'PY'
-import sqlite3
-db = sqlite3.connect("server/sqlite/smarthome_phase1.db")
-for sql in [
-    "select device_id, device_name from devices order by device_id",
-    "select device_id, online, relay_1, motion, lux, cover_state, cover_position, cover_calibrated, button_flags from device_state_latest order by device_id",
-    "select device_id, event_type, event_label, event_trigger from device_event_log order by id desc limit 3",
-    "select device_id, request_id, status, source from device_ack_log order by id desc limit 3",
-    "select master_id, online, wifi, mqtt, espnow from master_status order by master_id",
-    "select master_id, event, message from master_event_log order by id desc limit 3",
-]:
-    print("\\nSQL>", sql)
-    for row in db.execute(sql):
-        print(row)
-db.close()
-PY
+```powershell
+$SqliteSpotCheck = @'
+const sqlite3 = require('/data/node_modules/sqlite3');
+const db = new sqlite3.Database('/data/sqlite/smarthome_phase1.db');
+const queries = [
+  "select device_id, device_name from devices order by device_id",
+  "select device_id, online, relay_1, motion, lux, cover_state, cover_position, cover_calibrated, button_flags, last_ack_source from device_state_latest order by device_id",
+  "select device_id, event_type, event_label, event_trigger from device_event_log order by id desc limit 3",
+  "select device_id, request_id, status, source from device_ack_log order by id desc limit 3",
+  "select master_id, online, wifi, mqtt, espnow from master_status order by master_id",
+  "select master_id, event, message from master_event_log order by id desc limit 3"
+];
+function all(sql) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, (error, rows) => error ? reject(error) : resolve(rows || []));
+  });
+}
+(async () => {
+  for (const sql of queries) {
+    console.log("\nSQL>", sql);
+    console.log(JSON.stringify(await all(sql), null, 2));
+  }
+})().finally(() => db.close());
+'@
+docker compose -f server/docker-compose.yml exec -T nodered node -e $SqliteSpotCheck
 ```
 
 ## Abschluss
