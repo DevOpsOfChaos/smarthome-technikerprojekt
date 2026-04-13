@@ -1,0 +1,69 @@
+PROTOKOLL 2026-04-13 - NET-SEN Setup-Pfad Realtest
+
+Datum: 2026-04-13
+Geraetepfad: net_sen_env_bme280_veml_rain
+Ziel: Reale Verifikation des Setup-Pfads ueber fehlende Master-Bindung und manuellen Setup-Taster.
+
+Branch- und Commit-Kontext:
+- Repo: smarthome-technikerprojekt
+- Stand: oeffentlicher main
+- Pfad: firmware/src/devices/net_sen_env_bme280_veml_rain
+
+Vorab-Inspektion:
+- PinConfig.h setzt fuer diesen Pfad:
+  - SETUP_BUTTON_PIN = 2
+  - SETUP_BUTTON_ACTIVE_LOW = 1
+  - SETUP_BUTTON_HOLD_MS = 5000UL
+  - SETUP_INDICATOR_LED_PIN = 7
+  - SETUP_INDICATOR_LED_ACTIVE_HIGH = 1
+  - SETUP_INDICATOR_BLINK_MS = 500UL
+- Die gemeinsame Provisioning-Basis nutzt damit:
+  - Setup-Einstieg automatisch bei fehlender gespeicherter Master-MAC
+  - manuellen Setup-Einstieg ueber GPIO2-Hold
+  - blinkende Setup-LED auf GPIO7 im Setup-Modus
+
+Real beobachtete Testfaelle:
+
+1. Testfall ohne gespeicherte Master-MAC
+- Ausgangslage: keine Master-Bindung vorhanden
+- Erwartung: Geraet geht direkt in den Setup-Modus
+- Beobachtung:
+  - Setup-Modus wurde aktiviert
+  - GPIO7 blinkte sichtbar
+  - Setup-Seite war erreichbar
+  - Provisioning konnte gespeichert werden
+  - nach dem Speichern wechselte das Geraet automatisch in den normalen Modus
+  - GPIO7 ging danach wieder aus
+- Bewertung:
+  - automatischer Setup-Pfad bei fehlender Master-Bindung real bestaetigt
+
+2. Testfall manueller Setup-Einstieg ueber Taster
+- Ausgangslage: normaler Betrieb / gespeicherte Master-Bindung vorhanden
+- Bedienung: Setup-Taster an GPIO2 mehrere Sekunden gehalten
+- Erwartung: nach Hold-Zeit Wechsel in den Setup-Modus
+- Beobachtung:
+  - manueller Setup-Einstieg funktionierte
+  - Setup-Modus wurde aktiviert
+  - Setup-Seite war erreichbar
+  - Speichern funktionierte erneut
+  - Rueckkehr in den normalen Modus funktionierte anschliessend wieder korrekt
+- Bewertung:
+  - manueller Setup-Pfad ueber GPIO2-Hold real bestaetigt
+
+LED-Verhalten:
+- GPIO7 blinkte im Setup-Modus sichtbar
+- nach erfolgreichem Speichern / Rueckkehr in den normalen Modus war die LED wieder aus
+- damit ist auch der Setup-Indikator fuer diesen Pfad real bestaetigt
+
+Gesamtbewertung:
+- Der Setup-Pfad des net_sen-Geraets ist jetzt vollstaendig praktisch belegt:
+  - automatischer Setup-Einstieg bei fehlender Master-MAC funktioniert
+  - manueller Setup-Einstieg ueber GPIO2 funktioniert
+  - Setup-LED auf GPIO7 funktioniert sichtbar
+  - Setup-Seite ist erreichbar
+  - Speichern funktioniert
+  - Rueckkehr in den normalen Modus funktioniert
+
+Verdikt:
+- Setup-Pfad fuer net_sen real und vollstaendig nachgewiesen.
+- Keine weitere Firmware-Aenderung fuer diesen engen Setup-Block erforderlich.
