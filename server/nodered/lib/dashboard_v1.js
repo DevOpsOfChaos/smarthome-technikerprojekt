@@ -121,6 +121,7 @@ function formatStateValue(key, value) {
     if (key === "cover_moving") return value ? "Ja" : "Nein";
     if (["cover_position", "cover_target", "battery_pct"].includes(key)) return formatNumber(value, 0, "%");
     if (key === "battery_mv") return formatNumber(value, 0, "mV");
+    if (key === "button_flags") return formatNumber(value, 0, "");
     if (key === "temp_01c") return formatNumber(value, 10, "°C");
     if (key === "hum_01pct") return formatNumber(value, 10, "%");
     if (key === "pressure_hpa") return formatNumber(value, 0, "hPa");
@@ -138,6 +139,7 @@ function labelForStateKey(key) {
     const labels = {
         battery_mv: "Batterie",
         battery_pct: "Batteriestand",
+        button_flags: "Tasterflags",
         contact_open: "Kontakt",
         cover_direction: "Richtung",
         cover_moving: "Bewegung",
@@ -219,6 +221,7 @@ function buildStateFromRow(row) {
         "rain_raw",
         "battery_pct",
         "battery_mv",
+        "button_flags",
         "button_last_action",
         "button_last_action_at"
     ].forEach((key) => assignIfPresent(state, key, row[key]));
@@ -269,9 +272,7 @@ function buildConfigFromRow(row) {
         "auto_off_delay_s",
         "rain_threshold",
         "auto_up_time",
-        "auto_down_time",
-        "auto_up_position",
-        "auto_down_position"
+        "auto_down_time"
     ].forEach((key) => assignIfPresent(config, key, row[key]));
     const autoScheduleEnabled = toBooleanOrNull(row.auto_schedule_enabled);
     if (autoScheduleEnabled !== null) {
@@ -305,6 +306,7 @@ function buildLastAckFromRow(row) {
         status_code: row.last_ack_status_code || null,
         ack_msg_type: row.last_ack_msg_type || null,
         ack_seq: row.last_ack_seq || null,
+        source: row.last_ack_source || null,
         ack_at: row.last_ack_at || null
     };
 }
@@ -530,6 +532,7 @@ function buildOverviewQuery() {
         "    l.window_open,",
         "    l.battery_pct,",
         "    l.battery_mv,",
+        "    l.button_flags,",
         "    l.button_last_action,",
         "    l.button_last_action_at,",
         "    l.report_interval_s,",
@@ -539,8 +542,6 @@ function buildOverviewQuery() {
         "    l.auto_up_time,",
         "    l.auto_down_time,",
         "    l.auto_schedule_enabled,",
-        "    l.auto_up_position,",
-        "    l.auto_down_position,",
         "    l.last_event_type,",
         "    l.last_event_label,",
         "    l.last_event_trigger,",
@@ -553,6 +554,7 @@ function buildOverviewQuery() {
         "    l.last_ack_status_code,",
         "    l.last_ack_msg_type,",
         "    l.last_ack_seq,",
+        "    l.last_ack_source,",
         "    l.last_ack_at,",
         "    l.updated_at AS state_updated_at,",
         "    (SELECT COUNT(*) FROM master_status) AS master_count",
@@ -625,6 +627,7 @@ function buildDeviceDetailQuery(deviceId) {
         "    l.window_open,",
         "    l.battery_pct,",
         "    l.battery_mv,",
+        "    l.button_flags,",
         "    l.button_last_action,",
         "    l.button_last_action_at,",
         "    l.report_interval_s,",
@@ -634,8 +637,6 @@ function buildDeviceDetailQuery(deviceId) {
         "    l.auto_up_time,",
         "    l.auto_down_time,",
         "    l.auto_schedule_enabled,",
-        "    l.auto_up_position,",
-        "    l.auto_down_position,",
         "    l.last_event_type,",
         "    l.last_event_label,",
         "    l.last_event_trigger,",
@@ -648,6 +649,7 @@ function buildDeviceDetailQuery(deviceId) {
         "    l.last_ack_status_code,",
         "    l.last_ack_msg_type,",
         "    l.last_ack_seq,",
+        "    l.last_ack_source,",
         "    l.last_ack_at,",
         "    l.updated_at AS state_updated_at",
         "FROM devices AS d",

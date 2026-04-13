@@ -1,0 +1,44 @@
+# PROTOKOLL 2026-04-13 - Serververtrag vervollstaendigt
+
+## Ausgangslage
+
+Der Server verarbeitete den aktuellen Geraetepfad bereits modular ueber Topic-Routing, Runtime-Store, SQLite-Projektion und Dashboard. Die noch offene Luecke lag nicht in fehlender Generik, sondern in einzelnen offiziellen Vertragsfeldern, die aus dem aktuellen Firmware-/Masterpfad bereits ableitbar waren, serverseitig aber nicht durchgaengig ankamen.
+
+## Abgeleiteter Vertrag
+
+Der aktuelle Serververtrag wurde aus den vorhandenen Serverdateien, den aktiven Node-RED-Flows, der oeffentlichen Serverdokumentation sowie aus `firmware/lib/sh_protocol/` und der Master-Projektion in `firmware/src/basetypes/master/main.cpp` abgeleitet.
+
+Relevante offizielle Felder:
+
+- Meta: `device_id`, `device_name`, `device_class`, `power_type`, `fw_version`, `caps`, `mac_address`, `meta_schema_version`, `control_mode`, `config_profile`, `reporting_mode`, `sensor_mask`, `input_mask`
+- Availability: `device_id`, `availability`, `online`, `power_type`
+- State: `relay_1`, `relay_2`, `cover_mode`, `cover_state`, `cover_position`, `cover_calibrated`, `temp_01c`, `hum_01pct`, `lux`, `pressure_pa`, `gas_ohm`, `aqi`, `tvoc_ppb`, `eco2_ppm`, `motion`, `battery_pct`, `battery_mv`, `window_open`, `rain_raw`, `button_flags`, `fault`
+- Event: `event`, `event_type`, `trigger`, `param1`, `param2`
+- ACK: `request_id`, `channel`, `status`, `status_code`, `ack_msg_type`, `ack_seq`, `source`
+
+## Vorherige Luecken
+
+- `caps` wurde vom Master als numerische Bitmaske geliefert, vom Server aber nur als Liste sinnvoll normalisiert.
+- `button_flags` aus dem BAT-SEN-Statevertrag wurde nicht in Store, SQLite und Dashboard gefuehrt.
+- Events lieferten offiziell `event` und `trigger`; der Server hatte dafuer bereits Projektionfelder `event_label` und `event_trigger`, mappte sie aber nicht durchgaengig.
+- ACKs lieferten offiziell `source`; SQLite und Dashboard verloren diese Information.
+- Die Dashboard-Abfragen referenzierten lokale `auto_up_position`/`auto_down_position`-Spalten, die nicht zum SQLite-Schema gehoerten und nicht Teil des neutralen MQTT-Geraetevertrags sind.
+- Oeffentliche Texte sprachen an zentralen Stellen noch von einem vorlaeufigen V1-/Phase-1-Server, obwohl die beschriebene Linie der aktuelle Server ist.
+
+## Umsetzung
+
+- Numerische `caps`-Bitmasken werden in die bekannten Faehigkeitsnamen des aktuellen Protokolls normalisiert.
+- `button_flags` wird als offizielles Statefeld in Runtime-Store, SQLite-Projektion und Dashboard gefuehrt.
+- `event` wird auf `event_label` und `trigger` auf `event_trigger` projiziert.
+- `source` wird bei ACKs in Latest-State und ACK-Log persistiert und im Dashboard-Rohdatenblock sichtbar.
+- Die nicht vorhandenen `auto_up_position`/`auto_down_position`-SQLite-Referenzen wurden aus dem Dashboard entfernt.
+- Bestehende SQLite-Installationen bekommen enge Migrationsschritte fuer die neu benoetigten Spalten.
+- Die oeffentliche Kernbeschreibung wurde auf "aktueller Server" statt vorlaeufiger V1-/Phase-1-Sprache korrigiert. Historische Dateinamen, Datenbanknamen und bestehende API-Routen wurden nicht umbenannt.
+
+## Bewusst ausserhalb des Umfangs
+
+- Keine generische JSON-Ablage fuer unbekannte Zukunftsfelder.
+- Keine Sonderlogik fuer einzelne heute getestete Geraete.
+- Keine neue breite Command-Welt und keine Ausweitung auf Komfortautomationen.
+- Keine Aktivierung oder Erweiterung des pausierten BAT-SEN-Hardwarepfads.
+- Keine riskante Umbenennung historischer interner Dateinamen, Datenbankdateien oder `/api/phase1/...`-Routen.

@@ -124,6 +124,7 @@ function buildDeviceStateLatestUpsert(device) {
     window_open: device.state.window_open,
     battery_pct: device.state.battery_pct,
     battery_mv: device.state.battery_mv,
+    button_flags: device.state.button_flags,
     button_last_action: device.state.button_last_action,
     button_last_action_at: device.state.button_last_action_at,
     report_interval_s: device.config.report_interval_s,
@@ -145,6 +146,7 @@ function buildDeviceStateLatestUpsert(device) {
     last_ack_status_code: textOrNull(ack.status_code),
     last_ack_msg_type: textOrNull(ack.ack_msg_type),
     last_ack_seq: textOrNull(ack.ack_seq),
+    last_ack_source: textOrNull(ack.source),
     last_ack_at: ack.ack_at || null,
     updated_at: device.updated_at
   };
@@ -174,6 +176,7 @@ function buildDeviceAckInsert(deviceId, ack) {
     status_code: textOrNull(ack.status_code),
     ack_msg_type: textOrNull(ack.ack_msg_type),
     ack_seq: textOrNull(ack.ack_seq),
+    source: textOrNull(ack.source),
     occurred_at: ack.ack_at
   });
 }

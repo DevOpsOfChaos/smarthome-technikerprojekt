@@ -1,4 +1,4 @@
-# Aktive V1-Flows
+# Aktive Server-Flows
 
 - `00_boot.json`: gemeinsame Konfiguration und Initialisierung des Laufzeitzustands
 - `05_dashboard_runtime.json`: FlowFuse-Dashboard-Basis mit Uebersichts- und Detailseite

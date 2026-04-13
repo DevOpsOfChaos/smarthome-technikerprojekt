@@ -4,16 +4,16 @@
 Das öffentliche Repo enthält inzwischen eine klar erkennbare und real belegte technische Linie für:
 - Projektstruktur
 - öffentliche technische Dokumentation
-- Server-Phase-1-Basis
+- Serverbasis
 - konkrete reale Gerätepfade
 - Tests und Nachweise
 
-Im Serverbereich ist aktuell eine belastbare Phase-1-Linie sichtbar:
+Im Serverbereich ist aktuell eine belastbare Serverlinie sichtbar:
 - MQTT-Ingest für Geräte und Master
 - gemeinsames Geräteobjekt
 - separater Masterpfad
 - minimales SQLite-Schema als Grundlage
-- Dashboard V1 mit Geräteübersicht und Detailpfad
+- Dashboard mit Geräteübersicht und Detailpfad
 
 ## Bereits real nachgewiesen
 Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Protokolle und Testläufe belegt:
@@ -27,7 +27,7 @@ Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Pro
 - Diagnose eines echten Master-Fehlers hinter Null-/Minimal-States nach Master-Recovery
 - kleinster gezielter Fix im Master gegen dieses Wegsanitisieren valider State-Werte
 - realer Hardware-Rerun des Master-Fixes auf `MASTER-001`
-- belastbarer Dashboard-/`net_zrl`-Stand als öffentliche V1-Linie
+- belastbarer Dashboard-/`net_zrl`-Stand als öffentliche Serverlinie
 - erneuter Latest-Flash-/Kommunikationsnachweis für `net_zrl`
 
 ### NET-ERL Hall-Light
@@ -61,7 +61,7 @@ Wichtig ist dabei:
 ## Bereits sichtbar im Repo
 - grundlegende öffentliche Projektdokumentation
 - technische Trennung von Geräteschicht, Master und Server
-- erste Server-Phase für Ingest, Zustandsmodell und kleines Dashboard V1
+- aktueller Server für Ingest, Zustandsmodell und kleines Dashboard
 - reale Nachweise für Hall-Light, `net_zrl` und `net_sen`
 - bestätigte Setup-Pfade für Hall-Light und `net_sen`
 - offizielle Nachweis- und Teststruktur

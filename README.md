@@ -11,7 +11,7 @@ Im Mittelpunkt stehen:
 - **ESP-NOW** als Funkweg zwischen Geräten und Master
 - **ein Master** als einzige Brücke zwischen Funknetz und Server
 - **MQTT** ausschließlich zwischen Master und Server
-- **Node-RED** als aktueller Server- und Visualisierungskern
+- **Node-RED** als Server- und Visualisierungskern
 - eine Architektur, die **lehrerlesbar, modular und begründbar** bleibt
 
 ## Systemarchitektur in Kurzform
@@ -40,7 +40,7 @@ Er ist bewusst **kein halber Server** und **keine zweite Logikplattform**, sonde
 - technischer Knotenpunkt für Commands, ACKs und Statuspfade
 
 ### 3. Server
-Der Server bildet die aktuelle öffentliche Phase-1-Linie für:
+Der Server bildet die aktuelle öffentliche Serverlinie für:
 - MQTT-Ingest
 - Geräteobjekt und Zustandsmodell
 - SQLite-basierte Latest-State- und Log-Grundlage
@@ -64,10 +64,10 @@ Der aktuelle öffentliche Repo-Stand ist **kein fertiges Endprodukt**, sondern e
 
 Bereits sichtbar und nachweisbar sind unter anderem:
 - öffentliche Projektdokumentation und Architekturgrundlinie
-- Server-Phase-1-Basis mit MQTT-Ingest für Geräte und Master
+- Serverbasis mit MQTT-Ingest für Geräte und Master
 - gemeinsames Geräteobjekt und separater Masterpfad
 - minimales SQLite-Schema für Zustände und Nachweise
-- Dashboard V1 als belastbare öffentliche Serverlinie
+- Dashboard als belastbare öffentliche Serverlinie
 - realer Gerätepfad `net_erl_hall_light` mit überprüftem Normalbetrieb
 - real nachgewiesener Setup-Pfad für Hall-Light
 - realer Gerätepfad `net_sen_env_bme280_veml_rain` mit BME280, VEML7700 und digitalem Regenpfad
@@ -85,10 +85,10 @@ Wer das Projekt strukturiert verstehen will, startet hier:
 2. [Projektüberblick](docs/public/01_projektueberblick.md)
 3. [Architektur und Kommunikation](docs/public/02_architektur_und_kommunikation.md)
 4. [Aktueller Status und nächste Schritte](docs/public/03_aktueller_status_und_naechste_schritte.md)
-5. [Server-Schnellstart Phase 1](docs/public/04_server_schnellstart_phase1.md)
+5. [Server-Schnellstart](docs/public/04_server_schnellstart_phase1.md)
 
 Für den aktuellen Serverkern zusätzlich sinnvoll:
-- [Server V1 Überblick](docs/public/server/01_server_v1_ueberblick.md)
+- [Server Überblick](docs/public/server/01_server_v1_ueberblick.md)
 - [Geräteobjekt und MQTT-Ingest](docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md)
 
 ## Repo-Struktur

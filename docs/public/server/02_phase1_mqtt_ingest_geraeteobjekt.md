@@ -1,4 +1,4 @@
-# Phase 1 MQTT-Ingest und Geräteobjekt
+# MQTT-Ingest und Geräteobjekt
 
 ## Ingest-Regeln
 
@@ -21,7 +21,7 @@ Die aktiven Flows enthalten nur noch die Node-RED-Bruecken fuer:
 
 ## Minimaler Command-Ausgang
 
-Phase 1.3 fuehrt enge offizielle Server-Ausgaenge ein:
+Der aktuelle Server fuehrt enge offizielle Server-Ausgaenge:
 
 - HTTP-Eingaenge: `POST /api/phase1/net-erl/relay-1` und `POST /api/phase1/cover/command`
 - MQTT-Ziel: `smarthome/device/<device_id>/command`
@@ -48,7 +48,7 @@ Fuer Cover gibt es jetzt denselben engen serverseitigen Ausgang auf demselben MQ
 - aktualisiert `identity` und `meta`
 - ersetzt die bisher bekannte Metasicht
 - darf unbekannte Geraete auto-anlegen
-- leitet die faehigkeitsnahe Sicht aus `caps` und `device_class` ab
+- leitet die faehigkeitsnahe Sicht aus numerischer `caps`-Bitmaske oder aus `caps`-Listen sowie `device_class` ab
 - ist fachlich Geraetebeschreibung plus Handshake-Sicht, nicht die Hauptwahrheit fuer Recovery
 - nach einem reinen Master-Neustart ist ohne neues Node-`HELLO` keine frische `meta`-Wiederveroeffentlichung garantiert
 
@@ -62,7 +62,8 @@ Fuer Cover gibt es jetzt denselben engen serverseitigen Ausgang auf demselben MQ
 ### `state`
 
 - aktualisiert nur bekannte State-Felder
-- traegt fuer `cover` minimal `cover_state`, optional `cover_position` und `cover_calibrated`
+- traegt fuer `cover` `cover_mode`, `cover_state`, optional `cover_position` und `cover_calibrated`
+- traegt fuer batteriebetriebene Sensoren `battery_pct`, `battery_mv`, `window_open`, `rain_raw` und `button_flags`
 - spiegelt wenige echte Laufzeitparameter nach `config`
 - setzt `last_seen_at`
 - behandelt fehlende Felder nicht als Loeschsignal
@@ -70,11 +71,13 @@ Fuer Cover gibt es jetzt denselben engen serverseitigen Ausgang auf demselben MQ
 ### `event`
 
 - schreibt nur in `last_event`
+- mappt das vom Master gelieferte `event` auf `event_label` und `trigger` auf `event_trigger`
 - ergaenzt den Zustand, ersetzt ihn nicht
 
 ### `ack`
 
 - schreibt nur in `last_ack`
+- haelt neben Request, Channel, Status, Status-Code, ACK-Typ und Sequenz auch die vom Master gelieferte `source`
 - ist fuer Nachvollziehbarkeit da, nicht fuer den fachlichen Hauptzustand
 
 ### `master/status` und `master/event`
@@ -109,7 +112,7 @@ Diese Struktur ist absichtlich simpel. Wer hier wieder Sondermodelle pro Geraete
 - Topic-Erkennung steht nur in `server/nodered/lib/topic_router.js`
 - Block-Updates stehen nur in `server/nodered/lib/device_store.js`
 - die Zuordnung Topic -> Handler steht nur in `server/nodered/lib/topic_handlers.js`
-- SQL-Statements fuer Phase 1 stehen nur in `server/nodered/lib/sqlite_writes.js`
+- SQL-Statements fuer den aktuellen Server stehen nur in `server/nodered/lib/sqlite_writes.js`
 - der minimale Command-Bau steht nur in `server/nodered/lib/command_minimal.js`
 
 ## Unvermeidbare Node-RED-Bruecke
@@ -134,7 +137,7 @@ Fuer den aktuell oeffentlich bestaetigten Minimalpfad ist belegt:
 - der fruehere Null-/Minimal-State nach Master-Recovery war ein echter Master-Projektionsfehler und kein Server-Persistenzfehler
 - der Master-Fix ist per Hardware-Rerun auf `MASTER-001` fuer den realen Pfad bestaetigt
 
-## Phase-1-Grenze
+## Grenze
 
 Noch nicht Teil dieses Schritts:
 

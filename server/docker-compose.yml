@@ -77,21 +77,20 @@ services:
             });
           });
         }
+        async function ensureColumn(db, tableName, columnName, columnDefinition) {
+          const columns = await queryAll(db, "PRAGMA table_info(" + tableName + ")");
+          const hasColumn = columns.some((column) => column && column.name === columnName);
+          if (!hasColumn) {
+            await runSql(db, "ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
+          }
+        }
         async function ensurePhase1Migrations(db) {
-          const deviceColumns = await queryAll(db, "PRAGMA table_info(devices)");
-          const hasDashboardDisplayName = deviceColumns.some((column) => column && column.name === 'dashboard_display_name');
-          if (!hasDashboardDisplayName) {
-            await runSql(db, "ALTER TABLE devices ADD COLUMN dashboard_display_name TEXT");
-          }
-          const stateColumns = await queryAll(db, "PRAGMA table_info(device_state_latest)");
-          const hasCoverDirection = stateColumns.some((column) => column && column.name === 'cover_direction');
-          const hasCoverCalibrated = stateColumns.some((column) => column && column.name === 'cover_calibrated');
-          if (!hasCoverDirection) {
-            await runSql(db, "ALTER TABLE device_state_latest ADD COLUMN cover_direction TEXT");
-          }
-          if (!hasCoverCalibrated) {
-            await runSql(db, "ALTER TABLE device_state_latest ADD COLUMN cover_calibrated INTEGER");
-          }
+          await ensureColumn(db, "devices", "dashboard_display_name", "TEXT");
+          await ensureColumn(db, "device_state_latest", "cover_direction", "TEXT");
+          await ensureColumn(db, "device_state_latest", "cover_calibrated", "INTEGER");
+          await ensureColumn(db, "device_state_latest", "button_flags", "INTEGER");
+          await ensureColumn(db, "device_state_latest", "last_ack_source", "TEXT");
+          await ensureColumn(db, "device_ack_log", "source", "TEXT");
         }
         function ensureSchema() {
           return new Promise((resolve, reject) => {

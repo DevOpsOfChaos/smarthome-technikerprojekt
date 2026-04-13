@@ -1,4 +1,4 @@
-# Server V1
+# Server
 
 Bereichs-README fuer `server/`.
 Dieser Stand bleibt bewusst klein und kontrolliert.
@@ -10,7 +10,7 @@ Nicht diese Datei:
 
 ## Rolle der Serverbasis
 
-V1 liefert die kleine serverseitige Grundlage plus einen engen Dashboard-Schnitt:
+Der Server liefert die kleine serverseitige Grundlage plus einen engen Dashboard-Schnitt:
 
 - Mosquitto
 - Node-RED mit kleinem FlowFuse-Dashboard
@@ -19,7 +19,7 @@ V1 liefert die kleine serverseitige Grundlage plus einen engen Dashboard-Schnitt
 
 ## Scope
 
-- MQTT-Ingest fuer die engen V1-Themen
+- MQTT-Ingest fuer die engen aktuellen Themen
 - Topic-Routing in Device- und Masterpfad
 - gemeinsames Laufzeitobjekt pro Geraet
 - separater Masterzustand
@@ -55,12 +55,12 @@ Im Ordner `server/`:
 3. `docker compose up --build -d`
 4. `docker compose ps`
 
-Der echte V1-Startpfad liegt aktuell direkt in `docker-compose.yml`:
+Der echte Startpfad liegt aktuell direkt in `docker-compose.yml`:
 - Node-RED startet aus dem offiziellen `nodered/node-red:3.1`-Image.
-- SQLite-Schema, kleine V1-Migrationen, `flows.json` und die generierten Settings werden beim Containerstart inline vorbereitet.
-- `nodered/settings.js` bleibt die Basisdatei, die Laufzeit erweitert sie beim Start um den V1-`functionGlobalContext`.
+- SQLite-Schema, kleine Bestandsschema-Migrationen, `flows.json` und die generierten Settings werden beim Containerstart inline vorbereitet.
+- `nodered/settings.js` bleibt die Basisdatei, die Laufzeit erweitert sie beim Start um den benoetigten `functionGlobalContext`.
 
-## Offizielle V1-Dateien
+## Offizielle Serverdateien
 
 - `docker-compose.yml`
 - `.env.example`

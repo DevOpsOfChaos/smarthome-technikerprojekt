@@ -1,14 +1,14 @@
-# Server Schnellstart Phase 1
+# Server Schnellstart
 
 ## Ziel dieses Dokuments
 
-Diese Datei ist der kleinste ehrliche Einstieg in den aktuellen Server-V1-Stand.
+Diese Datei ist der kleinste ehrliche Einstieg in den aktuellen Serverstand.
 
 Sie beschreibt:
 - wie der Stack real startet
-- welche Oberflaechen in dieser Stufe wirklich vorhanden sind
+- welche Oberflaechen wirklich vorhanden sind
 - welche Laufzeitdateien dabei entstehen
-- was bewusst noch nicht zu diesem kleinen V1-Kern gehoert
+- was bewusst noch nicht zu diesem kleinen Serverkern gehoert
 
 ## Aktueller realer Serverstand
 
@@ -21,19 +21,19 @@ Der aktuelle Stand besteht aus:
 
 Wichtige Einordnung:
 - das ist ein kleiner kontrollierter Serverkern
-- die sichtbare V1-Oberflaeche ist das Dashboard mit Uebersicht und versteckter Detailseite
+- die sichtbare Oberflaeche ist das Dashboard mit Uebersicht und versteckter Detailseite
 - es ist bewusst noch keine breite Server- oder Komfortplattform
 
 ## Was `docker-compose.yml` real macht
 
-Der reale V1-Startpfad liegt aktuell direkt in `server/docker-compose.yml`.
+Der reale Startpfad liegt aktuell direkt in `server/docker-compose.yml`.
 
 Die Compose-Startlogik des Node-RED-Dienstes macht zusaetzlich:
 - Installation von `node-red-node-sqlite`, falls das Paket lokal noch fehlt
 - Initialisierung des SQLite-Schemas aus `server/sqlite/00_schema_phase1.sql`
-- Nachziehen kleiner Phase-1-Migrationen fuer `cover_direction` und `cover_calibrated`
+- Nachziehen kleiner Bestandsschema-Migrationen fuer Vertragsfelder
 - Zusammenbau aller JSON-Dateien aus `server/nodered/flows/active/` zu `server/nodered/flows.json`
-- Generierung einer temporaeren Node-RED-Settings-Datei mit dem benoetigten V1-`functionGlobalContext`
+- Generierung einer temporaeren Node-RED-Settings-Datei mit dem benoetigten `functionGlobalContext`
 
 Damit ist klar:
 - der Compose-Inline-Pfad ist die reale Startwahrheit
@@ -47,12 +47,12 @@ Damit ist klar:
 
 Das ist der technische Haupteinstieg fuer den laufenden Stack.
 
-### 2. Dashboard V1
+### 2. Dashboard
 
 - `http://localhost:1880/dashboard/`
 - `http://localhost:1880/dashboard/geraet?device=<device_id>`
 
-Das Dashboard V1 umfasst aktuell:
+Das Dashboard umfasst aktuell:
 - eine zentrale Geraeteuebersicht
 - eine versteckte Detailseite pro Geraet
 
@@ -82,8 +82,8 @@ Davon sind lokal und nicht Teil des Repo-Inhalts:
 
 - dass der Stack ueber `server/docker-compose.yml` hochkommt
 - dass die aktiven Flow-Dateien zu `server/nodered/flows.json` zusammengebaut werden
-- dass MQTT-Ingest, Runtime-State und SQLite-Persistenz ueber denselben kleinen V1-Kern laufen
-- dass das Dashboard V1 eine Geraeteuebersicht und eine versteckte Detailseite bereitstellt
+- dass MQTT-Ingest, Runtime-State und SQLite-Persistenz ueber denselben kleinen Serverkern laufen
+- dass das Dashboard eine Geraeteuebersicht und eine versteckte Detailseite bereitstellt
 
 ## Was dieser Stand nicht ist
 
@@ -92,7 +92,7 @@ Nicht erwarten:
 - Diagramme
 - Logs- oder MQTT-Konsole als Bedienflaeche
 - breite Automationen
-- Komfort-Commands als oeffentliche V1-Hauptsicht
+- Komfort-Commands als oeffentliche Hauptsicht
 - eine breite UI fuer alle denkbaren Ausbaustufen
 
 ## Weiterfuehrende Dateien

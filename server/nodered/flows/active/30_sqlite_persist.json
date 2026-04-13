@@ -11,7 +11,7 @@
     "type": "comment",
     "z": "tab_30_sqlite",
     "name": "Zentraler SQLite-Pfad",
-    "info": "Die Handler liefern nur noch vorbereitete Batch-Statements. Dieser Tab fuehrt sie gesammelt gegen die Phase-1-Datenbank aus.",
+    "info": "Die Handler liefern nur noch vorbereitete Batch-Statements. Dieser Tab fuehrt sie gesammelt gegen die Serverdatenbank aus.",
     "x": 190,
     "y": 60,
     "wires": []
@@ -59,7 +59,7 @@
     "mydb": "sqlitedb_30_phase1",
     "sqlquery": "batch",
     "sql": "",
-    "name": "Phase-1 SQLite batch",
+    "name": "Server SQLite batch",
     "x": 600,
     "y": 180,
     "wires": [

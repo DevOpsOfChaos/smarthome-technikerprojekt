@@ -1,11 +1,11 @@
-# Node-RED V1
+# Node-RED
 
-Dieser Ordner enthaelt die kleine Node-RED-Laufzeit fuer den engen Server-/Dashboard-V1-Pfad.
+Dieser Ordner enthaelt die kleine Node-RED-Laufzeit fuer den engen Server-/Dashboard-Pfad.
 
-- `flows/active/` enthaelt die produktiven V1-Flow-Fragmente
+- `flows/active/` enthaelt die produktiven Flow-Fragmente
 - `lib/` enthaelt kleine Hilfsmodule fuer Routing, Handler und SQL-Bausteine
 - `settings.js` ist die Basis fuer die Node-RED-Settings
-- der echte Startpfad liegt aktuell in `../docker-compose.yml`: dort werden SQLite, V1-Migrationen, `flows.json` und die erweiterten Settings beim Containerstart inline erzeugt
+- der echte Startpfad liegt aktuell in `../docker-compose.yml`: dort werden SQLite, Bestandsschema-Migrationen, `flows.json` und die erweiterten Settings beim Containerstart inline erzeugt
 
 Aktiv enthalten:
 - MQTT-Ingest

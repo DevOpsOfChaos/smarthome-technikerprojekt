@@ -34,6 +34,7 @@ const DEVICE_STATE_NORMALIZERS = {
   contact_open: normalizeBoolean,
   battery_pct: normalizeNumber,
   battery_mv: normalizeNumber,
+  button_flags: normalizeNumber,
   button_last_action: normalizeTextOrNull,
   button_last_action_at: normalizeTimestamp
 };
@@ -375,12 +376,13 @@ function applyEvent(device, payload, receivedAt = timeHelpers.nowIso()) {
 
   const raw = cloneObject(payload);
   const eventAt = normalizeTimestamp(raw.event_at || raw.occurred_at, receivedAt) || receivedAt;
+  const eventTrigger = Object.prototype.hasOwnProperty.call(raw, "event_trigger") ? raw.event_trigger : raw.trigger;
 
   device.last_event = {
     ...raw,
     event_type: normalizeTextOrNull(raw.event_type),
-    event_label: normalizeTextOrNull(raw.event_label),
-    event_trigger: normalizeTextOrNull(raw.event_trigger),
+    event_label: normalizeTextOrNull(raw.event_label || raw.event),
+    event_trigger: normalizeTextOrNull(eventTrigger),
     param1: normalizeTextOrNull(raw.param1),
     param2: normalizeTextOrNull(raw.param2),
     event_at: eventAt
@@ -408,6 +410,7 @@ function applyAck(device, payload, receivedAt = timeHelpers.nowIso()) {
     status_code: normalizeTextOrNull(raw.status_code),
     ack_msg_type: normalizeTextOrNull(raw.ack_msg_type),
     ack_seq: normalizeTextOrNull(raw.ack_seq),
+    source: normalizeTextOrNull(raw.source),
     ack_at: ackAt
   };
 
@@ -509,7 +512,7 @@ function buildDeviceRow(device) {
 
 /*
  * Diese Row bildet nur die realen Spalten aus `device_state_latest` ab.
- * Das Laufzeitobjekt darf mehr wissen, aber SQLite bekommt hier nur den offiziellen V1-Schnitt.
+ * Das Laufzeitobjekt darf mehr wissen, aber SQLite bekommt hier nur den offiziellen Serverschnitt.
  */
 function buildDeviceStateLatestRow(device) {
   const availability = cloneObject(device && device.availability);
@@ -548,6 +551,7 @@ function buildDeviceStateLatestRow(device) {
     window_open: state.window_open,
     battery_pct: state.battery_pct,
     battery_mv: state.battery_mv,
+    button_flags: state.button_flags,
     button_last_action: state.button_last_action,
     button_last_action_at: state.button_last_action_at,
     report_interval_s: config.report_interval_s,
@@ -569,6 +573,7 @@ function buildDeviceStateLatestRow(device) {
     last_ack_status_code: textOrNull(ack.status_code),
     last_ack_msg_type: textOrNull(ack.ack_msg_type),
     last_ack_seq: textOrNull(ack.ack_seq),
+    last_ack_source: textOrNull(ack.source),
     last_ack_at: ack.ack_at || null,
     updated_at: device.updated_at
   };

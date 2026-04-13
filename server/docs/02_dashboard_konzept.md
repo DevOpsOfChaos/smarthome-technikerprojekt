@@ -1,11 +1,11 @@
-# Dashboard-Konzept V1
+# Dashboard-Konzept
 
 ## Seiten
 
 - ├£bersicht
 - Ger├ñtedetail als kontextuelle Unterseite
 
-## V1-Ziel
+## Ziel
 
 - neue Ger├ñte sofort sichtbar
 - responsive Grundstruktur f├╝r Handy und Desktop

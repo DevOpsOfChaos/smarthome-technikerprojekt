@@ -20,7 +20,7 @@ Die Serverdarstellung soll langfristig nicht an fest verdrahteten Ger├ñtesond
 ## Aktueller belegter Serverbezug
 
 - real lokal belegt: MQTT-Ingest mit SQLite-Ablage und Influx-Schreibpfad f├╝r numerische Sensorwerte
-- Dashboard-V1 im ├Âffentlichen Repo bleibt ein enger Lesepfad auf Basis von `devices`, `device_state_latest` und `master_status`
+- Dashboard im ├Âffentlichen Repo bleibt ein enger Lesepfad auf Basis von `devices`, `device_state_latest` und `master_status`
 - der belastbare Gesamtstand und offene Nachweise stehen in `../../docs/14_test_und_nachweisstand.md`
 
 ## Verbindliche Server-Dokumente

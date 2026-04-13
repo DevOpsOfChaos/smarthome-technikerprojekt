@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS device_state_latest (
     window_open INTEGER,
     battery_pct REAL,
     battery_mv REAL,
+    button_flags INTEGER,
     button_last_action TEXT,
     button_last_action_at TEXT,
     report_interval_s INTEGER,
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS device_state_latest (
     last_ack_status_code TEXT,
     last_ack_msg_type TEXT,
     last_ack_seq TEXT,
+    last_ack_source TEXT,
     last_ack_at TEXT,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
@@ -96,6 +98,7 @@ CREATE TABLE IF NOT EXISTS device_ack_log (
     status_code TEXT,
     ack_msg_type TEXT,
     ack_seq TEXT,
+    source TEXT,
     occurred_at TEXT NOT NULL,
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );

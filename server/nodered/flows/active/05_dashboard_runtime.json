@@ -2,7 +2,7 @@
   {
     "id": "cfg_ui_base_v1",
     "type": "ui-base",
-    "name": "SmartHome Dashboard V1",
+    "name": "SmartHome Dashboard",
     "path": "/dashboard",
     "appIcon": "",
     "includeClientData": true,
@@ -22,7 +22,7 @@
     "id": "cfg_ui_theme_v1",
     "type": "ui-theme",
     "ui": "cfg_ui_base_v1",
-    "name": "Dashboard V1",
+    "name": "Dashboard",
     "colors": {
       "surface": "#111821",
       "primary": "#36c6aa",

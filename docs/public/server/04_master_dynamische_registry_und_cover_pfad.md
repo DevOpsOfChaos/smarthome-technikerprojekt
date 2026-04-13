@@ -3,12 +3,12 @@
 ## Zweck
 
 Diese Datei beschreibt eine Ziel- und Folgestufe.
-Sie ist nicht die Hauptbeschreibung des aktuellen kleinen Server-V1-Kerns.
+Sie ist nicht die Hauptbeschreibung des aktuellen kleinen Serverkerns.
 
-Der aktuelle oeffentliche V1-Stand liegt bei:
+Der aktuelle oeffentliche Serverstand liegt bei:
 - Compose-Inline-Start ueber `server/docker-compose.yml`
 - engem Ingest-/Store-/Persistenzkern
-- Dashboard V1 mit Uebersicht und versteckter Detailseite pro Geraet
+- Dashboard mit Uebersicht und versteckter Detailseite pro Geraet
 
 Diese Datei beschreibt die verbindliche Ziellinie fuer den Master-Umbau.
 

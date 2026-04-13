@@ -1,4 +1,4 @@
-# Server Basisarchitektur V1
+# Server Basisarchitektur
 
 ## Dienste
 
@@ -7,7 +7,7 @@
 - InfluxDB f├╝r Sensor-Zeitreihen
 - SQLite f├╝r operative Serverdaten
 
-## Broker-Betrieb V1
+## Broker-Betrieb
 
 - `server/config/mosquitto/mosquitto.conf` bleibt die einzige versionierte Broker-Vorlage
 - der Repo-Default bleibt anonym startbar, damit keine lokalen Zugangsdaten ins Repo m├╝ssen
@@ -21,15 +21,15 @@
 3. unbekannte Master und Nodes werden sofort in SQLite angelegt
 4. `availability`, `state`, `event` und `ack` bleiben im Laufzeitobjekt getrennt und werden im aktuellen SQLite-Schnitt als Roh-JSON gehalten
 5. numerische Sensorwerte aus `device/.../state` koennen parallel nach InfluxDB geschrieben werden
-6. das Dashboard liest im aktuellen engen V1-Schnitt nur aus SQLite und zeigt Geraeteuebersicht plus Geraetedetail
+6. das Dashboard liest im aktuellen engen Serverschnitt nur aus SQLite und zeigt Geraeteuebersicht plus Geraetedetail
 
 ## Realer Nachweisstand dieser Architektur
 
-- im Repo real belegt: MQTT-Ingest, SQLite-Ablage und der kleine Dashboard-V1-Lesepfad fuer Geraete
+- im Repo real belegt: MQTT-Ingest, SQLite-Ablage und der kleine Dashboard-Lesepfad fuer Geraete
 - das Dashboard liest `availability` kanonisch aus `device_state_latest.availability_json` und zeigt `state`, `meta`, `event`, `ack` und `diagnostics` roh auf der Detailseite
 - offen bleiben weitergehende Command-Pfade, Diagramme, Wetter, Logs, Automationen, weitere Basisgeraete und ein vollst├ñndiger Gesamtprojektnachweis
 
-## V1-Grenzen
+## Grenzen
 
 - keine Zusatzdienste au├ƒer Mosquitto, Node-RED und InfluxDB
 - keine Home-Assistant-Abh├ñngigkeit

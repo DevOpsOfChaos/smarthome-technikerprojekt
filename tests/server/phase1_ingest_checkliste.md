@@ -59,14 +59,14 @@ test -f server/sqlite/smarthome_phase1.db && echo ok
 ### Meta senden
 
 ```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/meta -r -m "{\"device_id\":\"net_erl_hall_light\",\"device_name\":\"Flurlicht\",\"device_class\":\"NET-ERL\",\"power_type\":\"mains\",\"caps\":[\"switchable\",\"motion\",\"lux\"],\"fw_version\":\"0.1.0\"}"
+mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/meta -r -m "{\"device_id\":\"net_erl_hall_light\",\"device_name\":\"Flurlicht\",\"device_class\":\"net_erl\",\"power_type\":\"mains\",\"caps\":81,\"fw_version\":\"0.1.0\",\"meta_schema_version\":1,\"control_mode\":\"relay_light\",\"config_profile\":\"hall_light\",\"reporting_mode\":\"hybrid\",\"sensor_mask\":\"TPL_______\",\"input_mask\":\"B____\"}"
 ```
 
 Erwartung:
 
 - Geraet wird auto-angelegt
 - `identity.device_id` und `identity.device_name` sind gesetzt
-- `meta.caps` enthaelt mindestens `switchable`, `motion`, `lux`, `online_state`, `fault_state`, `ack_tracking`
+- `meta.caps` enthaelt aus der numerischen Bitmaske mindestens `switchable`, `lux`, `motion`, `online_state`, `fault_state`, `ack_tracking`
 - `devices` enthaelt oder aktualisiert eine Zeile fuer `net_erl_hall_light`
 
 ## Availability prüfen
@@ -104,7 +104,7 @@ Erwartung:
 ### Cover-Meta senden
 
 ```bash
-mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/meta -r -m "{\"device_id\":\"net_zrl_demo\",\"device_name\":\"Rolladen Demo\",\"device_class\":\"NET-ZRL\",\"power_type\":\"mains\",\"caps\":[\"cover\"],\"fw_version\":\"0.1.0\"}"
+mosquitto_pub -h localhost -t smarthome/device/net_zrl_demo/meta -r -m "{\"device_id\":\"net_zrl_demo\",\"device_name\":\"Rolladen Demo\",\"device_class\":\"net_zrl\",\"power_type\":\"mains\",\"caps\":8195,\"fw_version\":\"0.1.0\",\"meta_schema_version\":1,\"control_mode\":\"cover\",\"config_profile\":\"cover_basic\",\"reporting_mode\":\"hybrid\",\"sensor_mask\":\"__________\",\"input_mask\":\"B____\"}"
 ```
 
 Erwartung:
@@ -159,13 +159,14 @@ Erwartung:
 ## Event prüfen
 
 ```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/event -m "{\"device_id\":\"net_erl_hall_light\",\"event\":\"motion_clear\",\"event_type\":\"motion\",\"trigger\":\"pir\",\"param1\":\"0\",\"param2\":\"0\"}"
+mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/event -m "{\"device_id\":\"net_erl_hall_light\",\"event\":\"motion_detected\",\"event_type\":2,\"trigger\":1,\"param1\":0,\"param2\":0}"
 ```
 
 Erwartung:
 
-- `last_event.event_type = motion`
-- `last_event.event_label = motion_clear`
+- `last_event.event_type = 2`
+- `last_event.event_label = motion_detected`
+- `last_event.event_trigger = 1`
 - normaler `state` bleibt unveraendert
 - `device_event_log` bekommt einen neuen Eintrag
 - `device_state_latest.last_event_*` wird mitgezogen
@@ -173,14 +174,15 @@ Erwartung:
 ## ACK prüfen
 
 ```bash
-mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/ack -m "{\"device_id\":\"net_erl_hall_light\",\"request_id\":\"req-1\",\"channel\":\"relay_1\",\"status\":\"ok\",\"status_code\":\"200\",\"ack_msg_type\":\"set_relay\",\"ack_seq\":\"17\"}"
+mosquitto_pub -h localhost -t smarthome/device/net_erl_hall_light/ack -m "{\"device_id\":\"net_erl_hall_light\",\"request_id\":\"req-1\",\"channel\":\"command\",\"status\":\"ok\",\"status_code\":0,\"ack_msg_type\":5,\"ack_seq\":17,\"source\":\"node_ack\"}"
 ```
 
 Erwartung:
 
 - `last_ack.request_id = req-1`
-- `last_ack.channel = relay_1`
+- `last_ack.channel = command`
 - `last_ack.status = ok`
+- `last_ack.source = node_ack`
 - normaler `state` bleibt unveraendert
 - `device_ack_log` bekommt einen neuen Eintrag
 - `device_state_latest.last_ack_*` wird mitgezogen
@@ -295,9 +297,9 @@ import sqlite3
 db = sqlite3.connect("server/sqlite/smarthome_phase1.db")
 for sql in [
     "select device_id, device_name from devices order by device_id",
-    "select device_id, online, relay_1, motion, lux, cover_state, cover_position, cover_calibrated from device_state_latest order by device_id",
-    "select device_id, event_type, event_label from device_event_log order by id desc limit 3",
-    "select device_id, request_id, status from device_ack_log order by id desc limit 3",
+    "select device_id, online, relay_1, motion, lux, cover_state, cover_position, cover_calibrated, button_flags from device_state_latest order by device_id",
+    "select device_id, event_type, event_label, event_trigger from device_event_log order by id desc limit 3",
+    "select device_id, request_id, status, source from device_ack_log order by id desc limit 3",
     "select master_id, online, wifi, mqtt, espnow from master_status order by master_id",
     "select master_id, event, message from master_event_log order by id desc limit 3",
 ]:

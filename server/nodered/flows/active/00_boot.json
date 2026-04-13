@@ -4,13 +4,13 @@
     "type": "tab",
     "label": "00_boot",
     "disabled": false,
-    "info": "Initialisiert den minimalen Laufzeitzustand fuer Phase 1."
+    "info": "Initialisiert den minimalen Laufzeitzustand fuer den aktuellen Server."
   },
   {
     "id": "comment_00_boot",
     "type": "comment",
     "z": "tab_00_boot",
-    "name": "Phase-1-Boot",
+    "name": "Server-Boot",
     "info": "Legt den gemeinsamen Runtime-State an. Die Fachlogik kommt ueber die globale Lib-Bruecke aus /data/lib/*.js.",
     "x": 170,
     "y": 80,

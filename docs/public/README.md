@@ -32,7 +32,7 @@ Nicht öffentlich ins Repo gehören:
 Der öffentliche Stand besteht inzwischen nicht mehr nur aus Architektur und Servergrundlage, sondern auch aus real belegten Gerätepfaden.
 
 Belastbar sichtbar sind:
-- Server-Phase-1-Kern mit MQTT-Ingest, Geräteobjekt und Dashboard-V1-Linie
+- Serverkern mit MQTT-Ingest, Geräteobjekt und Dashboard-Linie
 - `net_zrl` als real belastbarer Server-/Gerätepfad im öffentlichen Kern
 - `net_erl_hall_light` als real belegter konkreter Gerätepfad
 - real bestätigter Setup-Pfad für Hall-Light

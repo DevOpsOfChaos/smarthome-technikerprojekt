@@ -11,7 +11,7 @@
     "type": "comment",
     "z": "tab_10_ingest",
     "name": "MQTT Ingest",
-    "info": "Phase 1 verarbeitet nur meta, availability, state, event, ack sowie master status/event. Topic-Erkennung liegt zentral in /data/lib/topic_router.js.",
+    "info": "Der aktuelle Server verarbeitet meta, availability, state, event, ack sowie master status/event. Topic-Erkennung liegt zentral in /data/lib/topic_router.js.",
     "x": 150,
     "y": 60,
     "wires": []
