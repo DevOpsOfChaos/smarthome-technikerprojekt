@@ -5,7 +5,7 @@
 // Konkretes Geraet: net_sen-Umweltpfad mit BME280 + VEML7700 + digitalem Regensensor.
 // Regen wird aktuell als Event gemeldet; der net_sen-State-Payload hat noch kein Regenfeld.
 
-#define NET_SEN_DEVICE_ID "net_sen_02"
+#define NET_SEN_DEVICE_ID "NET-SEN-002"
 #define NET_SEN_DEVICE_NAME "NET-SEN Env BME280+VEML+Rain"
 #define NET_SEN_FW_VARIANT "net_sen_env_bme280_veml_rain"
 #define NET_SEN_DEVICE_CAPS (SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_PRESSURE | SH_CAP_RAIN)

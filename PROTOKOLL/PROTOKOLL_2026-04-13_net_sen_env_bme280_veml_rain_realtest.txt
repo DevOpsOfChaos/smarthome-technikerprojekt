@@ -1,0 +1,116 @@
+PROTOKOLL 2026-04-13 - net_sen_env_bme280_veml_rain Realtest
+
+Testgegenstand
+- Public Repo: smarthome-technikerprojekt
+- Branch: sidequest/net-sen-outdoor-realtest
+- Ausgangscommit: 266d73d
+- PlatformIO-Env: net_sen_env_bme280_veml_rain
+- Zielgeraet: NET-SEN Outdoor-Sensorpfad mit BME280, VEML7700 und digitalem Regenmodul
+
+Firmware-Fit-Pruefung vor Flash
+- platformio.ini enthaelt env:net_sen_env_bme280_veml_rain mit ESP32-C3-Board und passenden BME280/VEML7700-Abhaengigkeiten.
+- PinConfig.h entsprach dem Zielaufbau:
+  - I2C SDA GPIO0
+  - I2C SCL GPIO1
+  - Rain DO GPIO3
+  - Rain active-low mit Pullup
+  - Setup Button GPIO2 active-low, Hold 5000 ms
+  - Setup LED GPIO7 active-high, Blink 500 ms
+- DeviceConfig.h meldete BME280/VEML7700/Rain als aktiven net_sen-Pfad.
+- NetSenRuntime.h bindet I2C, Sensor-Hooks, Event-Hooks, HELLO/HEARTBEAT/STATE und Setup-Provisioning ein.
+- ShNodeProvisioning initialisiert Setup-Button und Setup-LED und startet den Setup-AP nur bei fehlender Master-Bindung oder gehaltenem Setup-Taster.
+- Erstes Fit-Urteil: build- und pinseitig testbar. Diese Einschaetzung war unvollstaendig, weil die Device-ID zunaechst nicht zum Master-Protokollvertrag passte.
+
+Build
+- pio run -e net_sen_env_bme280_veml_rain: SUCCESS
+- Nach Device-ID-Fix erneut: pio run -e net_sen_env_bme280_veml_rain: SUCCESS
+
+COM-Port-Evidenz
+- COM3: USB VID:PID=303A:1001, SER=20:6E:F1:6D:92:C0, als Master verwendet.
+- COM4: USB VID:PID=303A:1001, SER=8C:D0:B2:A8:B4:AB, als net_sen-Ziel verwendet.
+- Upload auf COM4 bestaetigte ESP32-C3, MAC 8c:d0:b2:a8:b4:ab.
+
+Flash
+- Erstflash: net_sen_env_bme280_veml_rain auf COM4: SUCCESS.
+- Realtest zeigte danach blockierenden Vertragsfehler:
+  - Sensor: HELLO_ACK abgelehnt
+  - Master: HELLO abgelehnt: ungueltige device_id=net_sen_02
+- Engster Fix:
+  - NET_SEN_DEVICE_ID von net_sen_02 auf NET-SEN-002 geaendert.
+- Rebuild und Reflash auf COM4: SUCCESS.
+
+Sensorbeobachtungen nach Fix
+- Boot:
+  - Gemeinsame Node-Basis geladen.
+  - Keine geraetespezifischen Setup-Daten gefunden. Defaults aktiv.
+  - NET-SEN v0.2.0 startet (0.4.0).
+  - Node=NET-SEN-002, Variant=net_sen_env_bme280_veml_rain.
+- BME280:
+  - BME280 nicht gefunden (0x76/0x77).
+  - Wiederholt: BME280 FEHLER: Sensor nicht initialisiert.
+  - Temperatur, Feuchtigkeit und Druck bleiben ungueltig:
+    temp_01c=-32768, hum_01pct=65535, pressure_pa=4294967295.
+- VEML7700:
+  - VEML7700 init OK auf 0x10.
+  - Lux-Werte wurden plausibel aktualisiert, beobachtet ca. 49 bis 80.
+- Fault:
+  - ENV snapshots melden fault=true, weil BME280 fehlt.
+
+Nachtest mit getauschtem BME280-Modul
+- Firmware erneut auf COM4 geflasht, damit die Sensorinitialisierung beim Boot mit dem neuen Modul laeuft.
+- Upload auf COM4 erneut SUCCESS, ESP32-C3 MAC 8c:d0:b2:a8:b4:ab.
+- Sensor-Log nach Neustart:
+  - BME280 init OK auf 0x76.
+  - VEML7700 init OK auf 0x10.
+  - Regensensor init: pin=3 status=trocken.
+  - HELLO_ACK empfangen.
+  - ENV snapshot temp_01c=227 hum_01pct=363 lux=12 pressure_pa=98965 rain=trocken fault=false.
+  - Weitere Snapshots: temp_01c=225, hum_01pct ca. 370..373, lux ca. 83..84, pressure_pa ca. 98966..98967, fault=false.
+- Ergebnis:
+  - Der vorherige BME280-Fehler lag nicht an fehlender Firmware-Initialisierung.
+  - Nach Modultausch initialisiert der BME280 sauber auf 0x76 und liefert plausible Werte.
+
+Regenpfad
+- Regensensor initialisiert auf GPIO3.
+- Beobachtete Zustaende im Mitschnitt: trocken, nass, trocken, nass, trocken.
+- Snapshot-Beispiele:
+  - rain=trocken fault=true
+  - rain=nass fault=true
+- Sensor-Log zeigte:
+  - Regensensor Status geaendert: nass
+  - Regensensor Status geaendert: trocken
+- Master-Log zeigte mehrfach:
+  - EVENT von NET-SEN-002: type=5
+- Damit ist die digitale Rain-DO-Umschaltung inklusive Master-Eventpfad real belegt.
+
+Master-Kommunikation
+- Vor Fix:
+  - Master lehnte HELLO wegen ungueltiger device_id=net_sen_02 ab.
+- Nach Fix:
+  - Node NET-SEN-002 ist online.
+  - HELLO_ACK gesendet an 8C:D0:B2:A8:B4:AB.
+  - HELLO von NET-SEN-002 (NET-SEN Env BME280+VEML+Rain).
+  - HEARTBEAT von NET-SEN-002.
+  - STATE_REPORT von NET-SEN-002 verarbeitet.
+  - EVENT von NET-SEN-002: type=5 bei Regenstatuswechsel.
+- Nebenbefund:
+  - Master meldete anfangs wiederholt MQTT connect fehlgeschlagen (state=-2, broker=192.168.178.59:1883, typ=ip).
+  - Im Nachtest kam MQTT spaeter hoch:
+    - MQTT verbunden.
+    - MQTT retained smarthome/device/NET-SEN-002/availability -> online.
+    - MQTT retained smarthome/device/NET-SEN-002/state -> temp_01c=225, hum_01pct=373, lux=84, pressure_pa=98966, fault=false.
+
+Setup-Pfad
+- Setup wurde ausserhalb dieses Mitschnitts vorbereitet.
+- Firmwareseitig ist der Setup-Pfad mit GPIO2/GPIO7 konfiguriert.
+- Im beobachteten Normalbetrieb wurde kein unerwarteter Setup-Modus gesehen.
+- Setup-AP und LED-Blinken wurden in diesem Lauf nicht vollstaendig separat verifiziert.
+
+Verdikt
+- Firmware ist nach dem Device-ID-Fix fuer den engen net_sen-Kommunikations- und Sensortest ausreichend lauffaehig.
+- Master-Kommunikation ist nach Fix real belegt: HELLO, HELLO_ACK, HEARTBEAT und STATE_REPORT laufen.
+- Sensorik ist nach Modultausch erfolgreich:
+  - BME280 ist ok.
+  - VEML7700 ist ok.
+  - Regen trocken/nass ist beobachtet, inklusive Master-Event.
+- Gesamturteil: Realtest fuer den engen net_sen-Aussensensorpfad bestanden. Der zuerst beobachtete Fehler war ein ungueltiger Device-ID-Vertrag in der Firmware und danach ein realer BME280-Modul-/Kontaktfehler. Nach Device-ID-Fix und BME280-Modultausch laufen Build, Flash, Sensorik, Rain-Event, Master-Kommunikation und MQTT-State plausibel.
