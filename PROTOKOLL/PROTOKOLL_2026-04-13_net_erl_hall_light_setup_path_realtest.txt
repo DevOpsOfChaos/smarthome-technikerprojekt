@@ -1,0 +1,105 @@
+PROTOKOLL 2026-04-13 - NET-ERL Hall-Light Setup-Pfad Realtest
+
+Datum: 2026-04-13
+Geraetepfad: net_erl_hall_light
+Ziel: Realtest nur des neuen Hall-Light-Setup-Pfads ueber GPIO2 / GPIO7 / Setup-AP.
+
+Branch- und Commit-Kontext:
+- Repo: smarthome-technikerprojekt
+- Branch: sidequest/hall-light-setup-path-realtest
+- Commit: 1209b1302117dde3fe2d4cd1ff95e316f15be50a
+
+Vorab-Inspektion:
+- firmware/platformio.ini enthaelt env:net_erl_hall_light mit build_src_filter auf devices/net_erl_hall_light.
+- firmware/src/devices/net_erl_hall_light/PinConfig.h setzt:
+  - SETUP_BUTTON_PIN = 2
+  - SETUP_BUTTON_ACTIVE_LOW = 1
+  - SETUP_BUTTON_HOLD_MS = 5000UL
+  - SETUP_INDICATOR_LED_PIN = 7
+  - SETUP_INDICATOR_LED_ACTIVE_HIGH = 1
+  - SETUP_INDICATOR_BLINK_MS = 500UL
+- firmware/src/devices/net_erl_hall_light/main.cpp uebergibt diese Werte an die Node-Provisioning-Basis.
+- firmware/lib/sh_node_provisioning/src/ShNodeProvisioning.cpp konfiguriert den Button active-low als INPUT_PULLUP, startet nach Hold den Setup-Modus und blinkt die Setup-LED nur bei aktivem Setup-Modus.
+- firmware/src/basetypes/net_erl/NetErlProvisioning.h setzt fuer diesen Pfad:
+  - Setup-SSID: device_id, hier NET-ERL-001
+  - Setup-Passwort: net-erl-setup
+  - AP-Kanal: 1
+
+COM-Port-Evidence:
+- COM3:
+  - pio device list: USB VID:PID=303A:1001 SER=20:6E:F1:6D:92:C0
+  - Serielle Live-Evidence identifizierte COM3 als Master:
+    - SmartHome ESP32
+    - MASTER v0.4.0
+    - FW: 0.4.0
+    - Variante: master
+    - ESP-NOW bereit
+- COM12:
+  - pio device list: USB VID:PID=303A:1001 SER=20:6E:F1:6A:DF:5C
+  - Upload-Evidence auf COM12 meldete ESP32-C3 und MAC 20:6e:f1:6a:df:5c.
+  - Der Master sah dieselbe MAC fuer NET-ERL-001.
+
+Build:
+- Befehl: pio run -e net_erl_hall_light
+- Ergebnis: SUCCESS
+- Speicher:
+  - RAM: 39932 bytes / 327680 bytes
+  - Flash: 822950 bytes / 1310720 bytes
+
+Geflasht:
+- Geraet: Hall-Light auf COM12
+- Befehl: pio run -e net_erl_hall_light -t upload --upload-port COM12
+- Ergebnis: SUCCESS
+- esptool-Evidence:
+  - Serial port COM12
+  - Chip is ESP32-C3 (QFN32), revision v0.4
+  - MAC: 20:6e:f1:6a:df:5c
+  - Hash of data verified
+  - Hard resetting via RTS pin
+
+Baseline nach Flash:
+- Hall-Light-Applikationslogs auf COM12 wurden nicht erwartet und nicht beobachtet, weil NET_ERL_DEBUG_ENABLED im Hall-Light-DeviceConfig.h auf 0 steht.
+- COM12 zeigte Boot-ROM-Ausgabe des ESP32-C3.
+- Master-seitige Live-Evidence nach dem Flash:
+  - HEARTBEAT von NET-ERL-001 (uptime=20s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+  - HEARTBEAT von NET-ERL-001 (uptime=40s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+- Damit war der gespeicherte Master-Normalpfad vor dem Setup-Eingriff plausibel aktiv.
+- Ein Windows-WLAN-Scan vor dem Setup-Test zeigte NET-ERL-001 nicht sichtbar; das passte zum normalen Nicht-Setup-Zustand.
+
+Manueller Setup-Test:
+- Bedienung: realer Hall-Light-Setup-Button an GPIO2 wurde fuer die Setup-Aktivierung verwendet.
+- Erwartete Bedienung aus Code: active-low, mindestens 5000 ms Hold.
+- Testplatz-Rueckmeldung: Setup-Modus funktionierte, die SSID NET-ERL-001 war sichtbar, die Setup-Seite war erreichbar und Speichern war moeglich.
+- Hostseitiger Windows-WLAN-Scan im Testfenster meldete NET-ERL-001 nicht sichtbar. Dieser Scan wurde als unzuverlaessig verworfen, weil die SSID am Testplatz real sichtbar war und die Setup-Seite genutzt werden konnte.
+- GPIO7-Setup-LED:
+  - Code-Erwartung: active-high, Blinkintervall 500 ms im Setup-Modus.
+  - Keine separate toolseitige Messung moeglich.
+  - Keine getrennte LED-Einzelbeobachtung in den erfassten Host-Logs; Bewertung daher nicht als unabhaengiger Host-Nachweis, sondern nur als Teil der manuellen Setup-Pfad-Rueckmeldung.
+
+Rueckkehr / finaler Zustand:
+- Nach dem Speichern auf der Setup-Seite kehrte der Hall-Light-Pfad in einen plausiblen Master-gebundenen Zustand zurueck.
+- Master-seitige Live-Evidence nach dem Speichern:
+  - HEARTBEAT von NET-ERL-001 (uptime=0s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+  - EVENT von NET-ERL-001: type=6
+  - HEARTBEAT von NET-ERL-001 (uptime=20s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+  - HEARTBEAT von NET-ERL-001 (uptime=40s)
+  - STATE_REPORT von NET-ERL-001 verarbeitet
+- Nebenbefund: Der Master meldete weiter MQTT connect fehlgeschlagen mit state=-2 gegen 192.168.178.59:1883. Das ist ein Infrastruktur-/Broker-Befund im Master-Umfeld und nicht Teil dieses Hall-Light-Setup-Pfadtests.
+
+Verdict:
+- Erfolgreich fuer den engen Hall-Light-Setup-Pfad:
+  - Build erfolgreich
+  - Flash auf reales Hall-Light an COM12 erfolgreich
+  - normaler Master-gebundener Baseline-Pfad vor dem Setup plausibel aktiv
+  - manuelle Setup-Aktivierung ueber GPIO2 am realen Hall-Light bestaetigt
+  - Setup-AP NET-ERL-001 am Testplatz sichtbar
+  - Setup-Seite erreichbar
+  - Speichern auf der Setup-Seite moeglich
+  - Rueckkehr in plausiblen Master-gebundenen Zustand nach dem Speichern sichtbar
+- Einschraenkung:
+  - GPIO7-Blinken wurde in diesem Lauf nicht unabhaengig ueber ein Host-Werkzeug gemessen und nicht separat als eigene Einzelbeobachtung protokolliert.
+- Keine Code-Aenderung erforderlich.
