@@ -78,6 +78,32 @@ Davon sind lokal und nicht Teil des Repo-Inhalts:
 4. `docker compose ps` pruefen
 5. `http://localhost:1880/dashboard/` oeffnen
 
+## Kleinster Server-Contract-Smoke-Test
+
+Aus dem Repo-Root kann der enge Vertrags-Smoke-Test gestartet werden:
+
+```powershell
+.\tests\server\server_contract_smoke.ps1
+```
+
+Wenn der Stack bereits laeuft:
+
+```powershell
+.\tests\server\server_contract_smoke.ps1 -SkipStart
+```
+
+Der Test prueft gezielt:
+- numerische `caps` und deren Ableitung in die Server-Capabilities
+- `button_flags`
+- ACK-`source` in `device_state_latest` und `device_ack_log`
+- SQL- und Migrationsfehler beim Stack-Start
+
+Der Test braucht kein lokal installiertes `mosquitto_pub` auf dem Host.
+Die MQTT-Publishes laufen ueber den Compose-Service `mosquitto`.
+
+Ein bestandener Lauf ist ein enger Server-Vertragsnachweis.
+Er ist kein vollstaendiger End-to-End-Beweis fuer alle Geraete- und UI-Pfade.
+
 ## Was nach dem Start real nachvollziehbar sein soll
 
 - dass der Stack ueber `server/docker-compose.yml` hochkommt

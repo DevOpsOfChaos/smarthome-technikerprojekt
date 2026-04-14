@@ -29,6 +29,7 @@ Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Pro
 - realer Hardware-Rerun des Master-Fixes auf `MASTER-001`
 - belastbarer Dashboard-/`net_zrl`-Stand als öffentliche Serverlinie
 - erneuter Latest-Flash-/Kommunikationsnachweis für `net_zrl`
+- erfolgreicher enger Server-Contract-Smoke-Test für numerische `caps`, `button_flags`, ACK-`source` und SQL-/Migrationsstart
 
 ### NET-ERL Hall-Light
 - realer Gerätepfad `net_erl_hall_light`
@@ -64,6 +65,7 @@ Wichtig ist dabei:
 - aktueller Server für Ingest, Zustandsmodell und kleines Dashboard
 - reale Nachweise für Hall-Light, `net_zrl` und `net_sen`
 - bestätigte Setup-Pfade für Hall-Light und `net_sen`
+- host-unabhängiger Server-Contract-Smoke-Test unter `tests/server/server_contract_smoke.ps1`
 - offizielle Nachweis- und Teststruktur
 
 ## Bewusst noch nicht voll ausgebaut
@@ -93,4 +95,5 @@ Wer den aktuellen technischen Kern verstehen will, liest als Nächstes:
 - `04_server_schnellstart_phase1.md`
 - `docs/public/server/01_server_v1_ueberblick.md`
 - `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`
+- `tests/server/phase1_ingest_checkliste.md`
 - die zugehörigen Protokolle unter `PROTOKOLL/`

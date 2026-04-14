@@ -1,0 +1,54 @@
+PROTOKOLL 2026-04-14 - Server-Contract-Smoke-Test
+
+Datum: 2026-04-14
+Bereich: Server / MQTT-Ingest / SQLite-Vertrag
+Ziel: Enger Nachweis des aktuellen Serververtrags nach dem Merge des Vertragsstands.
+
+Ausgangslage:
+- Der Serverstand war bereits auf main zusammengefuehrt.
+- Der Vertragsstand enthielt die neuen bzw. nachgezogenen Felder fuer Capability-, State- und ACK-Auswertung.
+- Der offene Punkt war nicht weiterer Serverumbau, sondern ein kleiner ehrlicher Testlauf gegen den realen Compose-Startpfad.
+
+Warum der Smoke-Test noetig war:
+- Numerische `caps` muessen serverseitig korrekt in Capability-Namen abgeleitet werden.
+- `button_flags` darf im State-Pfad nicht verloren gehen.
+- ACK-Quellen muessen sowohl im letzten Geraetestand als auch im ACK-Log sichtbar bleiben.
+- Der Stack darf beim Start keine SQL- oder Migrationsfehler erzeugen.
+- Der Nachweis sollte ohne lokal installiertes `mosquitto_pub` auf dem Windows-Host funktionieren.
+
+Geprueft wurde:
+- Stackstart ueber `server/docker-compose.yml`
+- Node-RED-Bereitschaft inklusive MQTT-Verbindung und SQLite-Oeffnung
+- keine SQL-/Migrationsfehler in den Node-RED-Logs
+- Publish von Meta-, State- und ACK-Nachrichten ueber den Compose-Service `mosquitto`
+- `caps` aus numerischer Bitmaske
+- `button_flags` in `device_state_latest`
+- `last_ack_source` in `device_state_latest`
+- `source` in `device_ack_log`
+
+Host-unabhaengiger Testpfad:
+- Der Test liegt unter `tests/server/server_contract_smoke.ps1`.
+- Start aus dem Repo-Root:
+  `.\tests\server\server_contract_smoke.ps1`
+- Wenn der Stack bereits laeuft:
+  `.\tests\server\server_contract_smoke.ps1 -SkipStart`
+- Der Test nutzt `docker compose exec` in den laufenden `mosquitto`-Service.
+- Die Payloads werden Base64-codiert in den Container uebergeben und dort mit `mosquitto_pub` veroeffentlicht.
+- Dadurch muss `mosquitto_pub` nicht lokal auf dem Host installiert sein.
+
+Ergebnis:
+- Der enge Smoke-Test ist erfolgreich gelaufen.
+- Numerische `caps` wurden korrekt verarbeitet.
+- `button_flags` wurde korrekt im aktuellen State-Pfad sichtbar.
+- ACK-`source` wurde im letzten Geraetestand und im ACK-Log uebernommen.
+- Beim Stack-Start traten keine SQL- oder Migrationsfehler auf.
+
+Was bewusst nicht behauptet wird:
+- Das ist kein vollstaendiger End-to-End-Systembeweis.
+- Es ersetzt keinen realen Geraetetest mit Master, Firmware und Hardware.
+- Es beweist nicht alle Dashboard-, Geraete- und Komfortpfade.
+- Es ist kein Nachweis fuer spaetere Automations- oder UI-Ausbaustufen.
+
+Bewertung:
+- Der Server-Vertragsblock gilt damit fuer den aktuellen engen Kern als belastbar.
+- Der sinnvolle naechste Schritt ist Doku- und Nachweispflege, nicht ein neuer Serverumbau.

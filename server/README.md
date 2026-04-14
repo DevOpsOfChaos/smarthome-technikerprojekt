@@ -60,6 +60,24 @@ Der echte Startpfad liegt aktuell direkt in `docker-compose.yml`:
 - SQLite-Schema, kleine Bestandsschema-Migrationen, `flows.json` und die generierten Settings werden beim Containerstart inline vorbereitet.
 - `nodered/settings.js` bleibt die Basisdatei, die Laufzeit erweitert sie beim Start um den benoetigten `functionGlobalContext`.
 
+## Enger Vertragstest
+
+Aus dem Repo-Root:
+
+```powershell
+.\tests\server\server_contract_smoke.ps1
+```
+
+Wenn der Stack bereits laeuft:
+
+```powershell
+.\tests\server\server_contract_smoke.ps1 -SkipStart
+```
+
+Der Test prueft den aktuellen Server-Vertrag fuer numerische `caps`, `button_flags`, ACK-`source` und SQL-/Migrationsfehler beim Start.
+Er nutzt `mosquitto_pub` im Compose-Service `mosquitto`; auf dem Host muss dieses Tool dafuer nicht lokal installiert sein.
+Der Test ist ein enger Smoke-Test des Serververtrags, kein vollstaendiger End-to-End-Systemtest.
+
 ## Offizielle Serverdateien
 
 - `docker-compose.yml`
