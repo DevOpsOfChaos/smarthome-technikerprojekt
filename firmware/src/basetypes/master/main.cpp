@@ -992,6 +992,22 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
                 break;
             }
+            if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasConfigStateReportPayload)) {
+                const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload& state =
+                    *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
+                nodeStates[nodeIndex].aqi = state.aqi;
+                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
             logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
             return;
         }
