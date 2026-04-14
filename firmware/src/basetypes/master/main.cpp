@@ -1009,6 +1009,8 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 break;
             }
             if (payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
+                // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
+                // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
                 const SmartHome::ZrlConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlConfigStateReportPayload*>(payload);
                 nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
                 nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
@@ -1090,6 +1092,8 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 break;
             }
             if (payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
+                // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
+                // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
                 const SmartHome::BatteryConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryConfigStateReportPayload*>(payload);
                 nodeStates[nodeIndex].battery_pct = state.battery_pct;
                 nodeStates[nodeIndex].battery_mv = state.battery_mv;
