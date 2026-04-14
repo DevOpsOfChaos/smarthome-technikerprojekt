@@ -2297,6 +2297,8 @@ void initialisierePin(int pin, uint8_t mode) {
 }  // namespace
 
 void setup() {
+    // Serial bleibt hier bewusst aktiv: NET-ZRL nutzt die Konsole nicht nur fuer Debug,
+    // sondern auch fuer lokale Setup- und Kalibrierbefehle.
     Serial.begin(115200);
     delay(150);
 
