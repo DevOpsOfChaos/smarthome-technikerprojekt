@@ -104,6 +104,74 @@ function availabilityInfo(availability) {
     return { label: state, className: "sh-chip-unknown" };
 }
 
+function normalizeFiniteNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function resolveFreshnessThresholds(device, config) {
+    const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
+    const powerType = normalizeString(device.meta && device.meta.power_type).toLowerCase();
+    const reportInterval = normalizeFiniteNumber(config && config.report_interval_s);
+    const isBattery = isBatteryDevice(device) || powerType.includes("battery") || powerType.includes("bat");
+
+    if (isBattery) {
+        const interval = reportInterval && reportInterval > 0 ? reportInterval : 3600;
+        return {
+            lateAfterSeconds: Math.max(interval * 3, 6 * 3600),
+            offlineAfterSeconds: Math.max(interval * 8, 48 * 3600)
+        };
+    }
+
+    const defaultInterval = baseType === "net_sen" ? 300 : 60;
+    const interval = reportInterval && reportInterval > 0 ? reportInterval : defaultInterval;
+    return {
+        lateAfterSeconds: Math.max(interval * 3, 180),
+        offlineAfterSeconds: Math.max(interval * 10, 900)
+    };
+}
+
+function deriveAvailabilityForDisplay(device) {
+    const rawAvailability = device.availability || {};
+    const rawState = normalizeString(rawAvailability.availability).toLowerCase();
+    const lastSeenText = normalizeString(rawAvailability.last_seen_at || device.last_seen_at);
+    const lastSeenMs = lastSeenText ? Date.parse(lastSeenText) : NaN;
+
+    if (rawState === "offline") {
+        return { availability: "offline", online: false, last_seen_at: rawAvailability.last_seen_at || null };
+    }
+
+    if (!Number.isFinite(lastSeenMs)) {
+        if (rawState === "online" || rawAvailability.online === true) {
+            return { availability: "online", online: true, last_seen_at: rawAvailability.last_seen_at || null };
+        }
+        return { availability: rawState || "unknown", online: false, last_seen_at: rawAvailability.last_seen_at || null };
+    }
+
+    const ageSeconds = Math.max(0, Math.floor((Date.now() - lastSeenMs) / 1000));
+    const thresholds = resolveFreshnessThresholds(device, device.config || {});
+    const sleepState = ["asleep", "sleeping_expected"].includes(rawState) ? rawState : "late";
+
+    if (ageSeconds >= thresholds.offlineAfterSeconds) {
+        return { availability: "offline", online: false, last_seen_at: rawAvailability.last_seen_at || null };
+    }
+    if (ageSeconds >= thresholds.lateAfterSeconds) {
+        return { availability: sleepState, online: false, last_seen_at: rawAvailability.last_seen_at || null };
+    }
+    if (["asleep", "sleeping_expected", "late"].includes(rawState)) {
+        return { availability: rawState, online: false, last_seen_at: rawAvailability.last_seen_at || null };
+    }
+    return { availability: "online", online: true, last_seen_at: rawAvailability.last_seen_at || null };
+}
+
+function availabilitySortPriority(device) {
+    const label = normalizeString(device.availability_label).toLowerCase();
+    if (label === "online") return 0;
+    if (["late", "asleep", "sleeping_expected"].includes(label)) return 1;
+    if (label === "offline") return 3;
+    return 2;
+}
+
 function formatNumber(rawValue, divisor, suffix) {
     if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
         return "-";
@@ -516,8 +584,9 @@ function describeDevice(row) {
             || normalizeString(meta.source).toLowerCase() === "simulation"
             || Boolean(meta.sim_case)
     };
-    const availabilityData = availabilityInfo(availability);
     const classification = classifyDevice(device, state, meta);
+    const displayAvailability = deriveAvailabilityForDisplay(device);
+    const availabilityData = availabilityInfo(displayAvailability);
     const controls = buildControls(device, state, meta);
     const batteryValue = Object.prototype.hasOwnProperty.call(state, "battery_pct")
         ? formatStateValue("battery_pct", state.battery_pct)
@@ -527,6 +596,8 @@ function describeDevice(row) {
     return Object.assign(device, {
         availability_label: availabilityData.label,
         availability_class: availabilityData.className,
+        display_availability: displayAvailability,
+        availability_sort_priority: availabilitySortPriority({ availability_label: availabilityData.label }),
         kind_label: classification.kind_label,
         type_icon: classification.icon,
         surface_class: classification.surface_class,
@@ -626,7 +697,15 @@ function buildOverviewQuery() {
 
 function buildOverviewPayload(rows) {
     const devices = (rows || []).map(describeDevice)
-        .filter((device) => device.base_type !== "master" && device.device_class !== "master");
+        .filter((device) => device.base_type !== "master" && device.device_class !== "master")
+        .sort((left, right) => {
+            const priorityDelta = left.availability_sort_priority - right.availability_sort_priority;
+            if (priorityDelta !== 0) {
+                return priorityDelta;
+            }
+            return normalizeString(left.display_name || left.device_id)
+                .localeCompare(normalizeString(right.display_name || right.device_id), "de-DE", { sensitivity: "base" });
+        });
     const masterCount = rows && rows.length ? Number(rows[0].master_count || 0) : 0;
     const offlineCount = devices.filter((device) => device.availability_label === "offline").length;
     return {
