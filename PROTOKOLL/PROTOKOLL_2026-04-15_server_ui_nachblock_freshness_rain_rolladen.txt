@@ -1,0 +1,51 @@
+PROTOKOLL 2026-04-15 – Server-UI-Nachblock Freshness, Regen und Rolladenkarte
+
+Ausgangslage
+Nach den ersten Server-Demo-Fixes war der Server insgesamt ruhiger, aber zwei Punkte waren im echten Anklicken noch sichtbar:
+1. Die Online-/Offline-Darstellung wirkte noch nicht stabil genug, weil die gespeicherte Availability nicht immer gut zur echten Frische der letzten Meldung passte.
+2. In der UI gab es noch kleinere Darstellungsprobleme bei Regenwerten und bei der Rolladenkarte.
+
+Ziel
+Die Übersicht sollte ohne neuen Großumbau demo-tauglicher werden.
+Dafür wurden nur kleine serverseitige UI- und Darstellungsanpassungen gemacht.
+
+Umsetzung
+1. Die sichtbare Availability im Dashboard wird jetzt aus der Freshness der letzten Meldung abgeleitet.
+   Dafür werden Gerätetyp und report_interval_s berücksichtigt.
+   Die gespeicherte Availability in der Datenbasis wird dabei nicht überschrieben, sondern nur für die Anzeige sinnvoll interpretiert.
+
+2. Die Übersicht sortiert Geräte jetzt nach diesem sichtbaren Status.
+   Online-Geräte stehen vorne, späte oder schlafende Geräte dahinter und echte Offline-Geräte weiter hinten.
+
+3. Die Regenanzeige wurde in der Darstellung nachgezogen.
+   Regen bleibt als eigener fachlicher Wert sichtbar und überschreibt nicht mehr andere Sensorwerte.
+
+4. Die Rolladenkarte wurde in der Übersicht gestrafft.
+   Doppelte oder unnötig ähnliche Anzeigeelemente wurden reduziert, damit die Karte ruhiger wirkt.
+
+5. Die Detailseite wurde etwas entlastet.
+   Rohdatenbereiche sind weniger aufdringlich und die Blöcke nutzen den verfügbaren Platz besser.
+
+Geänderte Datei
+- server/nodered/lib/dashboard_v1.js
+
+Prüfung
+- Dashboard-Logik für Freshness-Fälle per Node geprüft
+- Node-RED neu gestartet
+- Containerstatus danach healthy
+- git diff --check ohne echte Fehler
+
+Ergebnis
+Die Dashboard-Oberfläche wirkt nach diesem Nachblock deutlich ruhiger.
+Online- und Offline-Status werden für die Anzeige plausibler abgeleitet.
+Regen bleibt als eigener Wert sichtbar.
+Die Rolladenkarte zeigt weniger doppelte Information.
+
+Wichtige Einordnung
+Die neue Availability-Logik ist bewusst UI-seitig.
+Das ist für den aktuellen kleinen Schritt sinnvoll.
+Die sauberere spätere Lösung wäre, last_state_at und last_availability_at in der Datenbasis noch klarer getrennt zu führen, statt alles aus einem last_seen_at abzuleiten.
+
+Offen
+Die fachliche Regenumschaltung und einzelne Gerätepfade müssen weiterhin im echten Betrieb geprüft werden.
+Dieser Nachblock verbessert die Demo- und UI-Seite, ersetzt aber keinen Hardwaretest.
