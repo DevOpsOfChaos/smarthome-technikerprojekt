@@ -1,0 +1,153 @@
+[
+  {
+    "id": "comment_dashboard_device_delete_v1",
+    "type": "comment",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Geraet gezielt loeschen",
+    "info": "Kleiner Bereinigungspfad fuer einzelne Testgeraete. Keine Massenloeschung.",
+    "x": 180,
+    "y": 360,
+    "wires": []
+  },
+  {
+    "id": "ui_template_dashboard_delete_v1",
+    "type": "ui-template",
+    "z": "tab_dashboard_v1_ui",
+    "group": "cfg_ui_group_detail_v1",
+    "name": "Device Delete View",
+    "order": 2,
+    "width": 12,
+    "height": 0,
+    "format": "<template>\n  <section class=\"sh-delete-zone\" v-if=\"deviceId\">\n    <h4>Gerät löschen</h4>\n    <p class=\"sh-delete-copy\">Entfernt diesen Geräteeintrag mit aktuellem Status, Events und Acks aus der Serverdatenbank.</p>\n    <p class=\"sh-muted\">Device-ID: <strong>{{ deviceId }}</strong></p>\n    <label class=\"sh-delete-label\" for=\"delete-confirm-input\">Device-ID zur Bestätigung</label>\n    <input\n      id=\"delete-confirm-input\"\n      class=\"sh-delete-input\"\n      type=\"text\"\n      :value=\"confirmText\"\n      :disabled=\"pending\"\n      @input=\"confirmText = $event.target.value\"\n      @keydown.enter.prevent=\"deleteDevice\">\n    <div class=\"sh-delete-actions\">\n      <button class=\"sh-danger-btn\" :disabled=\"!canDelete || pending\" @click=\"deleteDevice\">Alles zu diesem Gerät löschen</button>\n    </div>\n    <p class=\"sh-delete-error\" v-if=\"errorText\">{{ errorText }}</p>\n    <p class=\"sh-delete-info\" v-if=\"infoText\">{{ infoText }}</p>\n  </section>\n</template>\n<script>\nexport default {\n  data() {\n    return {\n      deviceId: '',\n      confirmText: '',\n      pending: false,\n      errorText: '',\n      infoText: ''\n    }\n  },\n  computed: {\n    canDelete() {\n      return this.deviceId && this.confirmText === this.deviceId\n    }\n  },\n  methods: {\n    resolveDeviceId() {\n      const url = new URL(window.location.href)\n      return url.searchParams.get('device') || ''\n    },\n    async deleteDevice() {\n      if (!this.canDelete || this.pending) {\n        return\n      }\n      if (!window.confirm(`Alles zu ${this.deviceId} löschen?`)) {\n        return\n      }\n\n      this.pending = true\n      this.errorText = ''\n      this.infoText = ''\n      try {\n        const response = await fetch('/api/phase1/dashboard/delete-device', {\n          method: 'POST',\n          headers: { 'Content-Type': 'application/json' },\n          body: JSON.stringify({ device_id: this.deviceId, confirm_delete: true })\n        })\n        const body = await response.json().catch(() => null)\n        if (!response.ok) {\n          throw new Error(body?.message || body?.error || `HTTP ${response.status}`)\n        }\n        this.infoText = 'Gerät gelöscht. Die Übersicht wird neu geöffnet.'\n        window.setTimeout(() => window.location.assign('/dashboard/'), 450)\n      } catch (error) {\n        this.errorText = error?.message || 'Gerät konnte nicht gelöscht werden.'\n      } finally {\n        this.pending = false\n      }\n    }\n  },\n  mounted() {\n    this.deviceId = this.resolveDeviceId()\n  }\n}\n</script>\n<style>\n  .sh-delete-zone{box-sizing:border-box;width:100%;max-width:42rem;border:1px solid rgba(140,58,73,.58);border-radius:18px;background:linear-gradient(180deg,rgba(38,18,25,.96),rgba(18,12,16,.98));color:#f7edf0;padding:.9rem 1rem;margin-top:.8rem}.sh-delete-zone *{box-sizing:border-box}.sh-delete-zone h4{margin:0 0 .35rem}.sh-delete-copy,.sh-muted{margin:.2rem 0;color:#d3b8c0}.sh-delete-label{display:block;margin:.75rem 0 .3rem;font-size:.82rem;color:#e2c6ce}.sh-delete-input{width:min(100%,24rem);border:1px solid rgba(192,91,109,.54);border-radius:12px;background:rgba(12,8,11,.92);color:#fff;padding:.65rem .75rem}.sh-delete-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.65rem}.sh-danger-btn{border:1px solid rgba(226,105,126,.72);border-radius:999px;background:linear-gradient(180deg,rgba(115,34,49,.98),rgba(69,20,31,.98));color:#fff;padding:.58rem .9rem;cursor:pointer}.sh-danger-btn:disabled,.sh-delete-input:disabled{opacity:.55;cursor:not-allowed}.sh-delete-error{color:#ffd1d7;margin:.6rem 0 0}.sh-delete-info{color:#d7f8e2;margin:.6rem 0 0}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 210,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "httpin_dashboard_device_delete_v1",
+    "type": "http in",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Delete dashboard device",
+    "url": "/api/phase1/dashboard/delete-device",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 500,
+    "wires": [
+      [
+        "json_dashboard_device_delete_v1"
+      ]
+    ]
+  },
+  {
+    "id": "json_dashboard_device_delete_v1",
+    "type": "json",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Delete JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 420,
+    "y": 500,
+    "wires": [
+      [
+        "fn_dashboard_device_delete_query_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_dashboard_device_delete_query_v1",
+    "type": "function",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Build Delete Query",
+    "func": "const dashboard = global.get(\"dashboardV1\");\nif (!dashboard || typeof dashboard.buildDeviceDeleteQuery !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload = { ok: false, error: \"dashboard_helper_missing\", message: \"dashboard helper missing\" };\n    return [null, msg];\n}\n\nfunction readPayloadObject(message) {\n    const candidates = [\n        message.payload,\n        message.req && message.req.body\n    ];\n\n    for (const candidate of candidates) {\n        if (candidate && typeof candidate === \"object\" && !Buffer.isBuffer(candidate)) {\n            return candidate;\n        }\n\n        const text = Buffer.isBuffer(candidate)\n            ? candidate.toString(\"utf8\")\n            : typeof candidate === \"string\"\n                ? candidate\n                : \"\";\n        const trimmed = text.trim();\n        if (!trimmed) {\n            continue;\n        }\n\n        try {\n            const parsed = JSON.parse(trimmed);\n            if (parsed && typeof parsed === \"object\" && !Array.isArray(parsed)) {\n                return parsed;\n            }\n        } catch (error) {\n            // Ungueltiges JSON wird unten als fehlende device_id sauber abgelehnt.\n        }\n    }\n\n    return {};\n}\n\nconst payload = readPayloadObject(msg);\nconst deviceId = typeof payload.device_id === \"string\" ? payload.device_id.trim() : \"\";\nif (!deviceId) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: \"device_id_required\", message: \"device_id is required\" };\n    return [null, msg];\n}\n\nif (payload.confirm_delete !== true) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: \"delete_not_confirmed\", message: \"delete confirmation is required\" };\n    return [null, msg];\n}\n\nconst deleteQuery = dashboard.buildDeviceDeleteQuery(deviceId);\nif (!deleteQuery) {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: \"invalid_device_id\", message: \"device_id is invalid\" };\n    return [null, msg];\n}\n\nmsg.deleteDeviceId = deviceId;\nmsg.deleteDeviceResponse = { ok: true, device_id: deviceId, message: \"device deleted\" };\nmsg.topic = deleteQuery;\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 500,
+    "wires": [
+      [
+        "sqlite_dashboard_device_delete_v1"
+      ],
+      [
+        "httpresp_dashboard_device_delete_v1"
+      ]
+    ]
+  },
+  {
+    "id": "sqlite_dashboard_device_delete_v1",
+    "type": "sqlite",
+    "z": "tab_dashboard_v1_ui",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "batch",
+    "sql": "",
+    "name": "Delete Device",
+    "x": 870,
+    "y": 480,
+    "wires": [
+      [
+        "fn_dashboard_device_delete_response_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_dashboard_device_delete_response_v1",
+    "type": "function",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Delete Response",
+    "func": "const deviceId = msg.deleteDeviceId || \"\";\nconst runtime = global.get(\"smarthome_runtime\");\nif (deviceId && runtime && runtime.devices && Object.prototype.hasOwnProperty.call(runtime.devices, deviceId)) {\n    delete runtime.devices[deviceId];\n    global.set(\"smarthome_runtime\", runtime);\n}\n\nconst clearRetainedMessages = deviceId\n    ? [\"meta\", \"availability\", \"state\", \"event\", \"ack\"].map((block) => ({\n        topic: \"smarthome/device/\" + deviceId + \"/\" + block,\n        payload: \"\",\n        qos: 0,\n        retain: true\n    }))\n    : [];\n\nmsg.statusCode = 200;\nmsg.payload = msg.deleteDeviceResponse || { ok: true, device_id: deviceId, message: \"device deleted\" };\nreturn [msg, clearRetainedMessages];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1080,
+    "y": 480,
+    "wires": [
+      [
+        "httpresp_dashboard_device_delete_v1"
+      ],
+      [
+        "mqttout_dashboard_device_delete_clear_v1"
+      ]
+    ]
+  },
+  {
+    "id": "mqttout_dashboard_device_delete_clear_v1",
+    "type": "mqtt out",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Clear retained device topics",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "cfg_mqtt_broker",
+    "x": 1120,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "httpresp_dashboard_device_delete_v1",
+    "type": "http response",
+    "z": "tab_dashboard_v1_ui",
+    "name": "Delete response",
+    "statusCode": "",
+    "headers": {},
+    "x": 1090,
+    "y": 540,
+    "wires": []
+  }
+]

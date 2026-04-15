@@ -22,6 +22,22 @@ function sqlStringLiteral(value) {
     return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
+function buildDeviceDeleteQuery(deviceId) {
+    const normalizedId = normalizeString(deviceId);
+    if (!normalizedId) {
+        return null;
+    }
+    const idSql = sqlStringLiteral(normalizedId);
+    return [
+        "BEGIN IMMEDIATE;",
+        "DELETE FROM device_state_latest WHERE device_id = " + idSql + ";",
+        "DELETE FROM device_event_log WHERE device_id = " + idSql + ";",
+        "DELETE FROM device_ack_log WHERE device_id = " + idSql + ";",
+        "DELETE FROM devices WHERE device_id = " + idSql + ";",
+        "COMMIT;"
+    ].join(" ");
+}
+
 function normalizeBaseType(value) {
     const text = normalizeString(value).toLowerCase().replace(/-/g, "_");
     if (!text) {
@@ -64,6 +80,11 @@ function isRelayDevice(device, state, meta) {
 
 function isNetErlDevice(device) {
     return normalizeBaseType(device.base_type || device.device_class || device.device_id) === "net_erl";
+}
+
+function hasCapability(meta, capability) {
+    const caps = meta && Array.isArray(meta.caps) ? meta.caps : [];
+    return caps.includes(capability);
 }
 
 function availabilityInfo(availability) {
@@ -116,6 +137,7 @@ function formatStateValue(key, value) {
     if (value === null || value === undefined) return "-";
     if (["relay_1", "relay_2"].includes(key)) return value ? "An" : "Aus";
     if (["motion", "presence"].includes(key)) return value ? "Erkannt" : "Nein";
+    if (key === "rain") return value ? "Nass" : "Trocken";
     if (key === "contact_open") return value ? "Offen" : "Geschlossen";
     if (key === "window_open") return value ? "Offen" : "Geschlossen";
     if (key === "cover_moving") return value ? "Ja" : "Nein";
@@ -155,6 +177,8 @@ function labelForStateKey(key) {
         pressure_hpa: "Druck",
         relay_1: "Relais 1",
         relay_2: "Relais 2",
+        rain: "Regen",
+        rain_raw: "Regen-Rohwert",
         temp_01c: "Temperatur",
         window_open: "Kontakt"
     };
@@ -339,6 +363,16 @@ function relativeTimestamp(value) {
     return formatTimestamp(text);
 }
 
+function suppressDisplayOnlyStateNoise(device, state, meta) {
+    const suppressedKeys = [];
+    const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
+    if (baseType === "net_sen" && state.motion === false && !hasCapability(meta, "motion")) {
+        delete state.motion;
+        suppressedKeys.push("motion");
+    }
+    return suppressedKeys;
+}
+
 function pickHighlights(device, state, meta) {
     const keys = [];
     if (isCoverDevice(device, state, meta)) {
@@ -346,7 +380,11 @@ function pickHighlights(device, state, meta) {
     } else if (isRelayDevice(device, state, meta)) {
         keys.push("relay_1", "relay_2");
     }
-    keys.push("temp_01c", "hum_01pct", "lux", "battery_pct", "battery_mv", "motion", "presence", "contact_open", "window_open");
+    keys.push("temp_01c", "hum_01pct", "lux", "rain", "rain_raw", "pressure_pa", "pressure_hpa", "battery_pct", "battery_mv");
+    if (hasCapability(meta, "motion") || normalizeBaseType(device.base_type || device.device_class || device.device_id) !== "net_sen") {
+        keys.push("motion", "presence");
+    }
+    keys.push("contact_open", "window_open");
     return keys
         .filter((key, index) => keys.indexOf(key) === index)
         // Der große Lampen-Button zeigt relay_1 bei net_erl schon eindeutig an. Ein zweiter Ein/Aus-Hinweis bläht die Karte nur auf.
@@ -432,9 +470,17 @@ function describeDevice(row) {
     const config = buildConfigFromRow(row);
     const lastEvent = buildLastEventFromRow(row);
     const lastAck = buildLastAckFromRow(row);
+    const preliminaryDevice = {
+        device_id: row.device_id,
+        base_type: normalizeBaseType(row.device_class || row.device_id),
+        device_class: normalizeBaseType(row.device_class || row.device_id)
+    };
+    const suppressedStateKeys = suppressDisplayOnlyStateNoise(preliminaryDevice, state, meta);
     const diagnostics = {
         device_updated_at: row.device_updated_at || null,
-        state_updated_at: row.state_updated_at || null
+        state_updated_at: row.state_updated_at || null,
+        suppressed_display_state_keys: suppressedStateKeys,
+        rain_from_last_event: Boolean(lastEvent && lastEvent.event_label === "rain_detected" && Object.prototype.hasOwnProperty.call(state, "rain"))
     };
     const customName = normalizeString(row.dashboard_display_name);
     const metaName = normalizeString(row.device_name);
@@ -560,7 +606,14 @@ function buildOverviewQuery() {
         "    (SELECT COUNT(*) FROM master_status) AS master_count",
         "FROM devices AS d",
         "LEFT JOIN device_state_latest AS l ON l.device_id = d.device_id",
-        "ORDER BY lower(COALESCE(d.device_name, d.device_id));"
+        "ORDER BY",
+        "    CASE",
+        "        WHEN l.online = 1 OR lower(COALESCE(l.availability, '')) = 'online' THEN 0",
+        "        WHEN lower(COALESCE(l.availability, '')) IN ('late', 'asleep', 'sleeping_expected') THEN 1",
+        "        WHEN lower(COALESCE(l.availability, '')) = 'offline' THEN 3",
+        "        ELSE 2",
+        "    END,",
+        "    lower(COALESCE(d.device_name, d.device_id));"
     ].join(" ");
 }
 
@@ -568,11 +621,14 @@ function buildOverviewPayload(rows) {
     const devices = (rows || []).map(describeDevice)
         .filter((device) => device.base_type !== "master" && device.device_class !== "master");
     const masterCount = rows && rows.length ? Number(rows[0].master_count || 0) : 0;
+    const offlineCount = devices.filter((device) => device.availability_label === "offline").length;
     return {
         page: { key: "overview", title: "Geräteübersicht" },
         summary: {
             device_count: devices.length,
-            master_count: masterCount
+            master_count: masterCount,
+            active_count: devices.length - offlineCount,
+            offline_count: offlineCount
         },
         devices
     };
@@ -702,6 +758,7 @@ function buildDeviceDetailPayload(rows) {
 }
 
 module.exports = {
+    buildDeviceDeleteQuery,
     buildDeviceDetailPayload,
     buildDeviceDetailQuery,
     buildOverviewPayload,

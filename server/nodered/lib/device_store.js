@@ -390,8 +390,63 @@ function applyEvent(device, payload, receivedAt = timeHelpers.nowIso()) {
 
   device.updated_at = receivedAt;
   device.last_event_at = eventAt;
+  applyStateFromEvent(device);
   touchDeviceHandler(device, "event");
   return device;
+}
+
+function booleanFromEventParam(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on", "wet", "nass"].includes(text)) {
+    return true;
+  }
+  if (["0", "false", "no", "off", "dry", "trocken"].includes(text)) {
+    return false;
+  }
+
+  return null;
+}
+
+function rememberDerivedStateField(device, fieldName, eventLabel) {
+  if (!isPlainObject(device.diagnostics)) {
+    device.diagnostics = {};
+  }
+
+  const existing = Array.isArray(device.diagnostics.derived_state_fields)
+    ? device.diagnostics.derived_state_fields
+    : [];
+  const entry = `${fieldName}:event:${eventLabel}`;
+  if (!existing.includes(entry)) {
+    device.diagnostics.derived_state_fields = [...existing, entry];
+  }
+}
+
+function applyStateFromEvent(device) {
+  const event = cloneObject(device && device.last_event);
+  const eventLabel = normalizeTextOrNull(event.event_label || event.event);
+  if (eventLabel !== "rain_detected") {
+    return;
+  }
+
+  const rainState = booleanFromEventParam(event.param1 ?? event.param2);
+  if (rainState === null) {
+    return;
+  }
+
+  device.state.rain = rainState;
+  rememberDerivedStateField(device, "rain", eventLabel);
 }
 
 function applyAck(device, payload, receivedAt = timeHelpers.nowIso()) {

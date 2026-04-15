@@ -1,0 +1,31 @@
+PROTOKOLL - Server-Demo-Fixes 2026-04-15
+
+Ziel
+- Sichtbare Stolpersteine im Server-Dashboard vor der Demo entschärfen.
+- Keine neue Serverarchitektur, keine neue Gerätewelt, keine Firmwareänderung.
+
+Ausgangsbefund
+- Alte Testgeräte blieben in der Übersicht sichtbar.
+- Die Wetterstation wirkte unsauber, weil Regen nicht als eigener Wert sichtbar wurde und ein technisches motion=false bei net_sen nach Bewegung aussah.
+- Offline-Geräte standen in der Übersicht gleichrangig zwischen aktiven Geräten.
+
+Umgesetzte Korrekturen
+- Auf der Gerätedetailseite gibt es unten einen Löschbereich für genau ein ausgewähltes Gerät.
+- Die Löschroute entfernt device_state_latest, device_event_log, device_ack_log und danach den Eintrag aus devices.
+- Die Löschroute leert zusätzlich die retained MQTT-Gerätetopics für meta, availability, state, event und ack, damit gelöschte Testgeräte nach einem Node-RED-Neustart nicht direkt wieder erscheinen.
+- Regen-Events mit event=rain_detected werden serverseitig in den aktuellen Zustand rain übernommen.
+- Das Dashboard beschriftet rain als Regen und zeigt rain als Nass/Trocken.
+- net_sen-Geräte ohne Motion-Capability zeigen ein bloßes motion=false nicht mehr als hervorgehobenen Bewegungswert.
+- Die Übersicht sortiert online/aktive Geräte vor unklare und offline Geräte.
+
+Bewusst offen
+- Ob der reale Regensensor dauerhaft plausible Umschaltungen liefert, bleibt ein echter Hardwaretest.
+- Ob alle alten Testgeräte entfernt werden sollen, bleibt eine manuelle Entscheidung pro Gerät.
+- Weitere Restfehler im Livebetrieb müssen nach echten Tests einzeln eingegrenzt werden.
+
+Geprüft
+- Aktive Node-RED-Flow-Fragmente als JSON validiert.
+- Kleine Node-Prüfung für Lösch-SQL, Regenableitung und Dashboard-Highlights ausgeführt.
+- Server-Contract-Smoke-Test mit Compose, Node-RED, MQTT und SQLite ausgeführt.
+- Löschroute live gegen ein Smoke-Testgerät geprüft; devices, device_state_latest, device_event_log und device_ack_log waren danach leer.
+- Nach Neustart von Node-RED blieb das gelöschte Smoke-Testgerät aus der SQLite-Projektion verschwunden.
