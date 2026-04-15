@@ -366,7 +366,7 @@ function relativeTimestamp(value) {
 function suppressDisplayOnlyStateNoise(device, state, meta) {
     const suppressedKeys = [];
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
-    if (baseType === "net_sen" && state.motion === false && !hasCapability(meta, "motion")) {
+    if (baseType === "net_sen" && Object.prototype.hasOwnProperty.call(state, "motion") && !hasCapability(meta, "motion")) {
         delete state.motion;
         suppressedKeys.push("motion");
     }
@@ -376,7 +376,7 @@ function suppressDisplayOnlyStateNoise(device, state, meta) {
 function pickHighlights(device, state, meta) {
     const keys = [];
     if (isCoverDevice(device, state, meta)) {
-        keys.push("cover_position", "cover_direction", "cover_moving");
+        keys.push("cover_direction");
     } else if (isRelayDevice(device, state, meta)) {
         keys.push("relay_1", "relay_2");
     }
