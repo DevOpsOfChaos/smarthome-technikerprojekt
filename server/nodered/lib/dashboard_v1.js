@@ -381,23 +381,28 @@ function pickHighlights(device, state, meta) {
     } else if (isRelayDevice(device, state, meta)) {
         keys.push("relay_1", "relay_2");
     }
-    keys.push("temp_01c", "hum_01pct", "lux", "pressure_pa", "pressure_hpa", "rain", "rain_raw", "battery_pct", "battery_mv");
+    keys.push("temp_01c", "hum_01pct", "lux", "pressure_pa", "pressure_hpa", "rain", "battery_pct", "battery_mv");
     if (hasCapability(meta, "motion") || baseType !== "net_sen") {
         keys.push("motion", "presence");
     }
     keys.push("contact_open", "window_open");
-    const maxHighlights = baseType === "net_sen" ? 5 : 4;
-    return keys
+    const highlightKeys = keys
         .filter((key, index) => keys.indexOf(key) === index)
         // Der große Lampen-Button zeigt relay_1 bei net_erl schon eindeutig an. Ein zweiter Ein/Aus-Hinweis bläht die Karte nur auf.
         .filter((key) => !(isNetErlDevice(device) && key === "relay_1"))
-        .filter((key) => Object.prototype.hasOwnProperty.call(state, key))
-        .slice(0, maxHighlights)
-        .map((key) => ({
+        .filter((key) => Object.prototype.hasOwnProperty.call(state, key));
+    if (baseType === "net_sen" && !highlightKeys.includes("rain")) {
+        highlightKeys.push("rain");
+    }
+    return highlightKeys.map((key) => {
+        const hasValue = Object.prototype.hasOwnProperty.call(state, key);
+        return {
             key,
             label: labelForStateKey(key),
-            value_text: formatStateValue(key, state[key])
-        }));
+            value_text: hasValue ? formatStateValue(key, state[key]) : "unbekannt",
+            wide: baseType === "net_sen" && key === "rain"
+        };
+    });
 }
 
 function buildControls(device, state, meta) {
