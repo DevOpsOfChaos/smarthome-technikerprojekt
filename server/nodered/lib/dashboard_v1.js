@@ -375,22 +375,24 @@ function suppressDisplayOnlyStateNoise(device, state, meta) {
 
 function pickHighlights(device, state, meta) {
     const keys = [];
+    const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
     if (isCoverDevice(device, state, meta)) {
         keys.push("cover_direction");
     } else if (isRelayDevice(device, state, meta)) {
         keys.push("relay_1", "relay_2");
     }
-    keys.push("temp_01c", "hum_01pct", "lux", "rain", "rain_raw", "pressure_pa", "pressure_hpa", "battery_pct", "battery_mv");
-    if (hasCapability(meta, "motion") || normalizeBaseType(device.base_type || device.device_class || device.device_id) !== "net_sen") {
+    keys.push("temp_01c", "hum_01pct", "lux", "pressure_pa", "pressure_hpa", "rain", "rain_raw", "battery_pct", "battery_mv");
+    if (hasCapability(meta, "motion") || baseType !== "net_sen") {
         keys.push("motion", "presence");
     }
     keys.push("contact_open", "window_open");
+    const maxHighlights = baseType === "net_sen" ? 5 : 4;
     return keys
         .filter((key, index) => keys.indexOf(key) === index)
         // Der große Lampen-Button zeigt relay_1 bei net_erl schon eindeutig an. Ein zweiter Ein/Aus-Hinweis bläht die Karte nur auf.
         .filter((key) => !(isNetErlDevice(device) && key === "relay_1"))
         .filter((key) => Object.prototype.hasOwnProperty.call(state, key))
-        .slice(0, 4)
+        .slice(0, maxHighlights)
         .map((key) => ({
             key,
             label: labelForStateKey(key),
