@@ -59,7 +59,7 @@ constexpr uint32_t BOOT_COUNTER_PROTOCOL_PLACEHOLDER = NET_ERL_BOOT_COUNTER;
 
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
 constexpr const char* NET_ERL_KITCHEN_STORAGE_NAMESPACE = "net_erl_kit";
-constexpr const char* STORAGE_KEY_KITCHEN_SETUP = "kitchen_setup_v1";
+constexpr const char* STORAGE_KEY_KITCHEN_SETUP = "kitchen_cfg_v1";
 static_assert(
     sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
     "NET_ERL_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
