@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
+#include <esp_task_wdt.h>
 #include <esp_wifi.h>
 #include <stdarg.h>
 #include <string.h>
@@ -69,6 +70,7 @@ constexpr uint32_t GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t AIR_METRIC_UNGUELTIG = 0xFFFFU;
 constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;
 constexpr uint8_t LED_RING_HELLIGKEIT = 24U;
+constexpr uint32_t TASK_WDT_TIMEOUT_S = 8UL;
 
 Adafruit_BME680 bme680;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
@@ -127,7 +129,7 @@ struct KitchenRuntime {
     unsigned long letzter_ens_gueltig_ms;
     unsigned long button_changed_at_ms;
     unsigned long button_pressed_at_ms;
-    unsigned long motion_deadline_ms;
+    unsigned long letzte_motion_ms;
     unsigned long state_interval_ms;
     uint8_t bme680_gueltige_messungen;
     uint8_t master_mac[6];
@@ -209,6 +211,21 @@ uint16_t clampHum01pct(long value) {
     if (value < 0L) return 0U;
     if (value > 1000L) return 1000U;
     return (uint16_t)value;
+}
+
+void logf(const char* level, const char* format, ...);
+
+void initialisiereTaskWatchdog() {
+    const esp_err_t initErr = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+    if (initErr != ESP_OK && initErr != ESP_ERR_INVALID_STATE) {
+        logf("WARN", "Task-Watchdog Init fehlgeschlagen (err=%d)", (int)initErr);
+        return;
+    }
+
+    const esp_err_t addErr = esp_task_wdt_add(nullptr);
+    if (addErr != ESP_OK && addErr != ESP_ERR_INVALID_STATE) {
+        logf("WARN", "Loop-Task konnte nicht beim Watchdog angemeldet werden (err=%d)", (int)addErr);
+    }
 }
 
 uint16_t mapEns160AqiZu500(uint16_t rawAqi) {
@@ -826,6 +843,7 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 
         runtime.relay_auto_owned = false;
         runtime.pending_auto_on_decision = false;
+        runtime.blocked_by_lux = false;
         setzeRelayAusgang(neuerZustand, "master_cmd");
         runtime.state_report_offen = true;
         sendeRelayEvent(SH_TRIGGER_MASTER_CMD);
@@ -1097,7 +1115,7 @@ void leseUmweltsensoren(unsigned long jetzt) {
     if (runtime.lux_ok) {
         const float lux = veml.readLux();
         if (!isnan(lux) && lux >= 0.0f) {
-            runtime.sensor.lux = (uint16_t)lroundf(lux);
+            runtime.sensor.lux = clampToU16((long)lroundf(lux));
         } else {
             runtime.lux_ok = false;
             logf("WARN", "VEML7700 Read fehlgeschlagen");
@@ -1183,7 +1201,7 @@ void loggeSnapshot(unsigned long jetzt) {
 void motionAktivWerden(unsigned long jetzt) {
     runtime.motion_aktiv = true;
     runtime.sensor.motion = true;
-    runtime.motion_deadline_ms = jetzt + ((unsigned long)runtime.auto_off_delay_s * 1000UL);
+    runtime.letzte_motion_ms = jetzt;
     runtime.state_report_offen = true;
     runtime.pending_motion_event_state = 1U;
     sendeAusstehendesMotionEvent();
@@ -1210,13 +1228,13 @@ void motionAktivWerden(unsigned long jetzt) {
 }
 
 void motionTimerReset(unsigned long jetzt) {
-    runtime.motion_deadline_ms = jetzt + ((unsigned long)runtime.auto_off_delay_s * 1000UL);
+    runtime.letzte_motion_ms = jetzt;
 }
 
 void motionInaktivWerden() {
     runtime.motion_aktiv = false;
     runtime.sensor.motion = false;
-    runtime.motion_deadline_ms = 0UL;
+    runtime.letzte_motion_ms = 0UL;
     runtime.blocked_by_lux = false;
     runtime.pending_auto_on_decision = false;
     runtime.state_report_offen = true;
@@ -1248,7 +1266,10 @@ void pollPresence(unsigned long jetzt) {
         return;
     }
 
-    if (runtime.motion_aktiv && runtime.motion_deadline_ms > 0UL && jetzt >= runtime.motion_deadline_ms) {
+    const unsigned long autoOffDelayMs = (unsigned long)runtime.auto_off_delay_s * 1000UL;
+    if (runtime.motion_aktiv &&
+        runtime.letzte_motion_ms > 0UL &&
+        (jetzt - runtime.letzte_motion_ms) >= autoOffDelayMs) {
         motionInaktivWerden();
     }
 }
@@ -1286,6 +1307,7 @@ void verarbeiteLokalenButton(unsigned long jetzt) {
 
     runtime.relay_auto_owned = false;
     runtime.pending_auto_on_decision = false;
+    runtime.blocked_by_lux = false;
     setzeRelayAusgang(!runtime.relay_1, "local_button");
     sendeRelayEvent(SH_TRIGGER_MANUAL_BUTTON);
     runtime.state_report_offen = true;
@@ -1297,6 +1319,8 @@ void setup() {
         Serial.begin(115200);
         delay(150);
     }
+
+    initialisiereTaskWatchdog();
 
     runtime = {};
     runtime.report_interval_s = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
@@ -1378,6 +1402,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset();
     nodeProvisioning.update();
 
     if (!runtime.provisioning_bereit || runtime.setup_mode) {

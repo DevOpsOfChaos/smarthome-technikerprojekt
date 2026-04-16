@@ -1,0 +1,45 @@
+PROTOKOLL 2026-04-16 - NET-ERL Kitchen Vor-Realtest-Haertung
+
+Ausgangslage
+Der neue Geraetepfad net_erl_kitchen war vor dem naechsten Realtest bereits realtestnah aufgebaut.
+Aus der Review-Auswertung wurden bewusst nur vier kleine Haertungspunkte freigegeben.
+Groessere Themen wie BME680 non-blocking, LD2410C-UART, Lux-Nachschaltlogik, Debounce-Tuning oder Setup-Grundsatzpfade wurden nicht angefasst.
+
+Ziel
+Der Kitchen-Pfad sollte vor dem naechsten Hardwarelauf robuster werden, ohne die Sensor- oder Geraetearchitektur umzubauen.
+
+Umsetzung
+1. Hardware-Watchdog:
+   - Task-Watchdog fuer den Loop-Task initialisiert.
+   - Watchdog wird am Anfang von loop() zurueckgesetzt.
+   - Ziel ist ein enger Schutz gegen dauerhafte Haenger, besonders im Umfeld blockierender Sensorzugriffe.
+
+2. Motion-Timer:
+   - Die alte Future-Deadline wurde durch den Zeitpunkt der letzten erkannten Bewegung ersetzt.
+   - Der Ablauf wird jetzt per Differenzvergleich geprueft.
+   - Damit bleibt die Auto-Off-Logik auch ueber einen millis()-Ueberlauf hinweg robust.
+
+3. Lux-Wert:
+   - Der VEML7700-Luxwert wird vor der Ablage in den State auf uint16_t begrenzt.
+   - Negative oder ungueltige Werte bleiben weiterhin Fehlerfall.
+
+4. Manuelle Bedienung:
+   - Bei Master-Schaltbefehl und lokalem Button wird blocked_by_lux zurueckgesetzt.
+   - Manuelle Eingriffe tragen damit keinen alten Auto-Lux-Blockierungszustand weiter.
+
+Geaenderte Dateien
+- firmware/src/devices/net_erl_kitchen/main.cpp
+
+Pruefung
+- Befehl: pio run -e net_erl_kitchen
+- Ergebnis: SUCCESS
+- RAM: 40388 bytes / 327680 bytes
+- Flash: 852348 bytes / 1310720 bytes
+
+Ergebnis
+Der Haertungsblock ist eng umgesetzt.
+Der Kitchen-Pfad baut erfolgreich.
+Es wurden keine nicht freigegebenen Review-Punkte vorgezogen.
+
+Offen
+Der naechste echte Kitchen-Realtest muss weiterhin Sensorstart, Masterbindung, STATE, Button, Ring, Relais, LD2410C und Umweltwerte real bestaetigen.
