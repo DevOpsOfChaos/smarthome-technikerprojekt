@@ -1,0 +1,111 @@
+PROTOKOLL 2026-04-16 - NET-ERL Hall-Light Realtest nach Haertung
+
+Thema
+- Realtest des Geraetepfads net_erl_hall_light nach dem Hall-Light-Haertungsblock.
+- Ziel war kein neuer Review, sondern Build, Flash, Masterbindung, Startverhalten und soweit moeglich echtes Laufverhalten.
+
+Ausgangsstand
+- Oeffentliches Repo: C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt
+- Privates Repo: C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt-private
+- Beide Repos standen auf main.
+- Oeffentliches Repo vor dem Lauf: 1468d81 firmware: haerte hall light vor realtest
+- Privates Repo vor dem Lauf: c428e31 docs: add active codex prompt for hall light realtest and finish
+
+Ports / Hardware
+- Master: COM3
+  - USB VID:PID=303A:1001, SER=20:6E:F1:6D:92:C0
+  - wurde nur als Master-Monitor verwendet, nicht als Hall-Light-Upload-Ziel.
+- Hall-Light: COM12
+  - USB VID:PID=303A:1001, SER=20:6E:F1:6A:DF:5C
+  - Upload auf COM12 meldete ESP32-C3 und MAC 20:6e:f1:6a:df:5c.
+
+Build
+- Befehl:
+  pio run -e net_erl_hall_light
+- Ergebnis:
+  SUCCESS
+- Speicherbild:
+  RAM: 39980 bytes / 327680 bytes, 12.2 %
+  Flash: 824254 bytes / 1310720 bytes, 62.9 %
+
+Flash
+- Befehl:
+  pio run -e net_erl_hall_light -t upload --upload-port COM12
+- Ergebnis:
+  SUCCESS
+- Wichtig:
+  COM3 wurde nicht geflasht. COM3 war der Master.
+
+Setup-Modus
+- Kein unerwarteter Setup-Modus wurde beobachtet.
+- Hall-Light hatte eine gespeicherte Master-Bindung und lief nach dem Flash im normalen Master-gebundenen Pfad.
+- Hall-Light-Applikationslogs auf COM12 wurden nicht erwartet und nicht beobachtet, weil NET_ERL_DEBUG_ENABLED im Hall-Light-DeviceConfig.h weiter auf 0 steht.
+
+Master-seitige Evidence nach Hall-Light-Flash
+- Relevante Zeilen aus dem COM3-Mitschnitt:
+  [INFO] HELLO_ACK gesendet an 20:6E:F1:6A:DF:5C
+  [INFO] HELLO von NET-ERL-001 (NET-ERL Hall Light)
+  [INFO] ESP-NOW Sendestatus an 20:6E:F1:6A:DF:5C: OK
+  [INFO] EVENT von NET-ERL-001: type=2
+  [INFO] HEARTBEAT von NET-ERL-001 (uptime=0s)
+  [INFO] STATE_REPORT von NET-ERL-001 verarbeitet
+  [INFO] EVENT von NET-ERL-001: type=6
+  [INFO] STATE_REPORT von NET-ERL-001 verarbeitet
+- Zuordnung:
+  - EVENT type=2 entspricht SH_EVENT_MOTION_DETECTED.
+  - EVENT type=6 entspricht SH_EVENT_RELAY_CHANGED.
+- Danach liefen wiederholt HEARTBEAT und STATE_REPORT weiter:
+  - uptime=20s, 40s, 100s, 120s, 140s, 160s
+  - STATE_REPORT wurde mehrfach verarbeitet.
+
+Real geprueft
+- Build des aktiven Hall-Light-Environments.
+- Flash auf das reale Hall-Light-Zielgeraet COM12.
+- Masterbindung nach frischem Flash:
+  - HELLO vom Hall-Light kam beim Master an.
+  - HELLO_ACK wurde vom Master an die Hall-Light-MAC gesendet.
+  - ESP-NOW-Sendestatus war OK.
+- Normalbetrieb statt Setup:
+  - HEARTBEAT und STATE_REPORT wurden vom Master verarbeitet.
+- PIR/Motion:
+  - Master sah EVENT type=2 von NET-ERL-001.
+- Relaispfad:
+  - Master sah EVENT type=6 von NET-ERL-001.
+  - Das belegt mindestens den firmwareseitigen Relay-Changed/Event-Pfad.
+- Boot-Stabilitaet:
+  - Nach Flash und Reset liefen HEARTBEAT und STATE ueber mehrere Intervalle weiter.
+
+Nicht vollstaendig real pruefbar in diesem Lauf
+- Hall-Light-eigene Sensorwerte auf COM12:
+  - keine Applikationslogs, weil Debug fuer diesen produktionsnahen Hall-Light-Pfad deaktiviert ist.
+- BME280/VEML7700-Einzelwerte:
+  - masterseitig wurden STATE_REPORTs verarbeitet, aber der Master-Mitschnitt gibt die Einzelwerte nicht aus.
+- CMD/CFG-Pfade:
+  - Der Master meldete wiederholt MQTT connect fehlgeschlagen:
+    [WARN] MQTT connect fehlgeschlagen (state=-2, broker=192.168.178.59:1883, typ=ip)
+  - Damit waren MQTT-basierte set_relay/get_state/set_config-Befehle in diesem Lauf nicht belastbar pruefbar.
+- Auto-Off:
+  - Im beobachteten Zeitfenster wurde kein zweites Relay-Changed-Event als Auto-Off gesehen.
+  - Wahrscheinlicher Grund: PIR/Motion blieb im Testaufbau aktiv oder wurde nicht gezielt inaktiv beobachtet.
+
+Echte Probleme / Befunde
+- Kein Hall-Light-Firmwaredefekt wurde beobachtet, der einen kleinen Codefix rechtfertigt.
+- Externer Infrastruktur-Befund:
+  - Master erreicht den MQTT-Broker 192.168.178.59:1883 nicht.
+  - Das blockiert CMD/CFG-Realtests ueber den vorgesehenen Master-/MQTT-Pfad.
+- Nachweisgrenze:
+  - Ohne MQTT und ohne Hall-Light-Debuglogs bleiben Sensor-Einzelwerte, CMD, CFG und Auto-Off in diesem Lauf nur teilweise beziehungsweise nicht belastbar belegt.
+
+Fixes in diesem Lauf
+- Keine Firmware-Fixes.
+- Keine Serverarbeiten.
+- Keine Aenderungen an Kitchen, bat_sen oder anderen Geraetepfaden.
+
+Ergebnis
+- Build: bestanden.
+- Flash: bestanden auf COM12.
+- Setup-Modus: nicht aufgetreten.
+- HELLO / HELLO_ACK / STATE / HEARTBEAT: masterseitig real bestaetigt.
+- PIR/Motion-Event: masterseitig real gesehen.
+- Relay-Changed-Event: masterseitig real gesehen.
+- Offen bleibt ein separater Lauf mit erreichbar verbundenem MQTT-Broker beziehungsweise einer anderen legitimen Kommandoquelle, um CMD/CFG, gezieltes Relais-Schalten und Auto-Off sauber zu bestaetigen.
