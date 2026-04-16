@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
+#include <esp_task_wdt.h>
 #include <esp_wifi.h>
 #include <stdarg.h>
 #include <string.h>
@@ -58,6 +59,8 @@ static_assert(
     "NET_ERL_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
 constexpr uint32_t NET_ERL_HALL_SETUP_MAGIC = 0x484C4C31UL;
 constexpr uint16_t NET_ERL_HALL_SETUP_VERSION = 1U;
+constexpr uint32_t TASK_WDT_TIMEOUT_S = 8UL;
+constexpr uint16_t I2C_TIMEOUT_MS = 50U;
 
 Adafruit_BME280 bme280;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
@@ -68,6 +71,20 @@ struct SensorState {
     uint16_t lux;
     bool motion;
     bool fault;
+};
+
+struct PendingCmdRequest {
+    bool aktiv;
+    uint8_t sender_mac[6];
+    SmartHome::MsgHeader header;
+    SmartHome::CmdPayload payload;
+};
+
+struct PendingCfgRequest {
+    bool aktiv;
+    uint8_t sender_mac[6];
+    SmartHome::MsgHeader header;
+    SmartHome::CfgPayload payload;
 };
 
 struct HallRuntime {
@@ -86,6 +103,7 @@ struct HallRuntime {
     bool blocked_by_lux;
     bool pending_auto_on_decision;
     uint8_t pending_motion_event_state;
+    uint8_t pending_relay_event_trigger;
     unsigned long restart_requested_at_ms;
     unsigned long letztes_hello_ms;
     unsigned long letzter_heartbeat_ms;
@@ -110,6 +128,8 @@ struct HallRuntime {
     uint16_t auto_off_delay_s;
     char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
     SensorState sensor;
+    PendingCmdRequest pending_cmd;
+    PendingCfgRequest pending_cfg;
 };
 
 struct HallPersistedSetupData {
@@ -126,6 +146,7 @@ struct HallProvisioningSnapshot {
 };
 
 HallRuntime runtime = {};
+portMUX_TYPE runtimeMux = portMUX_INITIALIZER_UNLOCKED;
 
 bool parseUIntValue(const char* text, uint32_t& outValue) {
     if (text == nullptr || *text == '\0') return false;
@@ -183,6 +204,19 @@ void logf(const char* level, const char* format, ...) {
     Serial.print(level);
     Serial.print("] ");
     Serial.println(message);
+}
+
+void initialisiereTaskWatchdog() {
+    const esp_err_t initErr = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+    if (initErr != ESP_OK && initErr != ESP_ERR_INVALID_STATE) {
+        logf("WARN", "Task-Watchdog Init fehlgeschlagen (err=%d)", (int)initErr);
+        return;
+    }
+
+    const esp_err_t addErr = esp_task_wdt_add(nullptr);
+    if (addErr != ESP_OK && addErr != ESP_ERR_INVALID_STATE) {
+        logf("WARN", "Loop-Task konnte nicht beim Watchdog angemeldet werden (err=%d)", (int)addErr);
+    }
 }
 
 void provisioningLog(const char* level, const char* message) {
@@ -482,6 +516,7 @@ uint8_t holeAutoFlags() {
     flags |= SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED;
     if (runtime.relay_auto_owned) flags |= SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED;
     if (runtime.blocked_by_lux) flags |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_LUX;
+    if (runtime.pending_auto_on_decision) flags |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_MISSING_LUX;
     return flags;
 }
 
@@ -584,6 +619,35 @@ bool sendeRelayEvent(uint8_t trigger) {
     return sendePaket(runtime.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT_RELAY_CHANGED");
 }
 
+void merkeRelayEvent(uint8_t trigger) {
+    portENTER_CRITICAL(&runtimeMux);
+    runtime.pending_relay_event_trigger = trigger;
+    portEXIT_CRITICAL(&runtimeMux);
+}
+
+void sendeAusstehendesRelayEvent() {
+    if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return;
+
+    uint8_t trigger = 0U;
+    portENTER_CRITICAL(&runtimeMux);
+    trigger = runtime.pending_relay_event_trigger;
+    portEXIT_CRITICAL(&runtimeMux);
+
+    if (trigger == 0U) return;
+    if (!sendeRelayEvent(trigger)) return;
+
+    portENTER_CRITICAL(&runtimeMux);
+    if (runtime.pending_relay_event_trigger == trigger) {
+        runtime.pending_relay_event_trigger = 0U;
+    }
+    portEXIT_CRITICAL(&runtimeMux);
+}
+
+void meldeRelayAenderung(uint8_t trigger) {
+    merkeRelayEvent(trigger);
+    sendeAusstehendesRelayEvent();
+}
+
 void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
     if (payload.ack_status != SH_ACK_OK) {
         logf("WARN", "HELLO_ACK abgelehnt");
@@ -603,7 +667,6 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     runtime.master_bekannt = true;
     runtime.state_report_offen = true;
     stellePeerSicher(runtime.master_mac);
-    sendeAusstehendesMotionEvent();
     logf("INFO", "HELLO_ACK empfangen");
 }
 
@@ -715,7 +778,7 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
         runtime.pending_auto_on_decision = false;
         setzeRelayAusgang(neuerZustand, "master_cmd");
         runtime.state_report_offen = true;
-        sendeRelayEvent(SH_TRIGGER_MASTER_CMD);
+        meldeRelayAenderung(SH_TRIGGER_MASTER_CMD);
 
         if (header.flags & SH_FLAG_ACK_REQUEST) {
             sendeAck(senderMac, header.seq, header.msg_type, SH_ACK_OK);
@@ -725,6 +788,68 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 
     if (header.flags & SH_FLAG_ACK_REQUEST) {
         sendeAck(senderMac, header.seq, header.msg_type, SH_ACK_REJECTED);
+    }
+}
+
+void merkePendingCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
+    PendingCmdRequest request = {};
+    request.aktiv = true;
+    memcpy(request.sender_mac, senderMac, sizeof(request.sender_mac));
+    request.header = header;
+    request.payload = payload;
+
+    portENTER_CRITICAL(&runtimeMux);
+    runtime.pending_cmd = request;
+    portEXIT_CRITICAL(&runtimeMux);
+}
+
+void merkePendingCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    PendingCfgRequest request = {};
+    request.aktiv = true;
+    memcpy(request.sender_mac, senderMac, sizeof(request.sender_mac));
+    request.header = header;
+    request.payload = payload;
+
+    portENTER_CRITICAL(&runtimeMux);
+    runtime.pending_cfg = request;
+    portEXIT_CRITICAL(&runtimeMux);
+}
+
+bool holePendingCmd(PendingCmdRequest& request) {
+    portENTER_CRITICAL(&runtimeMux);
+    if (!runtime.pending_cmd.aktiv) {
+        portEXIT_CRITICAL(&runtimeMux);
+        return false;
+    }
+
+    request = runtime.pending_cmd;
+    runtime.pending_cmd = {};
+    portEXIT_CRITICAL(&runtimeMux);
+    return true;
+}
+
+bool holePendingCfg(PendingCfgRequest& request) {
+    portENTER_CRITICAL(&runtimeMux);
+    if (!runtime.pending_cfg.aktiv) {
+        portEXIT_CRITICAL(&runtimeMux);
+        return false;
+    }
+
+    request = runtime.pending_cfg;
+    runtime.pending_cfg = {};
+    portEXIT_CRITICAL(&runtimeMux);
+    return true;
+}
+
+void verarbeiteAusstehendeFunkAuftraege() {
+    PendingCmdRequest cmd = {};
+    while (holePendingCmd(cmd)) {
+        verarbeiteCmd(cmd.sender_mac, cmd.header, cmd.payload);
+    }
+
+    PendingCfgRequest cfg = {};
+    while (holePendingCfg(cfg)) {
+        verarbeiteCfg(cfg.sender_mac, cfg.header, cfg.payload);
     }
 }
 
@@ -745,13 +870,13 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
 
         case SH_MSG_CMD:
             if (header->payload_len == sizeof(SmartHome::CmdPayload)) {
-                verarbeiteCmd(senderMac, *header, *reinterpret_cast<const SmartHome::CmdPayload*>(payload));
+                merkePendingCmd(senderMac, *header, *reinterpret_cast<const SmartHome::CmdPayload*>(payload));
             }
             break;
 
         case SH_MSG_CFG:
             if (header->payload_len == sizeof(SmartHome::CfgPayload)) {
-                verarbeiteCfg(senderMac, *header, *reinterpret_cast<const SmartHome::CfgPayload*>(payload));
+                merkePendingCfg(senderMac, *header, *reinterpret_cast<const SmartHome::CfgPayload*>(payload));
             }
             break;
 
@@ -810,6 +935,7 @@ void konfiguriereVeml7700() {
 
 void initialisiereSensorik() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
+    Wire.setTimeOut(I2C_TIMEOUT_MS);
     runtime.bme_ok = bme280.begin((uint8_t)NET_ERL_BME280_ADDRESS, &Wire);
     if (!runtime.bme_ok) {
         logf("WARN", "BME280 Init fehlgeschlagen (addr=0x%02X)", NET_ERL_BME280_ADDRESS);
@@ -908,7 +1034,7 @@ void leseUmweltsensoren(unsigned long jetzt) {
             runtime.relay_auto_owned = true;
             runtime.blocked_by_lux = false;
             setzeRelayAusgang(true, "auto_on_motion_late_lux");
-            sendeRelayEvent(SH_TRIGGER_AUTO);
+            meldeRelayAenderung(SH_TRIGGER_AUTO);
             runtime.state_report_offen = true;
             logf("INFO", "motion weiter aktiv, auto_on nach erstem lux=%u <= schwelle=%u", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
         } else {
@@ -953,7 +1079,7 @@ void motionAktivWerden(unsigned long jetzt) {
         } else if (runtime.sensor.lux <= runtime.auto_on_lux_threshold) {
             runtime.relay_auto_owned = true;
             setzeRelayAusgang(true, "auto_on_motion");
-            sendeRelayEvent(SH_TRIGGER_AUTO);
+            meldeRelayAenderung(SH_TRIGGER_AUTO);
             logf("INFO", "motion erkannt, lux=%u <= schwelle=%u, timer gestartet", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
         } else {
             // Sinkende Lux waehrend laufender Praesenz schaltet nicht automatisch nach.
@@ -982,7 +1108,7 @@ void motionInaktivWerden() {
 
     if (runtime.relay_1 && runtime.relay_auto_owned) {
         setzeRelayAusgang(false, "auto_off_timer");
-        sendeRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER);
+        meldeRelayAenderung(SH_TRIGGER_AUTO_OFF_TIMER);
         runtime.relay_auto_owned = false;
         logf("INFO", "lampe aus nach timerablauf");
     }
@@ -1014,6 +1140,8 @@ void setup() {
         Serial.begin(115200);
         delay(150);
     }
+
+    initialisiereTaskWatchdog();
 
     runtime = {};
     runtime.report_interval_s = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
@@ -1093,6 +1221,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset();
     nodeProvisioning.update();
 
     if (!runtime.provisioning_bereit || runtime.setup_mode) {
@@ -1106,10 +1235,12 @@ void loop() {
 
     const unsigned long jetzt = millis();
 
+    verarbeiteAusstehendeFunkAuftraege();
     leseUmweltsensoren(jetzt);
     pollPIR(jetzt);
     loggeSnapshot(jetzt);
     sendeAusstehendesMotionEvent();
+    sendeAusstehendesRelayEvent();
 
     if (!runtime.master_bekannt &&
         (runtime.letztes_hello_ms == 0UL ||

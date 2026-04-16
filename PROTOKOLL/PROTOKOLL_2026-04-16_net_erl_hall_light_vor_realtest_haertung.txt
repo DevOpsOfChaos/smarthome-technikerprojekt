@@ -1,0 +1,48 @@
+PROTOKOLL 2026-04-16 - NET-ERL Hall Light Vor-Realtest-Haertung
+
+Ausgangslage
+Der produktionsnahe Hall-Light-Pfad war vor dem naechsten Realtest bereits vorhanden.
+Aus der Review-Auswertung wurden bewusst nur die callback-kritischen und kleinen robustheitsnahen Punkte freigegeben.
+Lux-Verhalten, PIR-Interrupt, BME280-Forced-Mode, Reboot-Kommando und sonstige Stilthemen wurden nicht angefasst.
+
+Ziel
+Der Hall-Light-Pfad sollte vor dem naechsten Hardwarelauf robuster werden, ohne die Geraete- oder Sensorarchitektur umzubauen.
+
+Umsetzung
+1. CMD-Pfad:
+   - ESP-NOW-CMD-Pakete werden im Callback nur noch als Pending-Auftrag vorgemerkt.
+   - Die eigentliche CMD-Verarbeitung mit Relaiszugriff, State-Markierung, Relay-Event und ACK laeuft in loop().
+
+2. CFG-Pfad:
+   - ESP-NOW-CFG-Pakete werden im Callback nur noch als Pending-Auftrag vorgemerkt.
+   - Die eigentliche CFG-Anwendung inklusive Persistenz und ACK laeuft in loop().
+
+3. Relay-Event-Pfad:
+   - Relay-Aenderungen laufen ueber einen Pending-Relay-Event-Pfad.
+   - Fruehe Auto-On-Ereignisse bleiben damit vorgemerkt, bis der Master bekannt ist.
+
+4. Watchdog und I2C:
+   - Der Loop-Task wird beim Hardware-Watchdog angemeldet.
+   - Der Watchdog wird am Anfang von loop() zurueckgesetzt.
+   - Fuer Wire wurde ein I2C-Timeout gesetzt.
+
+5. Auto-Flags:
+   - Bei offener Auto-On-Entscheidung wegen fehlendem ersten Lux-Wert wird SH_RELAY_COMFORT_FLAG_BLOCKED_BY_MISSING_LUX gesetzt.
+
+Geaenderte Dateien
+- firmware/src/devices/net_erl_hall_light/main.cpp
+
+Pruefung
+- Befehl: pio run -e net_erl_hall_light
+- Arbeitsverzeichnis: firmware
+- Ergebnis: SUCCESS
+- RAM: 39980 bytes / 327680 bytes
+- Flash: 824254 bytes / 1310720 bytes
+
+Ergebnis
+Der freigegebene Haertungsblock ist eng umgesetzt.
+Der Hall-Light-Pfad baut erfolgreich.
+Es wurden keine nicht freigegebenen Review-Punkte vorgezogen.
+
+Offen
+Der naechste echte Hall-Light-Realtest muss weiterhin Setup, Masterbindung, STATE, CMD, CFG, PIR, Lux, Auto-On, Auto-Off und Relay-Events real bestaetigen.
