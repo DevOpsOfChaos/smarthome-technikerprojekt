@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <esp_now.h>
+#include <esp_task_wdt.h>
 #include <esp_wifi.h>
 #include <stdarg.h>
 #include <string.h>
@@ -32,6 +33,8 @@ const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
+constexpr uint32_t TASK_WDT_TIMEOUT_S = 8UL;
+constexpr uint16_t I2C_TIMEOUT_MS = 50U;
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
 static_assert(
     sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
@@ -187,6 +190,19 @@ void provisioningLog(const char* level, const char* message) {
     Serial.print(level);
     Serial.print("] ");
     Serial.println(message);
+}
+
+void initialisiereTaskWatchdog() {
+    const esp_err_t initErr = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+    if (initErr != ESP_OK && initErr != ESP_ERR_INVALID_STATE) {
+        logf("WARN", "Task-Watchdog Init fehlgeschlagen (err=%d)", (int)initErr);
+        return;
+    }
+
+    const esp_err_t addErr = esp_task_wdt_add(nullptr);
+    if (addErr != ESP_OK && addErr != ESP_ERR_INVALID_STATE) {
+        logf("WARN", "Loop-Task konnte nicht beim Watchdog angemeldet werden (err=%d)", (int)addErr);
+    }
 }
 
 void copyText(char* target, size_t targetSize, const char* source) {
@@ -572,6 +588,7 @@ void initialisiereFunk() {
 void initialisiereSensorik() {
     if (I2C_BASIS_AKTIV) {
         Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
+        Wire.setTimeOut(I2C_TIMEOUT_MS);
     }
 
     netSenDeviceSensorInit();
@@ -605,6 +622,8 @@ void setup() {
         Serial.begin(115200);
         delay(150);
     }
+
+    initialisiereTaskWatchdog();
 
     nodeStatus = {};
     nodeStatus.report_interval_s = DEFAULT_REPORT_INTERVAL_S;
@@ -674,6 +693,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset();
     nodeProvisioning.update();
 
     if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode) {

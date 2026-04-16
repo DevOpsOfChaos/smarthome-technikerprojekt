@@ -39,6 +39,7 @@ static_assert(
 
 namespace {
 constexpr uint32_t I2C_CLOCK_HZ = 100000UL;
+constexpr unsigned long SENSOR_RECOVERY_RETRY_INTERVAL_MS = 30000UL;
 
 struct ErweiterterState {
     uint32_t pressure_pa;
@@ -63,6 +64,9 @@ unsigned long letzterSensorPollMs = 0UL;
 unsigned long letzterBmeFehlerLogMs = 0UL;
 unsigned long letzterVemlFehlerLogMs = 0UL;
 unsigned long letzterSnapshotLogMs = 0UL;
+unsigned long letzterBmeRecoveryMs = 0UL;
+unsigned long letzterVemlRecoveryMs = 0UL;
+unsigned long veml7700BereitSeitMs = 0UL;
 
 ErweiterterState erweiterterState = {
     NET_SEN_PRESSURE_UNGUELTIG,
@@ -88,8 +92,10 @@ uint16_t absDiffU16(uint16_t a, uint16_t b) {
     return a > b ? (uint16_t)(a - b) : (uint16_t)(b - a);
 }
 
-int16_t absDiffI16(int16_t a, int16_t b) {
-    return a > b ? (int16_t)(a - b) : (int16_t)(b - a);
+uint16_t absDiffI16(int16_t a, int16_t b) {
+    const int32_t diff = (int32_t)a - (int32_t)b;
+    const uint32_t absDiff = diff < 0 ? (uint32_t)(-diff) : (uint32_t)diff;
+    return absDiff > 65535UL ? 65535U : (uint16_t)absDiff;
 }
 
 bool wertAendertU32(uint32_t alt, uint32_t neu, uint32_t invalid, uint32_t delta) {
@@ -123,6 +129,7 @@ bool initialisiereBme280() {
         (uint8_t)NET_SEN_ENV_BME280_PRIMARY_ADDRESS,
         (uint8_t)NET_SEN_ENV_BME280_FALLBACK_ADDRESS};
 
+    bme280Adresse = 0U;
     for (uint8_t adresse : moeglicheAdressen) {
         if (!sensorBme280.begin(adresse, &Wire)) continue;
 
@@ -132,6 +139,42 @@ bool initialisiereBme280() {
     }
 
     return false;
+}
+
+void konfiguriereVeml7700() {
+    sensorVeml7700.setGain(VEML7700_GAIN_1);
+    sensorVeml7700.setIntegrationTime(VEML7700_IT_100MS);
+}
+
+bool initialisiereVeml7700(unsigned long jetzt) {
+    if (!sensorVeml7700.begin()) return false;
+
+    konfiguriereVeml7700();
+    veml7700BereitSeitMs = jetzt;
+    return true;
+}
+
+bool sensorRecoveryFaellig(unsigned long letzterVersuchMs, unsigned long jetzt) {
+    return letzterVersuchMs == 0UL ||
+           (jetzt - letzterVersuchMs) >= SENSOR_RECOVERY_RETRY_INTERVAL_MS;
+}
+
+void versucheBmeRecovery(unsigned long jetzt) {
+    if (bme280Bereit || !sensorRecoveryFaellig(letzterBmeRecoveryMs, jetzt)) return;
+
+    letzterBmeRecoveryMs = jetzt;
+    bme280Bereit = initialisiereBme280();
+    logf(bme280Bereit ? "INFO" : "WARN",
+         bme280Bereit ? "BME280 Recovery erfolgreich" : "BME280 Recovery fehlgeschlagen");
+}
+
+void versucheVemlRecovery(unsigned long jetzt) {
+    if (veml7700Bereit || !sensorRecoveryFaellig(letzterVemlRecoveryMs, jetzt)) return;
+
+    letzterVemlRecoveryMs = jetzt;
+    veml7700Bereit = initialisiereVeml7700(jetzt);
+    logf(veml7700Bereit ? "INFO" : "WARN",
+         veml7700Bereit ? "VEML7700 Recovery erfolgreich" : "VEML7700 Recovery fehlgeschlagen");
 }
 
 bool leseRegenNass() {
@@ -150,6 +193,9 @@ void netSenDeviceSensorInit() {
     letzterBmeFehlerLogMs = 0UL;
     letzterVemlFehlerLogMs = 0UL;
     letzterSnapshotLogMs = 0UL;
+    letzterBmeRecoveryMs = 0UL;
+    letzterVemlRecoveryMs = 0UL;
+    veml7700BereitSeitMs = 0UL;
     regenEventOffen = false;
     regenEventStatus = 0U;
 
@@ -172,10 +218,8 @@ void netSenDeviceSensorInit() {
             NET_SEN_ENV_BME280_FALLBACK_ADDRESS);
     }
 
-    veml7700Bereit = sensorVeml7700.begin();
+    veml7700Bereit = initialisiereVeml7700(bootMs);
     if (veml7700Bereit) {
-        sensorVeml7700.setGain(VEML7700_GAIN_1);
-        sensorVeml7700.setIntegrationTime(VEML7700_IT_100MS);
         logf("INFO", "VEML7700 init OK auf 0x10");
     } else {
         logf("WARN", "VEML7700 nicht gefunden (0x10)");
@@ -228,7 +272,7 @@ bool netSenDevicePollEvent(
     if (event_type != nullptr) *event_type = SH_EVENT_RAIN_DETECTED;
     if (trigger != nullptr) *trigger = SH_TRIGGER_AUTO;
     if (param1 != nullptr) *param1 = regenEventStatus;
-    if (param2 != nullptr) *param2 = regenEventStatus;
+    if (param2 != nullptr) *param2 = 0U;
     return true;
 }
 
@@ -261,6 +305,9 @@ bool netSenDeviceSensorPoll(
     bool bmeMessungGueltig = false;
     bool vemlMessungGueltig = false;
 
+    versucheBmeRecovery(jetzt);
+    versucheVemlRecovery(jetzt);
+
     if (bme280Bereit) {
         const float tempC = sensorBme280.readTemperature();
         const float humPct = sensorBme280.readHumidity();
@@ -281,19 +328,24 @@ bool netSenDeviceSensorPoll(
             neuerPressure = (uint32_t)lroundf(pressurePa);
             bmeMessungGueltig = true;
         } else {
+            bme280Bereit = false;
             logBmeFehlerGedrosselt(jetzt, "Messwerte unplausibel");
         }
     } else {
         logBmeFehlerGedrosselt(jetzt, "Sensor nicht initialisiert");
     }
 
+    const bool vemlAufwaermphase =
+        veml7700Bereit &&
+        (jetzt - veml7700BereitSeitMs) < NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS;
     if (veml7700Bereit) {
-        if ((jetzt - bootMs) >= NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS) {
+        if (!vemlAufwaermphase) {
             const float luxWert = sensorVeml7700.readLux();
             if (isfinite(luxWert) && luxWert >= 0.0f) {
                 neuerLux = clampToU16((long)lroundf(luxWert));
                 vemlMessungGueltig = true;
             } else {
+                veml7700Bereit = false;
                 logVemlFehlerGedrosselt(jetzt, "Lux unplausibel");
             }
         }
@@ -318,7 +370,7 @@ bool netSenDeviceSensorPoll(
         erweiterterStateGeaendert = true;
     }
 
-    const bool neuerFault = !(bmeMessungGueltig && vemlMessungGueltig);
+    const bool neuerFault = !bmeMessungGueltig || (!vemlMessungGueltig && !vemlAufwaermphase);
 
     *temp_01c = neuerTemp;
     *hum_01pct = neuerHum;

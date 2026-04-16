@@ -1,0 +1,47 @@
+PROTOKOLL 2026-04-16 - NET-SEN Env BME280+VEML+Rain Haertung
+
+Ausgangslage
+Der produktionsnahe NET-SEN-Umweltpfad mit BME280, VEML7700 und digitalem Regensensor war bereits real belegt.
+Aus der Review-Auswertung wurden bewusst nur kleine Firmware-Haertungspunkte umgesetzt.
+Hardware-/Pin-Grundsatzthemen, Regen-ACK-Redesign, Regensensor-Interrupt, BME280-Forced-Mode und VEML7700-Gain-Aenderungen wurden nicht angefasst.
+
+Ziel
+Der NET-SEN-Pfad sollte robuster gegen I2C-Haenger, Sensor-Ausfaelle und kleine State-/Event-Unklarheiten werden, ohne die Runtime- oder Geraetearchitektur umzubauen.
+
+Umsetzung
+1. I2C und Watchdog:
+   - Fuer den gemeinsamen NET-SEN-I2C-Start wurde ein Wire-Timeout gesetzt.
+   - Der Loop-Task wird beim Hardware-Watchdog angemeldet.
+   - Der Watchdog wird am Anfang von loop() zurueckgesetzt.
+
+2. Sensor-Recovery:
+   - BME280 und VEML7700 werden nach Init-Fehlern in einem festen Retry-Intervall erneut initialisiert.
+   - Unplausible Messwerte setzen den betroffenen Sensor wieder auf nicht bereit, damit die Recovery greifen kann.
+   - Die VEML7700-Konfiguration wird nach erfolgreicher Recovery erneut gesetzt.
+
+3. VEML7700-Aufwaermphase:
+   - Die erste bewusst verzoegerte Lux-Messung erzeugt nicht mehr allein einen Fault.
+   - Nach VEML7700-Recovery gilt die gleiche kurze Aufwaermphase erneut.
+
+4. Kleine Robustheits- und Klarheitsfixes:
+   - Die Temperaturdifferenz wird intern breiter berechnet, damit Sentinel-Werte nicht ueberlaufen.
+   - Beim Regen-Event bleibt param1 der Status 0/1, param2 wird reserviert auf 0 gesetzt.
+
+Geaenderte Dateien
+- firmware/src/basetypes/net_sen/NetSenRuntime.h
+- firmware/src/devices/net_sen_env_bme280_veml_rain/main.cpp
+
+Pruefung
+- Befehl: pio run -e net_sen_env_bme280_veml_rain
+- Arbeitsverzeichnis: firmware
+- Ergebnis: SUCCESS
+- RAM: 40108 bytes / 327680 bytes
+- Flash: 829624 bytes / 1310720 bytes
+
+Ergebnis
+Der freigegebene enge Haertungsblock ist umgesetzt.
+Der NET-SEN-Build fuer net_sen_env_bme280_veml_rain laeuft erfolgreich durch.
+Es wurden keine nicht freigegebenen Review-Punkte vorgezogen.
+
+Offen
+Der naechste echte Hardwarelauf sollte weiterhin BME280, VEML7700, Regenstatuswechsel, STATE, EVENT und Fault-Verhalten real bestaetigen.
