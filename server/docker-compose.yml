@@ -5,37 +5,17 @@ services:
     ports:
       - "${MQTT_PORT:-1883}:1883"
 
-  influxdb:
-    image: influxdb:2.7
-    restart: unless-stopped
-    ports:
-      - "${INFLUXDB_PORT:-8086}:8086"
-    environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: "${INFLUXDB_ADMIN_USER:-admin}"
-      DOCKER_INFLUXDB_INIT_PASSWORD: "${INFLUXDB_ADMIN_PASSWORD:-change-me}"
-      DOCKER_INFLUXDB_INIT_ORG: "${INFLUXDB_ORG:-smarthome}"
-      DOCKER_INFLUXDB_INIT_BUCKET: "${INFLUXDB_BUCKET:-smarthome}"
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: "${INFLUXDB_ADMIN_TOKEN:-change-me-token}"
-    volumes:
-      - influxdb-data:/var/lib/influxdb2
-
   nodered:
     image: nodered/node-red:3.1
     restart: unless-stopped
     depends_on:
       - mosquitto
-      - influxdb
     ports:
       - "${NODE_RED_PORT:-1880}:1880"
     environment:
       TZ: "${TZ:-Europe/Berlin}"
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
-      INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_ORG: "${INFLUXDB_ORG:-smarthome}"
-      INFLUXDB_BUCKET: "${INFLUXDB_BUCKET:-smarthome}"
-      INFLUXDB_TOKEN: "${INFLUXDB_ADMIN_TOKEN:-change-me-token}"
       SQLITE_DB_PATH: "${SQLITE_DB_PATH:-/data/sqlite/smarthome_phase1.db}"
     volumes:
       - ./nodered:/data
@@ -90,7 +70,6 @@ services:
           await ensureColumn(db, "device_state_latest", "cover_calibrated", "INTEGER");
           await ensureColumn(db, "device_state_latest", "button_flags", "INTEGER");
           await ensureColumn(db, "device_state_latest", "last_ack_source", "TEXT");
-          await ensureColumn(db, "device_ack_log", "source", "TEXT");
         }
         function ensureSchema() {
           return new Promise((resolve, reject) => {
@@ -143,7 +122,8 @@ services:
             "    capabilityHelpers: require('/data/lib/capability_helpers'),",
             "    timeHelpers: require('/data/lib/time_helpers'),",
             "    commandMinimal: require('/data/lib/command_minimal'),",
-            "    coverAutomation: require('/data/lib/cover_automation')",
+            "    coverAutomation: require('/data/lib/cover_automation'),",
+            "    dashboardV1: require('/data/lib/dashboard_v1')",
             '  }',
             '};',
             ''
@@ -155,6 +135,3 @@ services:
         });
         NODE
         exec node $$NODE_OPTIONS /usr/src/node-red/node_modules/node-red/red.js --userDir /data --settings /tmp/settings.generated.js --flowFile /data/flows.json
-
-volumes:
-  influxdb-data: {}

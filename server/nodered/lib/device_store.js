@@ -3,52 +3,56 @@
 const capabilityHelpers = require("./capability_helpers");
 const timeHelpers = require("./time_helpers");
 
+// Bekannte Zustandsfelder und ihre Normalisierungsfunktion.
+// Felder, die hier nicht aufgeführt sind, werden als dropped_state_fields vermerkt.
 const DEVICE_STATE_NORMALIZERS = {
-  fault: normalizeBoolean,
-  relay_1: normalizeBoolean,
-  relay_2: normalizeBoolean,
-  cover_mode: normalizeTextOrNull,
-  cover_state: normalizeTextOrNull,
-  cover_direction: normalizeTextOrNull,
-  cover_position: normalizeNumber,
-  cover_calibrated: normalizeBoolean,
-  is_calibrated: normalizeBoolean,
-  cover_moving: normalizeBoolean,
-  cover_target: normalizeNumber,
-  travel_time_ms: normalizeNumber,
-  temp_01c: normalizeNumber,
-  hum_01pct: normalizeNumber,
-  lux: normalizeNumber,
-  lux_01lx: normalizeNumber,
-  pressure_pa: normalizeNumber,
-  pressure_hpa: normalizeNumber,
-  gas_ohm: normalizeNumber,
-  aqi: normalizeNumber,
-  tvoc_ppb: normalizeNumber,
-  eco2_ppm: normalizeNumber,
-  motion: normalizeBoolean,
-  presence: normalizeBoolean,
-  rain: normalizeBoolean,
-  rain_raw: normalizeNumber,
-  window_open: normalizeBoolean,
-  contact_open: normalizeBoolean,
-  battery_pct: normalizeNumber,
-  battery_mv: normalizeNumber,
-  button_flags: normalizeNumber,
-  button_last_action: normalizeTextOrNull,
+  fault:                normalizeBoolean,
+  relay_1:              normalizeBoolean,
+  relay_2:              normalizeBoolean,
+  cover_mode:           normalizeTextOrNull,
+  cover_state:          normalizeTextOrNull,
+  cover_direction:      normalizeTextOrNull,
+  cover_position:       normalizeNumber,
+  cover_calibrated:     normalizeBoolean,
+  is_calibrated:        normalizeBoolean,
+  cover_moving:         normalizeBoolean,
+  cover_target:         normalizeNumber,
+  travel_time_ms:       normalizeNumber,
+  temp_01c:             normalizeNumber,
+  hum_01pct:            normalizeNumber,
+  lux:                  normalizeNumber,
+  lux_01lx:             normalizeNumber,
+  pressure_pa:          normalizeNumber,
+  pressure_hpa:         normalizeNumber,
+  gas_ohm:              normalizeNumber,
+  aqi:                  normalizeNumber,
+  tvoc_ppb:             normalizeNumber,
+  eco2_ppm:             normalizeNumber,
+  motion:               normalizeBoolean,
+  presence:             normalizeBoolean,
+  rain:                 normalizeBoolean,
+  rain_raw:             normalizeNumber,
+  window_open:          normalizeBoolean,
+  contact_open:         normalizeBoolean,
+  battery_pct:          normalizeNumber,
+  battery_mv:           normalizeNumber,
+  button_flags:         normalizeNumber,
+  button_last_action:   normalizeTextOrNull,
   button_last_action_at: normalizeTimestamp
 };
 
+// Konfigurationsfelder werden im Geräteobjekt separat von Zustandsfeldern gehalten.
 const DEVICE_CONFIG_NORMALIZERS = {
-  report_interval_s: normalizeNumber,
-  lux_threshold_on: normalizeNumber,
-  auto_off_delay_s: normalizeNumber,
-  rain_threshold: normalizeNumber,
-  auto_up_time: normalizeTextOrNull,
-  auto_down_time: normalizeTextOrNull,
-  auto_schedule_enabled: normalizeBoolean
+  report_interval_s:      normalizeNumber,
+  lux_threshold_on:       normalizeNumber,
+  auto_off_delay_s:       normalizeNumber,
+  rain_threshold:         normalizeNumber,
+  auto_up_time:           normalizeTextOrNull,
+  auto_down_time:         normalizeTextOrNull,
+  auto_schedule_enabled:  normalizeBoolean
 };
 
+// Metafelder, die aus dem Payload in device.meta übernommen werden.
 const DEVICE_META_FIELDS = [
   "device_name",
   "device_class",
@@ -101,6 +105,10 @@ function cloneObject(input) {
   return isPlainObject(input) ? { ...input } : {};
 }
 
+/*
+ * Zweck: Erzeugt einen leeren, initialisierten Laufzeitzustand für den Server.
+ * Rückgabe: Objekt mit leeren devices- und masters-Maps sowie Zeitstempel.
+ */
 function createRuntimeState(now = timeHelpers.nowIso()) {
   return {
     devices: {},
@@ -110,6 +118,11 @@ function createRuntimeState(now = timeHelpers.nowIso()) {
   };
 }
 
+/*
+ * Zweck: Stellt sicher, dass der Laufzeitzustand vollständig und gültig ist.
+ * Fehlende Teilstrukturen werden ergänzt, ohne vorhandene Daten zu überschreiben.
+ * Rückgabe: Geprüftes/repariertes Runtime-Objekt.
+ */
 function ensureRuntime(runtimeState, now = timeHelpers.nowIso()) {
   if (!isPlainObject(runtimeState)) {
     return createRuntimeState(now);
@@ -134,6 +147,11 @@ function ensureRuntime(runtimeState, now = timeHelpers.nowIso()) {
   return runtimeState;
 }
 
+/*
+ * Zweck: Erzeugt ein leeres Geräteobjekt für eine noch unbekannte Device-ID.
+ * Der Basistyp wird aus der ID abgeleitet, falls noch keine Metadaten vorliegen.
+ * Rückgabe: Vollständiges, leeres Geräteobjekt mit allen Pflichtfeldern.
+ */
 function createEmptyDevice(deviceId, now = timeHelpers.nowIso()) {
   return {
     identity: {
@@ -172,6 +190,10 @@ function createEmptyDevice(deviceId, now = timeHelpers.nowIso()) {
   };
 }
 
+/*
+ * Zweck: Erzeugt ein leeres Master-Objekt für ein noch unbekanntes Gateway.
+ * Rückgabe: Vollständiges, leeres Master-Objekt mit allen Pflichtfeldern.
+ */
 function createEmptyMaster(masterId, now = timeHelpers.nowIso()) {
   return {
     master_id: masterId,
@@ -185,7 +207,6 @@ function createEmptyMaster(masterId, now = timeHelpers.nowIso()) {
       last_seen_at: null,
       updated_at: now
     },
-    last_event: null,
     diagnostics: {
       last_handler: null,
       last_topic: null
@@ -194,15 +215,18 @@ function createEmptyMaster(masterId, now = timeHelpers.nowIso()) {
     updated_at: now,
     first_seen_at: now,
     last_seen_at: now,
-    last_status_at: null,
-    last_event_at: null
+    last_status_at: null
   };
 }
 
 /*
- * autoCreate ist die fachliche Schalterstelle fuer den Ingest:
- * Bei echten MQTT-Nachrichten soll ein unbekanntes Geraet robust angelegt werden.
- * Bei lesenden oder pruefenden Pfaden darf stattdessen bewusst `null` zurueckkommen.
+ * Zweck: Gibt das Geräteobjekt für eine Device-ID zurück.
+ *
+ * autoCreate steuert, ob unbekannte Geräte automatisch angelegt werden:
+ * - true (Standard): Gerät wird bei erster Nachricht angelegt (MQTT-Ingest)
+ * - false: null wird zurückgegeben (für lesende oder prüfende Pfade)
+ *
+ * Rückgabe: Geräteobjekt oder null.
  */
 function ensureDevice(runtimeState, deviceId, now = timeHelpers.nowIso(), options = {}) {
   const runtime = ensureRuntime(runtimeState, now);
@@ -222,6 +246,10 @@ function ensureDevice(runtimeState, deviceId, now = timeHelpers.nowIso(), option
   return runtime.devices[normalizedId];
 }
 
+/*
+ * Zweck: Gibt das Master-Objekt für eine Master-ID zurück, legt es ggf. neu an.
+ * Rückgabe: Master-Objekt oder null bei ungültiger ID.
+ */
 function ensureMaster(runtimeState, masterId, now = timeHelpers.nowIso()) {
   const runtime = ensureRuntime(runtimeState, now);
   const normalizedId = normalizeTextOrNull(masterId);
@@ -236,6 +264,7 @@ function ensureMaster(runtimeState, masterId, now = timeHelpers.nowIso()) {
   return runtime.masters[normalizedId];
 }
 
+// Aktualisiert updated_at und last_seen_at bei jeder eingehenden Nachricht.
 function touchDevice(device, receivedAt) {
   device.updated_at = receivedAt;
   device.last_seen_at = receivedAt;
@@ -246,6 +275,16 @@ function touchDeviceHandler(device, handlerName) {
   device.diagnostics.last_topic = handlerName;
 }
 
+/*
+ * Zweck: Übernimmt Metadaten (Klasse, Fähigkeiten, Firmware) in das Geräteobjekt.
+ *
+ * Eingaben:
+ * - device: Geräteobjekt aus dem Runtime-State
+ * - payload: Rohpayload der Meta-Nachricht
+ * - receivedAt: Empfangszeitpunkt
+ *
+ * Seiteneffekt: Aktualisiert device.meta, device.identity und leitet Capabilities neu ab.
+ */
 function applyMeta(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
     return null;
@@ -267,6 +306,8 @@ function applyMeta(device, payload, receivedAt = timeHelpers.nowIso()) {
   nextMeta.device_id = device.identity.device_id;
   nextMeta.device_name = normalizeTextOrNull(nextMeta.device_name) || device.identity.device_name;
   nextMeta.device_class = normalizeTextOrNull(nextMeta.device_class);
+  // Fähigkeiten werden bei jeder Meta-Aktualisierung neu abgeleitet,
+  // damit Klasse und caps-Bitmaske immer konsistent sind.
   nextMeta.caps = capabilityHelpers.deriveCapabilities({
     device_class: nextMeta.device_class,
     caps: capabilityHelpers.normalizeCapabilities(nextMeta.caps)
@@ -288,6 +329,15 @@ function applyMeta(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
+/*
+ * Zweck: Übernimmt Verfügbarkeitsdaten (online/offline) in das Geräteobjekt.
+ *
+ * Eingaben:
+ * - payload.availability: Statuslabel ("online", "offline", "late", …)
+ * - payload.online: optionaler expliziter Boolean
+ *
+ * Seiteneffekt: Aktualisiert device.availability inkl. online-Flag und last_seen_at.
+ */
 function applyAvailability(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
     return null;
@@ -304,6 +354,7 @@ function applyAvailability(device, payload, receivedAt = timeHelpers.nowIso()) {
     nextAvailability.availability = "unknown";
   }
 
+  // online-Flag aus Payload übernehmen oder aus availability-Label ableiten
   if (Object.prototype.hasOwnProperty.call(raw, "online")) {
     nextAvailability.online = timeHelpers.coerceBoolean(raw.online, false);
   } else if (nextAvailability.availability === "online") {
@@ -325,6 +376,17 @@ function applyAvailability(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
+/*
+ * Zweck: Übernimmt Zustandsdaten (Sensoren, Aktorstatus) in das Geräteobjekt.
+ *
+ * Eingabe: payload mit beliebigen Zustandsfeldern.
+ *
+ * Seiteneffekt:
+ * - Bekannte Felder werden normalisiert und in device.state geschrieben.
+ * - Konfigurationsfelder (report_interval_s, …) gehen in device.config.
+ * - Unbekannte Felder werden als dropped_state_fields diagnostisch vermerkt.
+ * - cover_calibrated und is_calibrated werden synchronisiert (dual-field-Kompatibilität).
+ */
 function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
     return null;
@@ -351,6 +413,7 @@ function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
     droppedStateFields.push(fieldName);
   });
 
+  // Beide Kalibrierungsfelder synchron halten, da Firmware beides senden kann.
   const coverCalibrated = device.state.cover_calibrated ?? device.state.is_calibrated;
   if (coverCalibrated !== undefined) {
     device.state.cover_calibrated = coverCalibrated;
@@ -369,6 +432,13 @@ function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
+/*
+ * Zweck: Übernimmt ein Geräteereignis (z. B. Tastendruck, Alarm) in das Geräteobjekt.
+ *
+ * Seiteneffekt:
+ * - Schreibt das normalisierte Ereignis in device.last_event.
+ * - Leitet ggf. Zustandsfelder aus dem Ereignis ab (z. B. rain aus rain_detected).
+ */
 function applyEvent(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
     return null;
@@ -380,12 +450,12 @@ function applyEvent(device, payload, receivedAt = timeHelpers.nowIso()) {
 
   device.last_event = {
     ...raw,
-    event_type: normalizeTextOrNull(raw.event_type),
-    event_label: normalizeTextOrNull(raw.event_label || raw.event),
+    event_type:    normalizeTextOrNull(raw.event_type),
+    event_label:   normalizeTextOrNull(raw.event_label || raw.event),
     event_trigger: normalizeTextOrNull(eventTrigger),
-    param1: normalizeTextOrNull(raw.param1),
-    param2: normalizeTextOrNull(raw.param2),
-    event_at: eventAt
+    param1:        normalizeTextOrNull(raw.param1),
+    param2:        normalizeTextOrNull(raw.param2),
+    event_at:      eventAt
   };
 
   device.updated_at = receivedAt;
@@ -433,6 +503,12 @@ function rememberDerivedStateField(device, fieldName, eventLabel) {
   }
 }
 
+/*
+ * Zweck: Leitet Zustandsfelder aus bestimmten Ereignissen ab.
+ *
+ * Derzeit implementiert: rain_detected → device.state.rain
+ * Erweiterbar für weitere ereignisbasierte Zustandsableitungen.
+ */
 function applyStateFromEvent(device) {
   const event = cloneObject(device && device.last_event);
   const eventLabel = normalizeTextOrNull(event.event_label || event.event);
@@ -449,6 +525,12 @@ function applyStateFromEvent(device) {
   rememberDerivedStateField(device, "rain", eventLabel);
 }
 
+/*
+ * Zweck: Übernimmt eine Befehlsbestätigung (Ack) in das Geräteobjekt.
+ *
+ * Seiteneffekt: Schreibt request_id, channel, status, status_code und ack_seq
+ *               in device.last_ack für die UI-Rückmeldung.
+ */
 function applyAck(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
     return null;
@@ -459,14 +541,14 @@ function applyAck(device, payload, receivedAt = timeHelpers.nowIso()) {
 
   device.last_ack = {
     ...raw,
-    request_id: normalizeTextOrNull(raw.request_id),
-    channel: normalizeTextOrNull(raw.channel),
-    status: normalizeTextOrNull(raw.status),
-    status_code: normalizeTextOrNull(raw.status_code),
+    request_id:   normalizeTextOrNull(raw.request_id),
+    channel:      normalizeTextOrNull(raw.channel),
+    status:       normalizeTextOrNull(raw.status),
+    status_code:  normalizeTextOrNull(raw.status_code),
     ack_msg_type: normalizeTextOrNull(raw.ack_msg_type),
-    ack_seq: normalizeTextOrNull(raw.ack_seq),
-    source: normalizeTextOrNull(raw.source),
-    ack_at: ackAt
+    ack_seq:      normalizeTextOrNull(raw.ack_seq),
+    source:       normalizeTextOrNull(raw.source),
+    ack_at:       ackAt
   };
 
   device.updated_at = receivedAt;
@@ -475,6 +557,10 @@ function applyAck(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
+/*
+ * Zweck: Übernimmt Statusdaten eines Master-Geräts (Gateway).
+ * Seiteneffekt: Aktualisiert online, wifi, mqtt, espnow, fw und last_seen_at.
+ */
 function applyMasterStatus(master, payload, receivedAt = timeHelpers.nowIso()) {
   if (!master) {
     return null;
@@ -487,13 +573,13 @@ function applyMasterStatus(master, payload, receivedAt = timeHelpers.nowIso()) {
     ...cloneObject(master.status),
     ...raw,
     master_id: master.master_id,
-    online: timeHelpers.coerceBoolean(raw.online, master.status.online || false),
-    wifi: timeHelpers.coerceBoolean(raw.wifi, master.status.wifi || false),
-    mqtt: timeHelpers.coerceBoolean(raw.mqtt, master.status.mqtt || false),
-    espnow: timeHelpers.coerceBoolean(raw.espnow, master.status.espnow || false),
-    fw: normalizeTextOrNull(raw.fw) || master.status.fw || null,
+    online:    timeHelpers.coerceBoolean(raw.online,  master.status.online  || false),
+    wifi:      timeHelpers.coerceBoolean(raw.wifi,    master.status.wifi    || false),
+    mqtt:      timeHelpers.coerceBoolean(raw.mqtt,    master.status.mqtt    || false),
+    espnow:    timeHelpers.coerceBoolean(raw.espnow,  master.status.espnow  || false),
+    fw:        normalizeTextOrNull(raw.fw) || master.status.fw || null,
     last_seen_at: lastSeenAt,
-    updated_at: receivedAt
+    updated_at:   receivedAt
   };
 
   master.updated_at = receivedAt;
@@ -504,218 +590,18 @@ function applyMasterStatus(master, payload, receivedAt = timeHelpers.nowIso()) {
   return master;
 }
 
-function applyMasterEvent(master, payload, receivedAt = timeHelpers.nowIso()) {
-  if (!master) {
-    return null;
-  }
-
-  const raw = cloneObject(payload);
-  const occurredAt = normalizeTimestamp(raw.occurred_at, receivedAt) || receivedAt;
-
-  if (!isPlainObject(master.status)) {
-    master.status = createEmptyMaster(master.master_id, receivedAt).status;
-  }
-
-  master.last_event = {
-    ...raw,
-    event: normalizeTextOrNull(raw.event),
-    message: normalizeTextOrNull(raw.message),
-    fw: normalizeTextOrNull(raw.fw),
-    occurred_at: occurredAt
-  };
-
-  master.updated_at = receivedAt;
-  master.last_event_at = occurredAt;
-  master.diagnostics.last_handler = "event";
-  master.diagnostics.last_topic = "event";
-  return master;
-}
 
 function textOrNull(value) {
   return value === undefined || value === null ? null : String(value);
-}
-
-/*
- * Diese Row passt exakt zur Tabelle `devices`.
- * Laufzeit-interne Zusatzfelder wie diagnostics oder Zeitmarken pro Block bleiben bewusst draussen.
- */
-function buildDeviceRow(device) {
-  const identity = cloneObject(device && device.identity);
-  const meta = cloneObject(device && device.meta);
-
-  return {
-    device_id: identity.device_id,
-    device_name: identity.device_name || meta.device_name || identity.device_id,
-    device_class: meta.device_class || identity.device_class || null,
-    power_type: meta.power_type || null,
-    fw_version: meta.fw_version || null,
-    caps: capabilityHelpers.deriveCapabilities({
-      device_class: meta.device_class,
-      caps: meta.caps
-    }),
-    control_mode: meta.control_mode || null,
-    config_profile: meta.config_profile || null,
-    reporting_mode: meta.reporting_mode || null,
-    sensor_mask: meta.sensor_mask || null,
-    input_mask: meta.input_mask || null,
-    mac_address: meta.mac_address || null,
-    meta_schema_version: meta.meta_schema_version || null,
-    created_at: device.created_at,
-    updated_at: device.updated_at
-  };
-}
-
-/*
- * Diese Row bildet nur die realen Spalten aus `device_state_latest` ab.
- * Das Laufzeitobjekt darf mehr wissen, aber SQLite bekommt hier nur den offiziellen Serverschnitt.
- */
-function buildDeviceStateLatestRow(device) {
-  const availability = cloneObject(device && device.availability);
-  const state = cloneObject(device && device.state);
-  const config = cloneObject(device && device.config);
-  const event = cloneObject(device && device.last_event);
-  const ack = cloneObject(device && device.last_ack);
-  const coverCalibrated = state.cover_calibrated ?? state.is_calibrated;
-
-  return {
-    device_id: device.identity.device_id,
-    availability: availability.availability || "unknown",
-    online: Boolean(availability.online),
-    last_seen_at: availability.last_seen_at || null,
-    fault: Boolean(state.fault),
-    relay_1: state.relay_1,
-    relay_2: state.relay_2,
-    cover_mode: state.cover_mode,
-    cover_state: state.cover_state,
-    cover_direction: state.cover_direction,
-    cover_position: state.cover_position,
-    cover_calibrated: coverCalibrated,
-    is_calibrated: coverCalibrated,
-    travel_time_ms: state.travel_time_ms,
-    temp_01c: state.temp_01c,
-    hum_01pct: state.hum_01pct,
-    lux: state.lux,
-    pressure_pa: state.pressure_pa,
-    gas_ohm: state.gas_ohm,
-    aqi: state.aqi,
-    tvoc_ppb: state.tvoc_ppb,
-    eco2_ppm: state.eco2_ppm,
-    motion: state.motion,
-    rain: state.rain,
-    rain_raw: state.rain_raw,
-    window_open: state.window_open,
-    battery_pct: state.battery_pct,
-    battery_mv: state.battery_mv,
-    button_flags: state.button_flags,
-    button_last_action: state.button_last_action,
-    button_last_action_at: state.button_last_action_at,
-    report_interval_s: config.report_interval_s,
-    lux_threshold_on: config.lux_threshold_on,
-    auto_off_delay_s: config.auto_off_delay_s,
-    rain_threshold: config.rain_threshold,
-    auto_up_time: config.auto_up_time,
-    auto_down_time: config.auto_down_time,
-    auto_schedule_enabled: config.auto_schedule_enabled,
-    last_event_type: textOrNull(event.event_type),
-    last_event_label: textOrNull(event.event_label),
-    last_event_trigger: textOrNull(event.event_trigger),
-    last_event_param1: textOrNull(event.param1),
-    last_event_param2: textOrNull(event.param2),
-    last_event_at: event.event_at || null,
-    last_ack_request_id: textOrNull(ack.request_id),
-    last_ack_channel: textOrNull(ack.channel),
-    last_ack_status: textOrNull(ack.status),
-    last_ack_status_code: textOrNull(ack.status_code),
-    last_ack_msg_type: textOrNull(ack.ack_msg_type),
-    last_ack_seq: textOrNull(ack.ack_seq),
-    last_ack_source: textOrNull(ack.source),
-    last_ack_at: ack.ack_at || null,
-    updated_at: device.updated_at
-  };
-}
-
-/*
- * Auch `master_status` bleibt flach. Event-Details gehoeren in `master_event_log`,
- * nicht als JSON-Blob in die Status-Tabelle.
- */
-function buildMasterStatusRow(master) {
-  const status = cloneObject(master && master.status);
-
-  return {
-    master_id: status.master_id || master.master_id,
-    online: Boolean(status.online),
-    wifi: Boolean(status.wifi),
-    mqtt: Boolean(status.mqtt),
-    espnow: Boolean(status.espnow),
-    fw: status.fw || null,
-    last_seen_at: status.last_seen_at || null,
-    updated_at: status.updated_at || master.updated_at
-  };
-}
-
-function buildDefaultUpdateColumns(columns, keyColumn) {
-  return columns.filter((columnName) => {
-    if (columnName === keyColumn) {
-      return false;
-    }
-
-    // Einmal gesetzte Insert-Zeitstempel duerfen durch spaetere Meldungen nicht ueberschrieben werden.
-    return columnName !== "created_at" && columnName !== "first_seen_at";
-  });
-}
-
-function buildValueSqlList(columns, row, jsonColumns) {
-  const jsonColumnSet = new Set(jsonColumns || []);
-  return columns.map((columnName) => {
-    const value = row[columnName];
-    return jsonColumnSet.has(columnName)
-      ? timeHelpers.toSqlJsonLiteral(value)
-      : timeHelpers.toSqlLiteral(value);
-  });
-}
-
-function buildUpsertSql(tableName, keyColumn, row, jsonColumns = [], updateColumns) {
-  const columns = Object.keys(row);
-  const updates = Array.isArray(updateColumns) && updateColumns.length
-    ? updateColumns
-    : buildDefaultUpdateColumns(columns, keyColumn);
-  const valuesSql = buildValueSqlList(columns, row, jsonColumns);
-
-  return [
-    "INSERT INTO " + tableName + " (" + columns.join(", ") + ")",
-    "VALUES (" + valuesSql.join(", ") + ")",
-    "ON CONFLICT(" + keyColumn + ") DO UPDATE SET",
-    updates.map((columnName) => columnName + " = excluded." + columnName).join(", "),
-    ";"
-  ].join(" ");
-}
-
-function buildDevicesUpsertSql(row) {
-  return buildUpsertSql("devices", "device_id", row, ["caps"]);
-}
-
-function buildDeviceStateLatestUpsertSql(row) {
-  return buildUpsertSql("device_state_latest", "device_id", row);
-}
-
-function buildMasterStatusUpsertSql(row) {
-  return buildUpsertSql("master_status", "master_id", row);
 }
 
 module.exports = {
   applyAck,
   applyAvailability,
   applyEvent,
-  applyMasterEvent,
   applyMasterStatus,
   applyMeta,
   applyState,
-  buildDeviceRow,
-  buildDeviceStateLatestRow,
-  buildDeviceStateLatestUpsertSql,
-  buildDevicesUpsertSql,
-  buildMasterStatusRow,
-  buildMasterStatusUpsertSql,
   createRuntimeState,
   ensureDevice,
   ensureMaster,

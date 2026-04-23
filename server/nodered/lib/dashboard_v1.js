@@ -1,5 +1,13 @@
 "use strict";
 
+// Dashboard-Hilfsmodul: Bereitet SQLite-Rohdaten für die Übersichts- und Detailseite auf.
+// Alle Funktionen sind zustandslos – Eingabe ist immer eine oder mehrere SQLite-Rows,
+// Ausgabe immer ein fertiges Payload-Objekt für den jeweiligen Dashboard-Widget-Node.
+
+/*
+ * Zweck: Parst einen JSON-Wert sicher. Gibt das Objekt direkt zurück, wenn es bereits
+ *        geparst ist, null bei leerem oder ungültigem Wert.
+ */
 function parseJson(value) {
     if (value === null || value === undefined || value === "") {
         return null;
@@ -22,6 +30,11 @@ function sqlStringLiteral(value) {
     return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
+/*
+ * Zweck: Erzeugt eine atomare DELETE-Transaktion zum vollständigen Entfernen eines Geräts.
+ * Löscht device_state_latest und devices in einem Batch.
+ * Rückgabe: SQL-String (BEGIN IMMEDIATE … COMMIT) oder null bei ungültiger device_id.
+ */
 function buildDeviceDeleteQuery(deviceId) {
     const normalizedId = normalizeString(deviceId);
     if (!normalizedId) {
@@ -31,13 +44,16 @@ function buildDeviceDeleteQuery(deviceId) {
     return [
         "BEGIN IMMEDIATE;",
         "DELETE FROM device_state_latest WHERE device_id = " + idSql + ";",
-        "DELETE FROM device_event_log WHERE device_id = " + idSql + ";",
-        "DELETE FROM device_ack_log WHERE device_id = " + idSql + ";",
         "DELETE FROM devices WHERE device_id = " + idSql + ";",
         "COMMIT;"
     ].join(" ");
 }
 
+/*
+ * Zweck: Normalisiert einen Gerätetyp-String auf einen kanonischen Basistyp.
+ * Eingabe: device_class, base_type oder device_id (Fallback-Reihenfolge).
+ * Rückgabe: z. B. "net_erl", "net_zrl", "bat_sen", "master" oder der normalisierte Eingabe-String.
+ */
 function normalizeBaseType(value) {
     const text = normalizeString(value).toLowerCase().replace(/-/g, "_");
     if (!text) {
@@ -51,10 +67,17 @@ function normalizeBaseType(value) {
     return text;
 }
 
+// Prüft, ob ein Gerät ein Batteriegerät ist (bat_sen-Präfix in ID, Klasse oder Basistyp).
 function isBatteryDevice(device) {
     return normalizeBaseType(device.base_type || device.device_class || device.device_id) === "bat_sen";
 }
 
+/*
+ * Zweck: Prüft, ob ein net_zrl-Gerät als Rolladen-Controller konfiguriert ist.
+ * Rolladen-Erkennung: control_mode enthält "cover"/"shutter"/"blind",
+ * oder Zustandsfelder wie cover_position/cover_direction/cover_moving sind vorhanden.
+ * Ohne net_zrl-Basistyp ist kein Cover möglich.
+ */
 function isCoverDevice(device, state, meta) {
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
     const controlMode = normalizeString(meta && meta.control_mode).toLowerCase();
@@ -69,6 +92,8 @@ function isCoverDevice(device, state, meta) {
         || Object.prototype.hasOwnProperty.call(state, "cover_moving");
 }
 
+// Prüft, ob ein Gerät ein Relais-Aktor ist (relay_1/2 im State oder net_erl/net_zrl-Typ).
+// Rolladen-Controller werden ausgeschlossen, obwohl sie auch Relais enthalten.
 function isRelayDevice(device, state, meta) {
     if (isCoverDevice(device, state, meta)) {
         return false;
@@ -78,6 +103,7 @@ function isRelayDevice(device, state, meta) {
         || ["net_erl", "net_zrl"].includes(normalizeBaseType(device.base_type || device.device_class || device.device_id));
 }
 
+// Prüft, ob ein Gerät ein net_erl-Aktor ist (für den direkten Lampen-Toggle in der Übersicht).
 function isNetErlDevice(device) {
     return normalizeBaseType(device.base_type || device.device_class || device.device_id) === "net_erl";
 }
@@ -87,6 +113,10 @@ function hasCapability(meta, capability) {
     return caps.includes(capability);
 }
 
+/*
+ * Zweck: Gibt Label und CSS-Klassenname für einen Verfügbarkeitsstatus zurück.
+ * Rückgabe: { label, className } – className entspricht den sh-chip-*-Klassen im Dashboard-CSS.
+ */
 function availabilityInfo(availability) {
     const state = normalizeString(availability && availability.availability).toLowerCase();
     if (!state) {
@@ -109,6 +139,15 @@ function normalizeFiniteNumber(value) {
     return Number.isFinite(numeric) ? numeric : null;
 }
 
+/*
+ * Zweck: Berechnet gerätespezifische Schwellwerte für "spät" und "offline".
+ *
+ * Batteriegeräte melden deutlich seltener als Netzgeräte. Ihre Schwellwerte
+ * basieren auf report_interval_s mit großzügigen Mindestpuffern.
+ * Netzgeräte (net_sen: 5 min, andere: 1 min Standardintervall) gelten schneller als offline.
+ *
+ * Rückgabe: { lateAfterSeconds, offlineAfterSeconds }
+ */
 function resolveFreshnessThresholds(device, config) {
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
     const powerType = normalizeString(device.meta && device.meta.power_type).toLowerCase();
@@ -131,6 +170,15 @@ function resolveFreshnessThresholds(device, config) {
     };
 }
 
+/*
+ * Zweck: Leitet den anzuzeigenden Verfügbarkeitsstatus aus dem letzten Kontaktzeitpunkt ab.
+ *
+ * Geht über den gespeicherten availability-String hinaus: Wenn last_seen_at bekannt ist,
+ * wird das tatsächliche Gerätealter gegen die gerätespezifischen Schwellwerte geprüft.
+ * Offline-Status aus dem Gerät wird immer direkt übernommen (kein Freshness-Override).
+ *
+ * Rückgabe: { availability, online, last_seen_at }
+ */
 function deriveAvailabilityForDisplay(device) {
     const rawAvailability = device.availability || {};
     const rawState = normalizeString(rawAvailability.availability).toLowerCase();
@@ -164,6 +212,7 @@ function deriveAvailabilityForDisplay(device) {
     return { availability: "online", online: true, last_seen_at: rawAvailability.last_seen_at || null };
 }
 
+// Sortierpriorität für die Geräteliste: online → spät/schlafend → unbekannt → offline.
 function availabilitySortPriority(device) {
     const label = normalizeString(device.availability_label).toLowerCase();
     if (label === "online") return 0;
@@ -172,6 +221,11 @@ function availabilitySortPriority(device) {
     return 2;
 }
 
+/*
+ * Zweck: Formatiert einen Zahlenwert mit optionalem Divisor und Einheit für die Anzeige.
+ * Beispiel: formatNumber(235, 10, "°C") → "23.5 °C"
+ * Rückgabe: Formatierten String oder "-" bei nicht-finitem Wert.
+ */
 function formatNumber(rawValue, divisor, suffix) {
     if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
         return "-";
@@ -181,6 +235,12 @@ function formatNumber(rawValue, divisor, suffix) {
     return suffix ? text + " " + suffix : text;
 }
 
+/*
+ * Zweck: Normalisiert eine Rolladen-Position für die Anzeige.
+ * Ohne Kalibrierung sind nur die Endlagen 0 und 100 belastbar –
+ * Zwischenwerte werden auf null gesetzt (unbekannt).
+ * Rückgabe: Zahl 0–100 oder null.
+ */
 function normalizeCoverPosition(value, isCalibrated) {
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
         return null;
@@ -191,6 +251,7 @@ function normalizeCoverPosition(value, isCalibrated) {
     return value;
 }
 
+// Erzeugt den Kalibrierungshinweis-Text für die UI (leer wenn kalibriert und Position bekannt).
 function coverCalibrationHint(positionCalibrated, positionValue) {
     if (!positionCalibrated) {
         return "Nicht kalibriert";
@@ -201,6 +262,11 @@ function coverCalibrationHint(positionCalibrated, positionValue) {
     return "";
 }
 
+/*
+ * Zweck: Wandelt einen Rohzustandswert in einen lesbaren Anzeigestring um.
+ * Kennt gerätespezifische Einheiten (°C, hPa, lx, mV, %) und boolesche Labels.
+ * Rückgabe: Formatierten String oder "-" bei fehlendem Wert.
+ */
 function formatStateValue(key, value) {
     if (value === null || value === undefined) return "-";
     if (["relay_1", "relay_2"].includes(key)) return value ? "An" : "Aus";
@@ -225,6 +291,7 @@ function formatStateValue(key, value) {
     return JSON.stringify(value);
 }
 
+// Übersetzt interne Zustandsfeld-Schlüssel in deutsche Anzeigenamen für die Detailseite.
 function labelForStateKey(key) {
     const labels = {
         battery_mv: "Batterie",
@@ -266,6 +333,11 @@ function assignIfPresent(target, key, value) {
     }
 }
 
+/*
+ * Zweck: Rekonstruiert das meta-Objekt aus einer SQLite-Row (JOIN devices + device_state_latest).
+ * caps wird aus JSON-Text zurück in ein Array geparst.
+ * Rückgabe: meta-Objekt mit allen bekannten Geräte-Metafeldern.
+ */
 function buildMetaFromRow(row) {
     const meta = {};
     assignIfPresent(meta, "device_name", row.device_name);
@@ -286,6 +358,7 @@ function buildMetaFromRow(row) {
     return meta;
 }
 
+// Rekonstruiert das availability-Objekt aus einer SQLite-Row.
 function buildAvailabilityFromRow(row) {
     return {
         availability: normalizeString(row.availability).toLowerCase() || "unknown",
@@ -294,6 +367,15 @@ function buildAvailabilityFromRow(row) {
     };
 }
 
+/*
+ * Zweck: Rekonstruiert das state-Objekt aus einer SQLite-Row.
+ *
+ * Besonderheiten:
+ * - Boolesche Felder (relay, motion, rain usw.) werden explizit konvertiert.
+ * - window_open wird als contact_open gespiegelt (Alias für die UI).
+ * - cover_moving wird aus cover_state abgeleitet ("opening"/"closing"/"moving" → true).
+ * - cover_position ohne Kalibrierung: Zwischenwerte werden entfernt (nur 0/100 bleiben).
+ */
 function buildStateFromRow(row) {
     const state = {};
     [
@@ -356,6 +438,7 @@ function buildStateFromRow(row) {
     return state;
 }
 
+// Rekonstruiert das config-Objekt (Schwellwerte, Zeitpläne) aus einer SQLite-Row.
 function buildConfigFromRow(row) {
     const config = {};
     [
@@ -373,6 +456,7 @@ function buildConfigFromRow(row) {
     return config;
 }
 
+// Rekonstruiert das last_event-Objekt aus einer SQLite-Row. Gibt null zurück, wenn kein Zeitstempel vorhanden.
 function buildLastEventFromRow(row) {
     if (!row.last_event_at) {
         return null;
@@ -387,6 +471,7 @@ function buildLastEventFromRow(row) {
     };
 }
 
+// Rekonstruiert das last_ack-Objekt aus einer SQLite-Row. Gibt null zurück, wenn weder Zeitstempel noch Request-ID vorhanden.
 function buildLastAckFromRow(row) {
     if (!row.last_ack_at && !row.last_ack_request_id) {
         return null;
@@ -403,6 +488,7 @@ function buildLastAckFromRow(row) {
     };
 }
 
+// Formatiert einen ISO-Zeitstempel als lesbares deutsches Datum/Uhrzeit-Format.
 function formatTimestamp(value) {
     const text = normalizeString(value);
     if (!text) return "-";
@@ -419,6 +505,7 @@ function formatTimestamp(value) {
     }).format(date);
 }
 
+// Gibt einen relativen Zeitabstand zurück ("vor 3 min", "vor 2 h"). Bei älteren Zeitstempeln: absolutes Datum.
 function relativeTimestamp(value) {
     const text = normalizeString(value);
     if (!text) return "-";
@@ -431,6 +518,11 @@ function relativeTimestamp(value) {
     return formatTimestamp(text);
 }
 
+/*
+ * Zweck: Entfernt Zustandsfelder aus dem State, die für dieses Gerät inhaltlich irreführend wären.
+ * Beispiel: net_sen ohne motion-Capability – das Feld käme aus Sensor-Rauschen, nicht aus echter Bewegung.
+ * Seiteneffekt: Mutiert das state-Objekt direkt. Gibt Liste der entfernten Felder zurück (für Diagnostics).
+ */
 function suppressDisplayOnlyStateNoise(device, state, meta) {
     const suppressedKeys = [];
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
@@ -441,6 +533,15 @@ function suppressDisplayOnlyStateNoise(device, state, meta) {
     return suppressedKeys;
 }
 
+/*
+ * Zweck: Wählt die wichtigsten Zustandsfelder für die Highlight-Kacheln in der Geräteübersicht.
+ *
+ * Priorisierung: Cover-Richtung > Relay-Status > Sensoren (Temp, Feuchte, Lux…) > Batterie.
+ * relay_1 wird bei net_erl unterdrückt, da der große Lampen-Button es bereits zeigt.
+ * rain wird bei net_sen immer ergänzt, auch ohne Wert (zeigt dann "unbekannt").
+ *
+ * Rückgabe: Array von { key, label, value_text, wide } für das Highlight-Grid.
+ */
 function pickHighlights(device, state, meta) {
     const keys = [];
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
@@ -473,6 +574,20 @@ function pickHighlights(device, state, meta) {
     });
 }
 
+/*
+ * Zweck: Baut das controls-Objekt für ein Gerät auf – enthält alle Steuer- und Anzeigeinformationen für die UI.
+ *
+ * Für Rolladen-Controller (cover):
+ * - Kalibrierungsstatus entscheidet, ob Zwischenpositionen freigegeben sind.
+ * - Endlagen (0/100 %) bleiben immer bedienbar.
+ * - shutter_style wird für die CSS-Animation der Rolladen-Grafik berechnet.
+ *
+ * Für Relais-Geräte (relay):
+ * - allow_overview_toggle gibt den direkten Lampen-Toggle in der Übersichtskarte frei
+ *   (nur für net_erl mit bekanntem relay_1-Status).
+ *
+ * Rückgabe: controls-Objekt oder null für Geräte ohne steuerbare Funktion.
+ */
 function buildControls(device, state, meta) {
     if (isCoverDevice(device, state, meta)) {
         const positionCalibrated = state.cover_calibrated === true || state.is_calibrated === true;
@@ -521,6 +636,11 @@ function buildControls(device, state, meta) {
     return null;
 }
 
+/*
+ * Zweck: Bestimmt Gerätetyp-Label, Icon und CSS-Oberflächenklasse für die Karte.
+ * Reihenfolge: Master → Cover → Relay → Batterie → Sensor (Fallback).
+ * Rückgabe: { kind_label, icon, surface_class }
+ */
 function classifyDevice(device, state, meta) {
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
     if (baseType === "master") {
@@ -538,6 +658,19 @@ function classifyDevice(device, state, meta) {
     return { kind_label: "Sensor", icon: "mdi-thermometer", surface_class: "is-sensor-card" };
 }
 
+/*
+ * Zweck: Zentraler Row-zu-Geräteobjekt-Übersetzer für das Dashboard.
+ *
+ * Eingabe: Eine SQLite-Row aus dem JOIN devices + device_state_latest.
+ * Ausgabe: Vollständiges, UI-fertiges Geräteobjekt mit:
+ * - meta, availability, state, config, last_event, last_ack (aus Row-Feldern rekonstruiert)
+ * - display_name (Anzeigename aus dashboard_display_name oder device_name oder device_id)
+ * - availability_label/-class (für Chip-Färbung)
+ * - controls (Steuerblock für Relais/Cover)
+ * - highlight_values (Highlight-Kacheln)
+ * - battery_value, detail_url, status_time_* (Footer-Anzeige)
+ * - simulation-Flag (für SIM-Chip)
+ */
 function describeDevice(row) {
     const meta = buildMetaFromRow(row);
     const availability = buildAvailabilityFromRow(row);
@@ -611,6 +744,16 @@ function describeDevice(row) {
     });
 }
 
+/*
+ * Zweck: Erzeugt die SQL-Abfrage für die Geräteübersicht.
+ *
+ * JOIN: devices (Metadaten) LEFT JOIN device_state_latest (aktueller Snapshot).
+ * LEFT JOIN damit auch Geräte ohne Zustand angezeigt werden.
+ * Sortierung: online → spät/schlafend → unbekannt → offline, dann alphabetisch nach Name.
+ * master_count wird als Subquery mitgeliefert (für die Zusammenfassung im Toolbar).
+ *
+ * Rückgabe: SQL-String für den sqlite-Node.
+ */
 function buildOverviewQuery() {
     return [
         "SELECT",
@@ -695,6 +838,13 @@ function buildOverviewQuery() {
     ].join(" ");
 }
 
+/*
+ * Zweck: Wandelt die SQLite-Rows der Übersichtsabfrage in das Dashboard-Payload um.
+ *
+ * Master-Geräte werden herausgefiltert (haben eigene Diagnosesicht).
+ * Sortierung: nach availability_sort_priority, dann alphabetisch nach display_name.
+ * Rückgabe: { page, summary: { device_count, master_count, active_count, offline_count }, devices }
+ */
 function buildOverviewPayload(rows) {
     const devices = (rows || []).map(describeDevice)
         .filter((device) => device.base_type !== "master" && device.device_class !== "master")
@@ -720,6 +870,12 @@ function buildOverviewPayload(rows) {
     };
 }
 
+/*
+ * Zweck: Erzeugt die SQL-Abfrage für die Gerätedetailseite eines einzelnen Geräts.
+ *
+ * Identisch mit der Übersichtsabfrage, aber gefiltert auf eine device_id und ohne master_count.
+ * Rückgabe: SQL-String oder null bei leerer device_id.
+ */
 function buildDeviceDetailQuery(deviceId) {
     const normalizedId = normalizeString(deviceId);
     if (!normalizedId) {
@@ -800,6 +956,16 @@ function buildDeviceDetailQuery(deviceId) {
     ].join(" ");
 }
 
+/*
+ * Zweck: Wandelt die SQLite-Row der Detailabfrage in das vollständige Detail-Payload um.
+ *
+ * Enthält zusätzlich zu describeDevice:
+ * - technical_rows: Technische Metadaten als flache Key-Value-Liste (für den Technik-Panel).
+ * - state_rows: Alle bekannten Zustandsfelder als beschriftete Liste (für den Status-Panel).
+ * - raw_sections: Rohe JSON-Blöcke aller Teilobjekte (für den aufklappbaren Diagnose-Panel).
+ *
+ * Bei leerem rows-Array: Payload mit device: null (kein Gerät ausgewählt/vorhanden).
+ */
 function buildDeviceDetailPayload(rows) {
     const row = Array.isArray(rows) && rows.length ? rows[0] : null;
     if (!row) {

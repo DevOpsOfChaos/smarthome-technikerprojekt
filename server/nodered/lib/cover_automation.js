@@ -1,9 +1,17 @@
 "use strict";
 
+// Rolladen-Zeitautomatik: speichert pro Gerät bis zu zwei Tagesfahrten
+// (Uhrzeit + Zielposition) in einer JSON-Datei auf dem Dateisystem.
+// Der Automatik-Scheduler prüft jede Minute, ob eine Fahrt fällig ist,
+// und leitet sie über den normalen Cover-Command-Pfad (command_minimal) weiter.
+
 const fs = require("fs");
 
+// Pfad zur Konfigurationsdatei; kann über Umgebungsvariable überschrieben werden.
 const STORAGE_PATH = process.env.COVER_AUTOMATION_PATH || "/data/cover_automation.json";
+// Zeitzone für die Auswertung der Fahrtuhrzeit (relevant für Ortszeit-Vergleich).
 const TIME_ZONE = process.env.TZ || "Europe/Berlin";
+// Erlaubte Zielpositionen in Prozent – bewusst hart begrenzt.
 const ALLOWED_POSITIONS = [0, 25, 50, 75, 100];
 const SLOT_KEYS = ["slot_1", "slot_2"];
 
@@ -86,6 +94,11 @@ function normalizeConfig(input) {
   };
 }
 
+/*
+ * Zweck: Liest die Automatik-Konfigurationsdatei vom Dateisystem.
+ * Ungültige oder fehlende Datei führt zum leeren Store (kein Fehler).
+ * Rückgabe: Normalisiertes Store-Objekt { devices: { ... } }.
+ */
 function loadStore() {
   try {
     if (!fs.existsSync(STORAGE_PATH)) {
@@ -122,6 +135,15 @@ function getDeviceConfig(deviceId) {
   return normalizeConfig(store.devices[normalizedId] || {});
 }
 
+/*
+ * Zweck: Speichert die Automatik-Konfiguration für ein einzelnes Gerät.
+ *
+ * Eingaben: deviceId, Payload mit enabled, slot_1_time/position, slot_2_time/position.
+ * Seiteneffekt: Schreibt den aktualisierten Store in die Konfigurationsdatei.
+ * Besonderheit: last_run_local_date wird nur zurückgesetzt, wenn Zeit oder Position geändert wurden,
+ *               damit ein unveränderter Slot nicht erneut ausgelöst wird.
+ * Rückgabe: { ok: true, config } bei Erfolg, { ok: false, error, message } bei Fehler.
+ */
 function saveDeviceConfig(deviceId, input, updatedAt) {
   const normalizedId = normalizeDeviceId(deviceId);
   if (!normalizedId) {
@@ -159,6 +181,11 @@ function saveDeviceConfig(deviceId, input, updatedAt) {
   return { ok: true, config };
 }
 
+/*
+ * Zweck: Zerlegt einen ISO-Zeitstempel in lokales Datum und Uhrzeit (HH:MM).
+ * Eingabe: timestamp als ISO-String oder Date-kompatibler Wert.
+ * Rückgabe: { date: "YYYY-MM-DD", time: "HH:MM" } in der konfigurierten Zeitzone.
+ */
 function formatLocalParts(timestamp) {
   const formatter = new Intl.DateTimeFormat("sv-SE", {
     timeZone: TIME_ZONE,
@@ -180,6 +207,11 @@ function formatLocalParts(timestamp) {
   };
 }
 
+/*
+ * Zweck: Prüft, ob ein Gerät im Laufzeitzustand als Rolladen-Controller bekannt ist.
+ * Prüft control_mode, device_class und Fähigkeitsliste.
+ * Rückgabe: true, wenn das Gerät ein Cover-Gerät ist, sonst false.
+ */
 function isCoverDevice(runtime, deviceId) {
   const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
   if (!device || !isPlainObject(device)) {
@@ -478,6 +510,20 @@ function renderDetailPage(runtime, deviceId, notice = "") {
   };
 }
 
+/*
+ * Zweck: Prüft alle konfigurierten Geräte auf fällige Fahrten und erzeugt MQTT-Befehle.
+ *
+ * Eingaben:
+ * - runtime: aktueller Laufzeitzustand (für Geräteklassen-Prüfung)
+ * - commandMinimal: Modul zur Befehlserzeugung (buildCoverCommand)
+ * - timestamp: aktueller Zeitstempel (ISO-String)
+ *
+ * Rückgabe: { messages: [...MQTT-Nachrichten], errors: [...Fehler bei einzelnen Slots] }
+ * Seiteneffekt: Markiert ausgelöste Slots mit last_run_local_date und speichert den Store.
+ *
+ * Besonderheit: Ein Slot wird nur ausgelöst, wenn Uhrzeit übereinstimmt und
+ *               er heute noch nicht gelaufen ist (Schutz gegen Mehrfachauslösung).
+ */
 function buildDueMessages(runtime, commandMinimal, timestamp) {
   const store = loadStore();
   const messages = [];

@@ -76,33 +76,7 @@ CREATE TABLE IF NOT EXISTS device_state_latest (
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS device_event_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id TEXT NOT NULL,
-    event_type TEXT,
-    event_label TEXT,
-    event_trigger TEXT,
-    param1 TEXT,
-    param2 TEXT,
-    occurred_at TEXT NOT NULL,
-    logged_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS device_ack_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    device_id TEXT NOT NULL,
-    request_id TEXT,
-    channel TEXT,
-    status TEXT,
-    status_code TEXT,
-    ack_msg_type TEXT,
-    ack_seq TEXT,
-    source TEXT,
-    occurred_at TEXT NOT NULL,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
-);
-
+-- Aktueller Master-Status (Snapshot, kein Verlauf)
 CREATE TABLE IF NOT EXISTS master_status (
     master_id TEXT PRIMARY KEY,
     online INTEGER NOT NULL DEFAULT 0,
@@ -113,21 +87,3 @@ CREATE TABLE IF NOT EXISTS master_status (
     last_seen_at TEXT,
     updated_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS master_event_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    master_id TEXT NOT NULL,
-    event TEXT,
-    message TEXT,
-    fw TEXT,
-    occurred_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_device_event_log_device_time
-    ON device_event_log (device_id, occurred_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_device_ack_log_device_time
-    ON device_ack_log (device_id, occurred_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_master_event_log_master_time
-    ON master_event_log (master_id, occurred_at DESC);

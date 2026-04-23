@@ -1,9 +1,19 @@
 "use strict";
 
+/*
+ * Zweck: Gibt den aktuellen Zeitpunkt als ISO-8601-String zurück.
+ * Rückgabe: z. B. "2026-04-23T07:00:00.000Z"
+ */
 function nowIso() {
   return new Date().toISOString();
 }
 
+/*
+ * Zweck: Normalisiert einen beliebigen Zeitwert auf einen ISO-8601-String.
+ *
+ * Eingabe: value (String, Date, Zahl oder leer), fallback (Standardwert)
+ * Rückgabe: Gültiger ISO-String, oder fallback bei ungültigem Wert.
+ */
 function coerceTimestamp(value, fallback = nowIso()) {
   if (!value) {
     return fallback;
@@ -13,6 +23,12 @@ function coerceTimestamp(value, fallback = nowIso()) {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
 }
 
+/*
+ * Zweck: Normalisiert einen Wert auf boolean.
+ *
+ * Versteht: true/false, 0/1, "true"/"false", "on"/"off", "online"/"offline", "open"/"closed".
+ * Rückgabe: true, false, oder fallback bei unbekanntem Wert.
+ */
 function coerceBoolean(value, fallback = false) {
   if (typeof value === "boolean") {
     return value;
@@ -34,6 +50,11 @@ function coerceBoolean(value, fallback = false) {
   return fallback;
 }
 
+/*
+ * Zweck: Normalisiert einen Wert auf eine endliche Zahl.
+ *
+ * Rückgabe: Zahl, oder fallback bei nicht-finitem Wert (null, NaN, Infinity, leer).
+ */
 function coerceNumber(value, fallback = null) {
   if (value === null || value === undefined || value === "") {
     return fallback;
@@ -43,43 +64,9 @@ function coerceNumber(value, fallback = null) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-function escapeSqlText(value) {
-  return String(value).replace(/'/g, "''");
-}
-
-function toSqlLiteral(value) {
-  if (value === undefined || value === null) {
-    return "NULL";
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "1" : "0";
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? String(value) : "NULL";
-  }
-
-  if (Array.isArray(value) || typeof value === "object") {
-    return toSqlLiteral(JSON.stringify(value));
-  }
-
-  return "'" + escapeSqlText(value) + "'";
-}
-
-function toSqlJsonLiteral(value) {
-  if (value === undefined || value === null) {
-    return "NULL";
-  }
-
-  return toSqlLiteral(JSON.stringify(value));
-}
-
 module.exports = {
   coerceBoolean,
   coerceNumber,
   coerceTimestamp,
-  nowIso,
-  toSqlJsonLiteral,
-  toSqlLiteral
+  nowIso
 };

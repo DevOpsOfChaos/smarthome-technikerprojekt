@@ -50,7 +50,7 @@
     "type": "function",
     "z": "tab_90_master",
     "name": "handleMasterStatus",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master status without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
+    "func": "// Zweck: Verarbeitet eine Status-Meldung eines Master-Geräts (Gateway).\n// Eingaben: msg.sh (Routing-State), msg.payload mit online, wifi, mqtt, espnow, fw.\n// Ergebnis: msg.payload mit aktualisiertem Master-Objekt, msg.sqlite_batch für die Persistenzschicht.\n// Seiteneffekt: Schreibt das aktualisierte Master-Objekt in smarthome_runtime (global).\nconst topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master status without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -58,41 +58,6 @@
     "libs": [],
     "x": 340,
     "y": 140,
-    "wires": [
-      [
-        "linkout_90_sqlite"
-      ]
-    ]
-  },
-  {
-    "id": "linkin_90_master_event",
-    "type": "link in",
-    "z": "tab_90_master",
-    "name": "handleMasterEvent",
-    "links": [
-      "linkout_10_master_event"
-    ],
-    "x": 110,
-    "y": 220,
-    "wires": [
-      [
-        "func_90_master_event"
-      ]
-    ]
-  },
-  {
-    "id": "func_90_master_event",
-    "type": "function",
-    "z": "tab_90_master",
-    "name": "handleMasterEvent",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master event without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 335,
-    "y": 220,
     "wires": [
       [
         "linkout_90_sqlite"

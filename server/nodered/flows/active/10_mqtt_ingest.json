@@ -88,7 +88,7 @@
     "type": "function",
     "z": "tab_10_ingest",
     "name": "Route device topic",
-    "func": "const topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\nif (!routed || routed.scope !== \"device\") {\n    return null;\n}\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\nmsg.sh = routed;\nreturn msg;",
+    "func": "// Zweck: Wertet das MQTT-Topic aus und entscheidet, ob es ein Gerätethema ist.\n// Eingaben: msg.topic (MQTT-Topicstring), nowIso() als Empfangszeitpunkt.\n// Ergebnis: msg.sh mit Routing-State (scope, topic_type, entity_id, received_at),\n//           oder null bei unbekanntem oder nicht gerätezugehörigem Topic.\nconst topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\nif (!routed || routed.scope !== \"device\") {\n    return null;\n}\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\nmsg.sh = routed;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -266,7 +266,7 @@
     "type": "function",
     "z": "tab_10_ingest",
     "name": "Route master topic",
-    "func": "const topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\nif (!routed || routed.scope !== \"master\") {\n    return null;\n}\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\nmsg.sh = routed;\nreturn msg;",
+    "func": "// Zweck: Wertet das MQTT-Topic aus und entscheidet, ob es ein Master-Thema ist.\n// Eingaben: msg.topic (MQTT-Topicstring), nowIso() als Empfangszeitpunkt.\n// Ergebnis: msg.sh mit Routing-State (scope, topic_type, entity_id, received_at),\n//           oder null bei unbekanntem oder nicht master-zugehörigem Topic.\nconst topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\nif (!routed || routed.scope !== \"master\") {\n    return null;\n}\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\nmsg.sh = routed;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -292,24 +292,16 @@
         "t": "eq",
         "v": "status",
         "vt": "str"
-      },
-      {
-        "t": "eq",
-        "v": "event",
-        "vt": "str"
       }
     ],
     "checkall": "true",
     "repair": false,
-    "outputs": 2,
+    "outputs": 1,
     "x": 810,
     "y": 280,
     "wires": [
       [
         "linkout_10_master_status"
-      ],
-      [
-        "linkout_10_master_event"
       ]
     ]
   },
@@ -324,19 +316,6 @@
     ],
     "x": 1095,
     "y": 260,
-    "wires": []
-  },
-  {
-    "id": "linkout_10_master_event",
-    "type": "link out",
-    "z": "tab_10_ingest",
-    "name": "to handleMasterEvent",
-    "mode": "link",
-    "links": [
-      "linkin_90_master_event"
-    ],
-    "x": 1085,
-    "y": 300,
     "wires": []
   }
 ]

@@ -1,207 +1,207 @@
 [
-  {
-    "id": "tab_20_store",
-    "type": "tab",
-    "label": "20_device_store",
-    "disabled": false,
-    "info": "Pflegt das gemeinsame Geraeteobjekt. State bleibt Hauptwahrheit, Event und ACK ergaenzen nur."
-  },
-  {
-    "id": "comment_20_store",
-    "type": "comment",
-    "z": "tab_20_store",
-    "name": "Geraeteobjekt",
-    "info": "Die fachliche Wahrheit liegt in /data/lib/device_store.js und /data/lib/topic_handlers.js. Die Function-Nodes bleiben nur Node-RED-Bruecken.",
-    "x": 170,
-    "y": 60,
-    "wires": []
-  },
-  {
-    "id": "linkout_20_sqlite",
-    "type": "link out",
-    "z": "tab_20_store",
-    "name": "to SQLite writes",
-    "mode": "link",
-    "links": [
-      "linkin_30_writes"
-    ],
-    "x": 605,
-    "y": 420,
-    "wires": []
-  },
-  {
-    "id": "linkin_20_meta",
-    "type": "link in",
-    "z": "tab_20_store",
-    "name": "handleMeta",
-    "links": [
-      "linkout_10_meta"
-    ],
-    "x": 95,
-    "y": 120,
-    "wires": [
-      [
-        "func_20_meta"
-      ]
-    ]
-  },
-  {
-    "id": "func_20_meta",
-    "type": "function",
-    "z": "tab_20_store",
-    "name": "handleMeta",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"meta without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 290,
-    "y": 120,
-    "wires": [
-      [
-        "linkout_20_sqlite"
-      ]
-    ]
-  },
-  {
-    "id": "linkin_20_availability",
-    "type": "link in",
-    "z": "tab_20_store",
-    "name": "handleAvailability",
-    "links": [
-      "linkout_10_availability"
-    ],
-    "x": 95,
-    "y": 180,
-    "wires": [
-      [
-        "func_20_availability"
-      ]
-    ]
-  },
-  {
-    "id": "func_20_availability",
-    "type": "function",
-    "z": "tab_20_store",
-    "name": "handleAvailability",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"availability without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 320,
-    "y": 180,
-    "wires": [
-      [
-        "linkout_20_sqlite"
-      ]
-    ]
-  },
-  {
-    "id": "linkin_20_state",
-    "type": "link in",
-    "z": "tab_20_store",
-    "name": "handleState",
-    "links": [
-      "linkout_10_state"
-    ],
-    "x": 95,
-    "y": 240,
-    "wires": [
-      [
-        "func_20_state"
-      ]
-    ]
-  },
-  {
-    "id": "func_20_state",
-    "type": "function",
-    "z": "tab_20_store",
-    "name": "handleState",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"state without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 290,
-    "y": 240,
-    "wires": [
-      [
-        "linkout_20_sqlite"
-      ]
-    ]
-  },
-  {
-    "id": "linkin_20_event",
-    "type": "link in",
-    "z": "tab_20_store",
-    "name": "handleEvent",
-    "links": [
-      "linkout_10_event"
-    ],
-    "x": 95,
-    "y": 300,
-    "wires": [
-      [
-        "func_20_event"
-      ]
-    ]
-  },
-  {
-    "id": "func_20_event",
-    "type": "function",
-    "z": "tab_20_store",
-    "name": "handleEvent",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"event without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 295,
-    "y": 300,
-    "wires": [
-      [
-        "linkout_20_sqlite"
-      ]
-    ]
-  },
-  {
-    "id": "linkin_20_ack",
-    "type": "link in",
-    "z": "tab_20_store",
-    "name": "handleAck",
-    "links": [
-      "linkout_10_ack"
-    ],
-    "x": 95,
-    "y": 360,
-    "wires": [
-      [
-        "func_20_ack"
-      ]
-    ]
-  },
-  {
-    "id": "func_20_ack",
-    "type": "function",
-    "z": "tab_20_store",
-    "name": "handleAck",
-    "func": "const topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"ack without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 285,
-    "y": 360,
-    "wires": [
-      [
-        "linkout_20_sqlite"
-      ]
-    ]
-  }
+    {
+        "id": "tab_20_store",
+        "type": "tab",
+        "label": "20_device_store",
+        "disabled": false,
+        "info": "Pflegt das gemeinsame Geraeteobjekt. State bleibt Hauptwahrheit, Event und ACK ergaenzen nur."
+    },
+    {
+        "id": "comment_20_store",
+        "type": "comment",
+        "z": "tab_20_store",
+        "name": "Geraeteobjekt",
+        "info": "Die fachliche Wahrheit liegt in /data/lib/device_store.js und /data/lib/topic_handlers.js. Die Function-Nodes bleiben nur Node-RED-Bruecken.",
+        "x": 170,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "linkout_20_sqlite",
+        "type": "link out",
+        "z": "tab_20_store",
+        "name": "to SQLite writes",
+        "mode": "link",
+        "links": [
+            "linkin_30_writes"
+        ],
+        "x": 605,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "linkin_20_meta",
+        "type": "link in",
+        "z": "tab_20_store",
+        "name": "handleMeta",
+        "links": [
+            "linkout_10_meta"
+        ],
+        "x": 95,
+        "y": 120,
+        "wires": [
+            [
+                "func_20_meta"
+            ]
+        ]
+    },
+    {
+        "id": "func_20_meta",
+        "type": "function",
+        "z": "tab_20_store",
+        "name": "handleMeta",
+        "func": "// Zweck: Verarbeitet eine Meta-Nachricht und aktualisiert Geräteklasse, Fähigkeiten und Firmware.\n// Eingaben: msg.sh (Routing-State), msg.payload (Rohpayload aus MQTT).\n// Ergebnis: msg.payload mit aktualisiertem Geräteobjekt, msg.sqlite_batch für die Persistenzschicht.\n// Seiteneffekt: Schreibt das aktualisierte Gerät in smarthome_runtime (global).\nconst topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"meta without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 290,
+        "y": 120,
+        "wires": [
+            [
+                "linkout_20_sqlite"
+            ]
+        ]
+    },
+    {
+        "id": "linkin_20_availability",
+        "type": "link in",
+        "z": "tab_20_store",
+        "name": "handleAvailability",
+        "links": [
+            "linkout_10_availability"
+        ],
+        "x": 95,
+        "y": 180,
+        "wires": [
+            [
+                "func_20_availability"
+            ]
+        ]
+    },
+    {
+        "id": "func_20_availability",
+        "type": "function",
+        "z": "tab_20_store",
+        "name": "handleAvailability",
+        "func": "// Zweck: Verarbeitet eine Verfügbarkeitsmeldung (online/offline/late).\n// Eingaben: msg.sh (Routing-State), msg.payload (Rohpayload aus MQTT).\n// Ergebnis: msg.payload mit aktualisiertem Geräteobjekt, msg.sqlite_batch für die Persistenzschicht.\n// Seiteneffekt: Schreibt das aktualisierte Gerät in smarthome_runtime (global).\nconst topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"availability without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 320,
+        "y": 180,
+        "wires": [
+            [
+                "linkout_20_sqlite"
+            ]
+        ]
+    },
+    {
+        "id": "linkin_20_state",
+        "type": "link in",
+        "z": "tab_20_store",
+        "name": "handleState",
+        "links": [
+            "linkout_10_state"
+        ],
+        "x": 95,
+        "y": 240,
+        "wires": [
+            [
+                "func_20_state"
+            ]
+        ]
+    },
+    {
+        "id": "func_20_state",
+        "type": "function",
+        "z": "tab_20_store",
+        "name": "handleState",
+        "func": "// Zweck: Verarbeitet eine Zustandsmeldung (Sensordaten, Aktorstatus).\n// Eingaben: msg.sh (Routing-State), msg.payload (Rohpayload aus MQTT).\n// Ergebnis: msg.payload mit aktualisiertem Geräteobjekt, msg.sqlite_batch für die Persistenzschicht.\n// Seiteneffekt: Schreibt das aktualisierte Gerät in smarthome_runtime (global).\nconst topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"state without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 290,
+        "y": 240,
+        "wires": [
+            [
+                "linkout_20_sqlite"
+            ]
+        ]
+    },
+    {
+        "id": "linkin_20_event",
+        "type": "link in",
+        "z": "tab_20_store",
+        "name": "handleEvent",
+        "links": [
+            "linkout_10_event"
+        ],
+        "x": 95,
+        "y": 300,
+        "wires": [
+            [
+                "func_20_event"
+            ]
+        ]
+    },
+    {
+        "id": "func_20_event",
+        "type": "function",
+        "z": "tab_20_store",
+        "name": "handleEvent",
+        "func": "// Zweck: Verarbeitet ein Geräteereignis (Tastendruck, Alarm, Regenalarm usw.).\n// Eingaben: msg.sh (Routing-State), msg.payload (Rohpayload aus MQTT).\n// Ergebnis: msg.payload mit aktualisiertem Geräteobjekt, msg.sqlite_batch für die Persistenzschicht.\n// Seiteneffekt: Schreibt das aktualisierte Gerät inkl. last_event in smarthome_runtime (global).\nconst topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"event without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 295,
+        "y": 300,
+        "wires": [
+            [
+                "linkout_20_sqlite"
+            ]
+        ]
+    },
+    {
+        "id": "linkin_20_ack",
+        "type": "link in",
+        "z": "tab_20_store",
+        "name": "handleAck",
+        "links": [
+            "linkout_10_ack"
+        ],
+        "x": 95,
+        "y": 360,
+        "wires": [
+            [
+                "func_20_ack"
+            ]
+        ]
+    },
+    {
+        "id": "func_20_ack",
+        "type": "function",
+        "z": "tab_20_store",
+        "name": "handleAck",
+        "func": "// Zweck: Verarbeitet eine Befehlsbestätigung (Ack) vom Gerät.\n// Eingaben: msg.sh (Routing-State), msg.payload (Rohpayload aus MQTT).\n// Ergebnis: msg.payload mit aktualisiertem Geräteobjekt, msg.sqlite_batch für die Persistenzschicht.\n// Seiteneffekt: Schreibt das aktualisierte Gerät inkl. last_ack in smarthome_runtime (global).\nconst topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.device) {\n    node.warn(\"ack without device_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 285,
+        "y": 360,
+        "wires": [
+            [
+                "linkout_20_sqlite"
+            ]
+        ]
+    }
 ]
