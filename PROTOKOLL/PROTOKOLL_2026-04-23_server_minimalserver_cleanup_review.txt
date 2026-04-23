@@ -1,0 +1,69 @@
+PROTOKOLL 2026-04-23 - Server-Minimalserver-Cleanup und Review
+
+Bereich:
+Server / Node-RED / SQLite / Compose
+
+Anlass:
+Nach dem Rueckbau des Servers auf einen kleineren, neutralen Minimalumfang wurde eine
+enge Nachrunde zur Bereinigung verbliebener Altreste durchgefuehrt. Ziel war kein neuer
+Umbau, sondern die sichere Entfernung kleiner Inkonsistenzen aus dem aktiven Serverkern.
+
+Zielstand:
+- kein InfluxDB-Pfad mehr im aktiven Server
+- keine Historien- oder Zeitreihenhaltung mehr
+- nur noch aktueller Snapshot pro Geraet in SQLite
+- aktiver Serverpfad ohne unnoetige Altlogik
+- keine breite Refactor-Welle
+
+Gepruefte Aenderungen:
+1. Entfernung verbliebener Master-Event-Reste im Runtime-State
+   - im Master-Runtime-State wurden funktionslose Restfelder entfernt, die nach dem
+     vorangegangenen Rueckbau keine aktive Rolle mehr hatten
+   - betroffen waren alte Event-bezogene Masterfelder ohne aktuellen Nutzwert
+
+2. Bereinigung veralteter Funktionssignatur in der SQLite-Snapshot-Logik
+   - eine Funktionssignatur mit ungenutztem Parameter wurde vereinfacht
+   - zugehoerige Aufrufe wurden passend angepasst
+   - Ziel war die Reduktion von Altlasten und Missverstaendnissen im aktiven Schreibpfad
+
+3. Entfernung ungenutzter SQL-Helferfunktionen
+   - veraltete Hilfsfunktionen fuer fruehere SQL-/Historienpfade wurden entfernt
+   - nach dem aktuellen Stand bestehen darauf keine erforderlichen Restverweise mehr
+
+Bewertung der Aenderungen:
+Die Nachrunde ist eng genug geblieben und hat keine erkennbare neue Baustelle aufgemacht.
+Die geaenderten Stellen passen zur bereits eingeschlagenen Linie des Minimalservers.
+Es wurde kein unnoetiger Grossumbau durchgefuehrt.
+
+Positiver Effekt:
+- weniger tote Altlogik im aktiven Serverkern
+- klarerer Zustand nach dem Rueckbau von Historie und Master-Event-Pfaden
+- geringere Verwechslungsgefahr bei spaeterer Wartung oder Pruefung
+- kleinere und besser lesbare Kernlogik
+
+Trade-offs / Risiken:
+- keine offensichtlichen neuen Funktionsrisiken aus den geprueften Aenderungen erkennbar
+- wie bei jeder Bereinigung aktiver Pfade bleibt ein lokaler Smoke-Test sinnvoll
+- diese Nachrunde ersetzt keine Funktionspruefung des Gesamtsystems
+
+Statische Pruefung:
+- keine offensichtlichen Restverweise auf den entfernten Master-Event-Pfad
+- keine offensichtlichen Restaufrufe der bereinigten Signatur
+- keine offensichtlichen Restverweise auf entfernte SQL-Helfer
+- Aenderungsumfang eng und plausibel
+
+Noch offen / naechster sinnvoller Schritt:
+- lokaler Smoke-Test des aktuellen Serverstands
+- pruefen:
+  - Compose-Start
+  - Node-RED-Start
+  - MQTT-Ingest
+  - Geraeteuebersicht
+  - Geraetedetailseite
+  - Aktorsteuerung
+  - Rolladenlogik in Abhaengigkeit vom Kalibrierstatus
+
+Fazit:
+Die gepruefte Nachrunde ist als Mini-Cleanup sinnvoll und annehmbar. Sie bringt den
+Server naeher an einen kleinen, neutralen und wartbaren Minimalstand, ohne unnoetig
+breite Seiteneffekte zu erzeugen.
