@@ -32,3 +32,4 @@ server/sqlite/*.db-journal
 
 # Local archives
 *.zip
+firmware/src/basetypes/master_compat/config.h

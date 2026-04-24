@@ -1,0 +1,19 @@
+Datum: 2026-04-25
+Branch: feature/master-compat-stage1
+
+Inhalt:
+- Separater kompatibler Master-Testpfad unter `firmware/src/basetypes/master_compat/` integriert.
+- MQTT-/JSON-Vertragspruefung fuer eine statische `net_zrl`-Node vorbereitet.
+- Bestehender `basetypes/master/`-Pfad unveraendert gelassen.
+- `firmware/platformio.ini` nur um das neue Environment `master_compat_stage1` ergaenzt.
+- `firmware/src/basetypes/master_compat/config.h` bleibt lokales, ignoriertes Konfigurationsartefakt.
+
+Build:
+- Aufruf: `pio run -e master_compat_stage1`
+- Ergebnis: Build fehlgeschlagen.
+- Fehlerursache: Toolchain-/Framework-Aufloesung der vorhandenen WiFi-Abhaengigkeit.
+- Konkreter Fehler: `C:/Users/mries/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiGeneric.h:44:10: fatal error: Network.h: No such file or directory`
+
+Hinweis:
+- Der gleiche Fehler tritt auch beim bestehenden Environment `master` auf.
+- Keine Serverdateien geaendert.
