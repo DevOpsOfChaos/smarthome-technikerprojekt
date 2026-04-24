@@ -43,9 +43,9 @@ Er ist bewusst **kein halber Server** und **keine zweite Logikplattform**, sonde
 Der Server bildet die aktuelle öffentliche Serverlinie für:
 - MQTT-Ingest
 - Geräteobjekt und Zustandsmodell
-- SQLite-basierte Latest-State- und Log-Grundlage
+- SQLite-basierte Snapshot-Persistenz
 - Node-RED-basierte Bedien- und Diagnosepfade
-- spätere Zeitreihen- und UI-Ableitungen
+- Geräteanzeige, Gerätestatus und sichere Steuerung
 
 ## Verbindliche technische Leitplanken
 
@@ -66,7 +66,7 @@ Bereits sichtbar und nachweisbar sind unter anderem:
 - öffentliche Projektdokumentation und Architekturgrundlinie
 - Serverbasis mit MQTT-Ingest für Geräte und Master
 - gemeinsames Geräteobjekt und separater Masterpfad
-- minimales SQLite-Schema für Zustände und Nachweise
+- minimales SQLite-Schema für aktuelle Zustände und Persistenz
 - Dashboard als belastbare öffentliche Serverlinie
 - realer Gerätepfad `net_erl_hall_light` mit überprüftem Normalbetrieb
 - real nachgewiesener Setup-Pfad für Hall-Light
