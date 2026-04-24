@@ -11,8 +11,8 @@ Das öffentliche Repo enthält inzwischen eine klar erkennbare und real belegte 
 Im Serverbereich ist aktuell eine belastbare Serverlinie sichtbar:
 - MQTT-Ingest für Geräte und Master
 - gemeinsames Geräteobjekt
-- separater Masterpfad
-- minimales SQLite-Schema als Grundlage
+- separater Masterpfad für Statusdiagnose
+- minimales SQLite-Schema für aktuelle Zustände und Persistenz
 - Dashboard mit Geräteübersicht und Detailpfad
 
 ## Bereits real nachgewiesen
@@ -56,13 +56,13 @@ Er ist die aktuelle offizielle technische Linie, auf die weitere Arbeit sauber a
 Wichtig ist dabei:
 - zuerst fachliche Mitte stabil
 - dann konkrete Gerätepfade sauber und ehrlich belegen
-- dann Persistenz, UI-Ableitungen und zusätzliche Pfade kontrolliert erweitern
+- dann Anzeige, Persistenz und zusätzliche Pfade kontrolliert erweitern
 - Komfortfunktionen erst danach
 
 ## Bereits sichtbar im Repo
 - grundlegende öffentliche Projektdokumentation
 - technische Trennung von Geräteschicht, Master und Server
-- aktueller Server für Ingest, Zustandsmodell und kleines Dashboard
+- aktueller Server für Ingest, Zustandsmodell, Snapshot-Persistenz und kleines Dashboard
 - reale Nachweise für Hall-Light, `net_zrl` und `net_sen`
 - bestätigte Setup-Pfade für Hall-Light und `net_sen`
 - host-unabhängiger Server-Contract-Smoke-Test unter `tests/server/server_contract_smoke.ps1`
