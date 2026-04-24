@@ -14,8 +14,7 @@ Der Server liefert die kleine serverseitige Grundlage plus einen engen Dashboard
 
 - Mosquitto
 - Node-RED mit kleinem FlowFuse-Dashboard
-- SQLite
-- InfluxDB als bereits vorhandener Basisdienst
+- SQLite als Snapshot-Persistenz
 
 ## Scope
 
@@ -26,13 +25,15 @@ Der Server liefert die kleine serverseitige Grundlage plus einen engen Dashboard
 - minimale SQLite-Persistenz fuer `devices`, `device_state_latest` und `master_status`
 - eine zentrale Geraeteuebersicht
 - eine versteckte Detailseite pro Geraet
+- Aktorsteuerung im engen aktuellen Rahmen
 
 ## Bewusst nicht Teil dieser Stufe
 
+- Zeitreihen
 - Diagramme
 - Wetter
 - volle Logs- oder MQTT-Konsole
-- Commands als Komfortpfad
+- Commands als breite Komfortwelt
 - Automationen
 - SIM-spezifischer Ausbau
 - grosse Konfigurationswelt
@@ -74,7 +75,7 @@ Wenn der Stack bereits laeuft:
 .\tests\server\server_contract_smoke.ps1 -SkipStart
 ```
 
-Der Test prueft den aktuellen Server-Vertrag fuer numerische `caps`, `button_flags`, ACK-`source` und SQL-/Migrationsfehler beim Start.
+Der Test prueft den aktuellen Server-Vertrag fuer numerische `caps`, `button_flags`, ACK-bezogene Felder im aktuellen Snapshot und SQL-/Migrationsfehler beim Start.
 Er nutzt `mosquitto_pub` im Compose-Service `mosquitto`; auf dem Host muss dieses Tool dafuer nicht lokal installiert sein.
 Der Test ist ein enger Smoke-Test des Serververtrags, kein vollstaendiger End-to-End-Systemtest.
 
@@ -96,5 +97,5 @@ Der Test ist ein enger Smoke-Test des Serververtrags, kein vollstaendiger End-to
 
 ## Ehrliche Grenze
 
-Wenn spaeter Diagramme, Wetter, Logs oder Commands dazukommen sollen, muessen sie auf diesem kleinen Ingest- und Dashboard-Kern aufbauen.
+Wenn spaeter Zusatzfunktionen dazukommen sollen, muessen sie auf diesem kleinen Snapshot-, Anzeige- und Steuerkern aufbauen.
 Der aktuelle Stand ist absichtlich nicht die Komfortebene.
