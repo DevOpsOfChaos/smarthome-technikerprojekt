@@ -25,6 +25,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <Preferences.h>
 #include <PubSubClient.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
@@ -1231,7 +1232,7 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* daten, int laenge)
 }
 #endif
 
-void onEspNowSent(const uint8_t* mac, esp_now_send_status_t status) {
+void logEspNowSendStatus(const uint8_t* mac, esp_now_send_status_t status) {
     char text[18] = {0};
     macText(mac, text, sizeof(text));
     logf(
@@ -1240,6 +1241,17 @@ void onEspNowSent(const uint8_t* mac, esp_now_send_status_t status) {
         text,
         status == ESP_NOW_SEND_SUCCESS ? "OK" : "FEHLER");
 }
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+void onEspNowSent(const esp_now_send_info_t* info, esp_now_send_status_t status) {
+    if (info == nullptr) return;
+    logEspNowSendStatus(info->des_addr, status);
+}
+#else
+void onEspNowSent(const uint8_t* mac, esp_now_send_status_t status) {
+    logEspNowSendStatus(mac, status);
+}
+#endif
 
 bool sendeStateRequest(size_t nodeIndex) {
     if (!nodeStates[nodeIndex].mac_bekannt) {

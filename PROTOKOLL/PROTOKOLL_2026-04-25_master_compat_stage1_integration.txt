@@ -4,16 +4,19 @@ Branch: feature/master-compat-stage1
 Inhalt:
 - Separater kompatibler Master-Testpfad unter `firmware/src/basetypes/master_compat/` integriert.
 - MQTT-/JSON-Vertragspruefung fuer eine statische `net_zrl`-Node vorbereitet.
-- Bestehender `basetypes/master/`-Pfad unveraendert gelassen.
+- Bestehender `basetypes/master/`-Pfad funktional beibehalten und fuer aktuelle Build-Kompatibilitaet angepasst.
 - `firmware/platformio.ini` nur um das neue Environment `master_compat_stage1` ergaenzt.
 - `firmware/src/basetypes/master_compat/config.h` bleibt lokales, ignoriertes Konfigurationsartefakt.
+- Gemeinsames PlatformIO-Build-Setup fuer aktuelle Arduino-ESP32-Abhaengigkeiten korrigiert.
 
 Build:
 - Aufruf: `pio run -e master_compat_stage1`
-- Ergebnis: Build fehlgeschlagen.
-- Fehlerursache: Toolchain-/Framework-Aufloesung der vorhandenen WiFi-Abhaengigkeit.
-- Konkreter Fehler: `C:/Users/mries/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiGeneric.h:44:10: fatal error: Network.h: No such file or directory`
+- Ergebnis: erfolgreich.
+
+Vergleichsbuild:
+- Aufruf: `pio run -e master`
+- Ergebnis: erfolgreich.
 
 Hinweis:
-- Der gleiche Fehler tritt auch beim bestehenden Environment `master` auf.
+- Das Build-Setup wurde so angepasst, dass die aktuelle `WiFi`-/`Network`-Abhaengigkeit sowie die aktuelle ESP-NOW-Send-Callback-Signatur sauber verarbeitet werden.
 - Keine Serverdateien geaendert.
