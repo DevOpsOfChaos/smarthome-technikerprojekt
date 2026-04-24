@@ -4,23 +4,23 @@
 
 Der aktuelle Server führt den kleinen kontrollierten Serverkern:
 
-- MQTT-Ingest fuer Geraete und Master
+- MQTT-Ingest für Geräte und Master
 - Topic-Routing auf kleine Handler
-- gemeinsames Geraeteobjekt als fachliche Mitte
+- gemeinsames Geräteobjekt als fachliche Mitte
 - separater Masterzustand
-- minimale SQLite-Persistenz fuer `devices`, `device_state_latest` und `master_status`
-- Dashboard mit zentraler Uebersicht und versteckter Detailseite pro Geraet
+- minimale SQLite-Persistenz für `devices`, `device_state_latest` und `master_status`
+- Dashboard mit zentraler Übersicht und versteckter Detailseite pro Gerät
 
-Nicht Teil dieser Stufe sind breite Komfortebenen wie Wetter, Diagramme, Logs-Konsole, breite Automationen oder eine grosse Command-Welt.
+Nicht Teil dieser Stufe sind breite Komfortebenen wie Wetter, Diagramme, Logs-Konsole, breite Automationen oder eine große Command-Welt.
 
-## Real bestaetigter Stand im Repo
+## Real bestätigter Stand im Repo
 
 Der aktuelle Stand ist im Repo nicht nur beschrieben, sondern direkt ablesbar:
 
 - der reale Node-RED-Startpfad liegt in `server/docker-compose.yml`
-- die aktive Serverlinie laeuft ueber `00_boot`, `05_dashboard_runtime`, `10_mqtt_ingest`, `20_device_store`, `30_sqlite_persist`, `60_dashboard_overview`, `63_dashboard_device_detail` und `90_master_diag`
-- `server/nodered/lib/dashboard_v1.js` liefert die Datenaufbereitung fuer Uebersicht und Detailseite
-- `server/nodered/lib/device_store.js` haelt den Laufzeitkern und die schemaenge Persistenzlinie zusammen
+- die aktive Serverlinie läuft über `00_boot`, `05_dashboard_runtime`, `10_mqtt_ingest`, `20_device_store`, `30_sqlite_persist`, `60_dashboard_overview`, `63_dashboard_device_detail` und `90_master_diag`
+- `server/nodered/lib/dashboard_v1.js` liefert die Datenaufbereitung für Übersicht und Detailseite
+- `server/nodered/lib/device_store.js` hält den Laufzeitkern und die enge Persistenzlinie zusammen
 
 Diese Doku beschreibt damit keinen Wunschstand, sondern den aktuell sichtbaren Serverzuschnitt.
 
@@ -30,17 +30,18 @@ Der aktuelle Serverstand ist fachlich in vier Schichten zu lesen:
 
 ### 1. Start- und Laufzeitbasis
 
-- `server/docker-compose.yml` startet Mosquitto, Node-RED und InfluxDB
+- `server/docker-compose.yml` startet Mosquitto und Node-RED
 - SQLite bleibt eine lokale Datei
 - die Compose-Startlogik initialisiert Schema und kleine Bestandsschema-Migrationen
 - die aktiven Flow-Dateien werden beim Start zu `flows.json` zusammengebaut
 
 ### 2. Ingest, Store und Persistenz
 
-- MQTT-Ingest fuer `meta`, `availability`, `state`, `event` und `ack`
-- separater Masterpfad fuer `status` und `event`
+- MQTT-Ingest für `meta`, `availability`, `state`, `event` und `ack`
+- separater Masterpfad für `status`
 - gemeinsamer Runtime-State in Node-RED
 - zentrale SQLite-Writes aus derselben Handlerkette
+- Snapshot-Persistenz statt Verlaufs- oder Zeitreihenhaltung
 
 ### 3. Dashboard
 
@@ -48,10 +49,10 @@ Der aktuelle Serverstand ist fachlich in vier Schichten zu lesen:
 - `http://localhost:1880/dashboard/geraet?device=<device_id>`
 
 Das Dashboard umfasst aktuell:
-- eine zentrale Geraeteuebersicht
-- eine versteckte Detailseite pro Geraet
+- eine zentrale Geräteübersicht
+- eine versteckte Detailseite pro Gerät
 
-Mehr ist oeffentlich fuer diese Stufe nicht zu behaupten.
+Mehr ist öffentlich für diese Stufe nicht zu behaupten.
 
 ### 4. Nachweis- und Laufzeitbasis
 
@@ -66,7 +67,7 @@ Die Datenbank und `flows.json` sind Laufzeitprodukte, keine zweite Architektur.
 ### Laufzeitbasis
 
 - `server/docker-compose.yml` ist der offizielle Startpfad
-- `server/.env.example` haelt die benoetigten Ports und Basiswerte
+- `server/.env.example` hält die benötigten Ports und Basiswerte
 - `server/nodered/settings.js` bleibt die Basisdatei; die erweiterte Laufzeitkonfiguration entsteht beim Start
 
 ### Node-RED-Struktur
@@ -74,15 +75,15 @@ Die Datenbank und `flows.json` sind Laufzeitprodukte, keine zweite Architektur.
 - `00_boot` initialisiert den gemeinsamen Runtime-State
 - `05_dashboard_runtime` definiert Dashboard-Basis, Seiten und Gruppen
 - `10_mqtt_ingest` abonniert die Pflicht-Topics und verteilt sie weiter
-- `20_device_store` pflegt das Geraeteobjekt
+- `20_device_store` pflegt das Geräteobjekt
 - `30_sqlite_persist` schreibt den engen aktuellen Stand nach SQLite
-- `60_dashboard_overview` liefert die zentrale Geraeteuebersicht
-- `63_dashboard_device_detail` liefert die versteckte Detailseite pro Geraet
-- `90_master_diag` haelt Masterstatus und Masterevents getrennt
+- `60_dashboard_overview` liefert die zentrale Geräteübersicht
+- `63_dashboard_device_detail` liefert die versteckte Detailseite pro Gerät
+- `90_master_diag` hält Masterstatus getrennt
 
 ### Fachliche Mitte
 
-Pro Geraet wird eine einheitliche Struktur gepflegt:
+Pro Gerät wird eine einheitliche Struktur gepflegt:
 
 - `identity`
 - `meta`
@@ -93,11 +94,11 @@ Pro Geraet wird eine einheitliche Struktur gepflegt:
 - `last_ack`
 - `diagnostics`
 
-Masterdaten laufen bewusst ausserhalb dieser Geraeteobjekte.
+Masterdaten laufen bewusst außerhalb dieser Geräteobjekte.
 
 ## MQTT-Pflichttopics
 
-### Geraete
+### Geräte
 
 - `smarthome/device/+/meta`
 - `smarthome/device/+/availability`
@@ -108,7 +109,6 @@ Masterdaten laufen bewusst ausserhalb dieser Geraeteobjekte.
 ### Master
 
 - `smarthome/master/+/status`
-- `smarthome/master/+/event`
 
 ## Warum dieser Zuschnitt richtig ist
 
@@ -116,17 +116,17 @@ Der Serverstand bleibt klein, damit er lesbar und belastbar bleibt:
 
 - Startpfad und Laufzeitwahrheit liegen an einer Stelle
 - Store, Persistenz und Dashboard bauen auf derselben engen Linie auf
-- die sichtbare UI bleibt auf Uebersicht und Detail beschraenkt
-- spaetere Komfortebenen werden nicht als schon erreicht verkauft
+- die sichtbare UI bleibt auf Übersicht und Detail beschränkt
+- spätere Komfortebenen werden nicht als schon erreicht verkauft
 
 ## Bewusste Grenze
 
 Real vorhanden ist ein kleiner, belastbarer Serverstand mit Dashboard.
 
-Nicht oeffentlich als aktueller Hauptstand zu behandeln sind:
+Nicht öffentlich als aktueller Hauptstand zu behandeln sind:
 - Wetter
 - Diagramme
-- Logs- oder MQTT-Konsole als Bedienflaeche
+- Logs- oder MQTT-Konsole als Bedienfläche
 - breite Automationen
-- Komfort-Commands als grosse Produktschicht
-- eine breite UI ueber Uebersicht und Detailseite hinaus
+- Komfort-Commands als große Produktschicht
+- eine breite UI über Übersicht und Detailseite hinaus
