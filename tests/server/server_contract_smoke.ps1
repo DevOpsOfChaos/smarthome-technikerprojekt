@@ -113,12 +113,8 @@ function get(sql, params) {
     [deviceId]
   );
   const latest = await get(
-    'select device_id, button_flags, last_ack_request_id, last_ack_source from device_state_latest where device_id = ?',
+    'select device_id, button_flags, last_ack_request_id, last_ack_channel, last_ack_status, last_ack_status_code, last_ack_msg_type, last_ack_seq, last_ack_source from device_state_latest where device_id = ?',
     [deviceId]
-  );
-  const ack = await get(
-    'select device_id, request_id, status, source from device_ack_log where device_id = ? and request_id = ? order by id desc limit 1',
-    [deviceId, requestId]
   );
 
   const failures = [];
@@ -138,15 +134,24 @@ function get(sql, params) {
     if (latest.last_ack_request_id !== requestId) {
       failures.push(`last_ack_request_id expected ${requestId}, got ${latest.last_ack_request_id}`);
     }
+    if (latest.last_ack_channel !== 'command') {
+      failures.push(`last_ack_channel expected command, got ${latest.last_ack_channel}`);
+    }
+    if (latest.last_ack_status !== 'ok') {
+      failures.push(`last_ack_status expected ok, got ${latest.last_ack_status}`);
+    }
+    if (String(latest.last_ack_status_code) !== '0') {
+      failures.push(`last_ack_status_code expected 0, got ${latest.last_ack_status_code}`);
+    }
+    if (String(latest.last_ack_msg_type) !== '5') {
+      failures.push(`last_ack_msg_type expected 5, got ${latest.last_ack_msg_type}`);
+    }
+    if (String(latest.last_ack_seq) !== '1') {
+      failures.push(`last_ack_seq expected 1, got ${latest.last_ack_seq}`);
+    }
     if (latest.last_ack_source !== 'node_ack') {
       failures.push(`last_ack_source expected node_ack, got ${latest.last_ack_source}`);
     }
-  }
-
-  if (!ack) {
-    failures.push('missing device_ack_log row');
-  } else if (ack.source !== 'node_ack') {
-    failures.push(`ack log source expected node_ack, got ${ack.source}`);
   }
 
   const result = {
@@ -155,8 +160,12 @@ function get(sql, params) {
     request_id: requestId,
     caps,
     button_flags: latest ? latest.button_flags : null,
+    last_ack_channel: latest ? latest.last_ack_channel : null,
+    last_ack_status: latest ? latest.last_ack_status : null,
+    last_ack_status_code: latest ? latest.last_ack_status_code : null,
+    last_ack_msg_type: latest ? latest.last_ack_msg_type : null,
+    last_ack_seq: latest ? latest.last_ack_seq : null,
     last_ack_source: latest ? latest.last_ack_source : null,
-    ack_log_source: ack ? ack.source : null,
     failures
   };
 
@@ -247,4 +256,4 @@ Publish-Mqtt -Topic "smarthome/device/$DeviceId/ack" -Payload $ackPayload
 Wait-DbProjection
 Assert-NoSqlMigrationErrors
 
-Write-Host "Smoke test passed: numeric caps, button_flags, ACK source and SQL/migration startup gate are ok."
+Write-Host "Smoke test passed: numeric caps, button_flags, ACK snapshot fields and SQL/migration startup gate are ok."
