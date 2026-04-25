@@ -6,14 +6,12 @@ Thema
 
 Ausgangsstand
 - Oeffentliches Repo: C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt
-- Privates Repo: C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt-private
-- Beide Repos standen auf main und wurden vor dem Lauf per Fast-Forward-Pull aktualisiert.
+- Das oeffentliche Repo stand auf main und wurde vor dem Lauf per Fast-Forward-Pull aktualisiert.
 - Oeffentliches Repo vor dem Lauf: 440b548 docs: add hall light realtest protocol
-- Privates Repo vor dem Lauf: 3ce6a58 docs: add active codex prompt for hall light retest with running docker
 
 Repo- und Stack-Pruefung
-- `git status --short --branch` war in beiden Repos sauber.
-- `git log --oneline -10` wurde in beiden Repos geprueft.
+- `git status --short --branch` war im oeffentlichen Repo sauber.
+- `git log --oneline -10` wurde im oeffentlichen Repo geprueft.
 - `docker compose ps` im Ordner `server/` zeigte:
   - `server-mosquitto-1` up, Port 1883 veroeffentlicht
   - `server-nodered-1` up und healthy, Port 1880 veroeffentlicht
@@ -42,7 +40,7 @@ Wichtiger Ablaufbefund
   - `status_code=-6`
   - `source="master_registry"`
 - Der Befund war kein Hall-Light-Firmwarefix, sondern ein Testablauf-/Registry-Bootstrap-Thema.
-- Hall-Light wurde deshalb gemaess Prompt auf COM12 neu geflasht, um HELLO und Registry-Aufbau sauber neu anzustossen.
+- Hall-Light wurde deshalb gemaess Testplan auf COM12 neu geflasht, um HELLO und Registry-Aufbau sauber neu anzustossen.
 
 Build / Flash im Nachtest
 - Befehl:
