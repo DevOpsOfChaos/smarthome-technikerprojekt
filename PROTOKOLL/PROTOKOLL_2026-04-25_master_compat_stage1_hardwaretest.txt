@@ -1,54 +1,82 @@
 Datum: 2026-04-25
 Branch: feature/master-compat-stage1
-Ziel des Tests: Erster Hardwaretest fuer master_compat_stage1 auf ESP32-C3 mit Build, Upload, Serial-Startlog sowie WLAN-/MQTT-Vertragspruefung.
+Ziel des Tests: Erster echter Hardwaretest fuer master_compat_stage1 auf ESP32-C3 mit Build, Flash, Serial-Startlog sowie WLAN-/MQTT-Vertragspruefung.
 Verwendetes Environment: PlatformIO env master_compat_stage1 auf esp32-c3-devkitm-1.
 
 Build-Ergebnis:
 - Befehl: C:\Users\mries\.platformio\penv\Scripts\pio.exe run -e master_compat_stage1
 - Ergebnis: erfolgreich
 
-Port-Erkennung:
-- Sichtbarer USB-Seriell-Port: COM15
-- USB-Kennung: VID:PID=303A:1001
-- Port wurde nicht fuer Upload verwendet, weil die benoetigte Laufzeitumgebung nicht testfaehig war.
+Lokale Voraussetzungen:
+- Lokale Konfiguration fuer master_compat_stage1 wurde vor dem Lauf mit echten WLAN- und MQTT-Werten befuellt.
+- MQTT-Broker wurde lokal ueber den vorhandenen Server-Stack gestartet.
+- Portpruefung erfolgreich:
+  - 127.0.0.1:1883 offen
+  - 192.168.178.59:1883 offen
 
-Vor dem Upload festgestellte Blocker:
-- Die lokale Konfiguration fuer master_compat_stage1 enthielt noch Platzhalter fuer WLAN-Zugangsdaten.
-- Ein lokaler MQTT-Broker auf Port 1883 war nicht erreichbar.
-- Test-NetConnection 127.0.0.1 -Port 1883: fehlgeschlagen
-- Test-NetConnection 192.168.178.59 -Port 1883: fehlgeschlagen
-- Der vorgesehene Broker konnte nicht ueber docker compose gestartet werden, weil die Docker-Engine auf dem Testrechner nicht verfuegbar war.
+Port-Erkennung:
+- Verwendeter USB-Seriell-Port: COM15
+- USB-Kennung: VID:PID=303A:1001
 
 Upload-Ergebnis:
-- Nicht ausgefuehrt
-- Grund: Kein belastbarer WLAN-/MQTT-Laufzeittest mit Platzhalter-Konfiguration und nicht erreichbarem Broker moeglich.
+- Befehl: C:\Users\mries\.platformio\penv\Scripts\pio.exe run -e master_compat_stage1 -t upload --upload-port COM15
+- Ergebnis: erfolgreich
+- Auffaelligkeit:
+  - Ein erster Uploadversuch scheiterte an einem blockierten COM-Port durch haengengebliebene Upload-Prozesse.
+  - Ein weiterer Versuch lief in ein Windows-Encoding-Problem der Toolchain.
+  - Nach Bereinigung der Restprozesse und UTF-8-Konsole wurde der Flash erfolgreich abgeschlossen.
 
 Serial-Befunde:
-- Kein Serial-Startlog aufgenommen, da kein Flash mit ungueltiger Laufzeitkonfiguration erzwungen wurde.
+- Bootmeldung vorhanden: [master_compat] boot
+- WLAN-Verbindung erfolgreich
+- Beobachtete IP-Adresse: 192.168.178.92
+- Beobachtete MAC-Adresse: 8C:D0:B2:A9:34:5A
+- MQTT-Verbindung erfolgreich: [mqtt] connecting ... OK
+- Keine Reconnect-Schleife im beobachteten Startfenster
 
 MQTT-Befunde:
-- Keine MQTT-Verbindung der Firmware gegen reale Hardware nachgewiesen.
-- Keine retained Topics aus echter Firmware nachgewiesen.
-- Keine Command-/Ack-Pruefung aus echter Firmware nachgewiesen.
+- retained Masterstatus vorhanden, online=true
+- retained Meta der statischen NET-ZRL-901-Node vorhanden
+- retained Availability vorhanden, online=true
+- retained State vorhanden
+- Command-/Ack-Pfad ueber MQTT erfolgreich gegen echte Firmware geprueft
 
 Bestandene Tests:
-- Build von master_compat_stage1 erfolgreich
-- Lokale Ignore-Regel fuer master_compat/config.h vorhanden
+- Build erfolgreich
+- Flash erfolgreich
+- Serial-Startlog erfolgreich
+- WLAN-Verbindung erfolgreich
+- MQTT-Verbindung erfolgreich
+- retained Masterstatus erfolgreich
+- retained Meta erfolgreich
+- retained Availability erfolgreich
+- retained State erfolgreich
+- get_state mit request_id -> Ack ok
+- set_position=50 im unkalibrierten Zustand -> Ack not_calibrated, status_code=-5
+- Command ohne request_id -> kein Ack im Prueffenster
+- Optionaler Sim-Hook:
+  - simulate_calibrated=true -> Ack ok
+  - set_position=50 danach -> Ack ok
+  - State danach mit cover_position=50
 
-Nicht bestandene bzw. nicht durchfuehrbare Tests:
-- Upload/Flash
-- Serial-Startlog
-- WLAN-Verbindung
-- MQTT-Verbindung
-- retained Masterstatus
-- retained Meta/Availability/State der statischen NET-ZRL-901-Node
-- Commands/Acks ueber MQTT
+Vertragsrelevante Payload-Befunde:
+- Masterstatus:
+  - master_id=MASTER-001
+  - online=true
+  - wifi=true
+  - mqtt=true
+  - espnow=false
+  - fw=1.0.0
+- Node-State initial:
+  - relay_1 Boolean
+  - relay_2 Boolean
+  - cover_mode Boolean
+  - cover_position=null
+  - cover_calibrated=false
+  - fault Boolean
 
 Ehrliche Grenze:
-- Dieser Lauf liefert keinen Hardware-Nachweis fuer den Stage-1-Laufzeitpfad.
+- Der Test belegt den Stage-1-Firmwarepfad auf echter Hardware inklusive WLAN und MQTT.
 - Kein ESP-NOW-Test.
-- Kein echter Node-Nachweis.
+- Kein Nachweis einer echten Node ueber Funk.
 - Keine Stage-2-Bridge.
-
-Abbruchgrund:
-- Der Test wurde nach erfolgreichem Build vor dem Flash abgebrochen, weil die reale Laufzeitumgebung nicht eindeutig funktionsfaehig war.
