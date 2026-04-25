@@ -22,12 +22,12 @@
 #define CONF_MASTER_ID     "MASTER-001"
 #define CONF_FW_VERSION    "1.0.0"
 
-// ---- Simulierte Node (Stage 1) ----
-// Entspricht einer statischen net_zrl-Node. In Stage 2 durch echte ESP-NOW-Node ersetzen.
+// ---- Stage-1-Reste ----
+// In Stage 2 registriert sich die echte net_zrl-Node per HELLO über ESP-NOW.
+// Diese Werte werden vom Stage-2-Codepfad nicht mehr verwendet.
 #define CONF_NODE_ID       "NET-ZRL-901"
 #define CONF_NODE_NAME     "Rolladen Wohnzimmer"
 
 // ---- Entwicklungs-Hooks ----
-// Aktiviert simulate_calibrated-Kommando für Tests.
-// In Produktion NICHT definieren oder auskommentieren.
+// Stage 2 verwendet keine Simulationskommandos mehr.
 #define CONF_ENABLE_SIM_HOOKS  1

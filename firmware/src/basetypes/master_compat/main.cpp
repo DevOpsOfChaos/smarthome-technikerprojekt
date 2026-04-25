@@ -1,189 +1,204 @@
 /*
  * basetypes/master_compat/main.cpp
  *
- * Kompatibler Masterpfad – Stage 1
- * MQTT/JSON-Vertrag vollständig, eine simulierte net_zrl-Node.
- * Kein echtes ESP-NOW in dieser Stage.
- *
- * Vertrag: smarthome-technikerprojekt, master_vertrag_bestandsaufnahme
+ * Kompatibler Masterpfad – Stage 2 Minimal-Bridge
+ * Ein echter ESP-NOW-Bridgepfad fuer genau einen net_zrl-Node.
+ * MQTT-/JSON-Vertrag bleibt erhalten, Transport wird real.
  */
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include "config.h"
+#include <esp_now.h>
+#include <esp_wifi.h>
+#include <string.h>
 
-#define MQTT_BUF_SIZE       1024
-#define RECONNECT_DELAY_MS  3000
+#if __has_include(<esp_arduino_version.h>)
+  #include <esp_arduino_version.h>
+#endif
+
+#ifndef ESP_ARDUINO_VERSION_MAJOR
+  #define ESP_ARDUINO_VERSION_MAJOR 2
+#endif
+
+#include "config.h"
+#include "../../../lib/sh_protocol/src/Protocol.h"
+#include "../../../lib/sh_protocol/src/DeviceTypes.h"
+
+#define MQTT_BUF_SIZE           1024U
+#define RECONNECT_DELAY_MS      3000UL
+#define WIFI_RETRY_INTERVAL_MS  5000UL
+#define COMMAND_TIMEOUT_MS      7000UL
+#define NODE_OFFLINE_TIMEOUT_MS 30000UL
+#define REQUEST_ID_LEN          96U
 
 static const char TOPIC_MASTER_STATUS[] =
     "smarthome/master/" CONF_MASTER_ID "/status";
+static const char TOPIC_NODE_CMD_SUB[] = "smarthome/device/+/command";
 
-static char TOPIC_NODE_META[64];
-static char TOPIC_NODE_AVAIL[64];
-static char TOPIC_NODE_STATE[64];
-static char TOPIC_NODE_ACK[64];
-static char TOPIC_NODE_CMD_SUB[] = "smarthome/device/+/command";
+struct PendingCommand {
+    bool active;
+    uint8_t seq;
+    uint8_t msg_type;
+    uint8_t cmd_type;
+    uint8_t param1;
+    uint8_t param2;
+    uint32_t sent_ms;
+    char request_id[REQUEST_ID_LEN];
+};
 
 struct NetZrlNode {
-    const char* device_id;
-    const char* device_name;
+    bool registered_node;
+    bool meta_known;
+    bool state_known;
+    bool online;
+    bool mac_known;
+    uint8_t mac[6];
+    uint32_t last_contact_ms;
+    uint16_t caps;
+    uint16_t fw_version;
+    uint8_t power_type;
+    uint8_t meta_schema_version;
+    uint8_t control_mode;
+    uint8_t config_profile;
+    uint8_t reporting_mode;
+    char device_id[SH_DEVICE_ID_LEN];
+    char device_name[SH_DEVICE_NAME_LEN];
+    char sensor_mask[SH_SENSOR_MASK_LEN];
+    char input_mask[SH_INPUT_MASK_LEN];
     bool relay_1;
     bool relay_2;
     bool cover_mode;
-    char cover_state[16];
+    uint8_t cover_state;
+    uint8_t cover_position;
     bool cover_calibrated;
-    int cover_position;
     bool fault;
-    bool available;
-    uint32_t ack_seq;
+    PendingCommand pending;
 };
 
-static NetZrlNode g_node;
-
+static NetZrlNode g_node = {};
 static WiFiClient wifiClient;
 static PubSubClient mqtt(wifiClient);
-static char g_mac[18];
-static uint32_t g_reconnect_ts = 0;
+static bool g_wifi_ok = false;
+static bool g_espnow_ready = false;
+static uint32_t g_last_wifi_attempt_ms = 0;
+static uint32_t g_last_mqtt_attempt_ms = 0;
+static uint8_t g_next_seq = 1;
 
-static void wifiConnect();
-static void mqttConnect();
-static void publishAll();
-static void publishMasterStatus(bool online);
-static void publishNodeMeta();
-static void publishNodeAvailability();
-static void publishNodeState();
-static void publishNodeAck(const char* device_id, const char* request_id,
-                           const char* status, int status_code,
-                           uint8_t ack_msg_type, const char* source);
-static void onMqttMessage(const char* topic, byte* payload, unsigned int len);
-static void handleCommand(const char* device_id,
-                          const char* payload_str, unsigned int len);
-
-void setup() {
-    Serial.begin(115200);
-    delay(500);
-    Serial.println("[master_compat] boot");
-
-    g_node.device_id = CONF_NODE_ID;
-    g_node.device_name = CONF_NODE_NAME;
-    g_node.relay_1 = false;
-    g_node.relay_2 = false;
-    g_node.cover_mode = true;
-    strlcpy(g_node.cover_state, "stopped", sizeof(g_node.cover_state));
-    g_node.cover_calibrated = false;
-    g_node.cover_position = -1;
-    g_node.fault = false;
-    g_node.available = true;
-    g_node.ack_seq = 0;
-
-    snprintf(TOPIC_NODE_META, sizeof(TOPIC_NODE_META),
-             "smarthome/device/%s/meta", CONF_NODE_ID);
-    snprintf(TOPIC_NODE_AVAIL, sizeof(TOPIC_NODE_AVAIL),
-             "smarthome/device/%s/availability", CONF_NODE_ID);
-    snprintf(TOPIC_NODE_STATE, sizeof(TOPIC_NODE_STATE),
-             "smarthome/device/%s/state", CONF_NODE_ID);
-    snprintf(TOPIC_NODE_ACK, sizeof(TOPIC_NODE_ACK),
-             "smarthome/device/%s/ack", CONF_NODE_ID);
-
-    wifiConnect();
-
-    mqtt.setServer(CONF_MQTT_HOST, CONF_MQTT_PORT);
-    mqtt.setBufferSize(MQTT_BUF_SIZE);
-    mqtt.setCallback(onMqttMessage);
-
-    mqttConnect();
+static void copyText(char* target, size_t target_size, const char* source) {
+    if (target == nullptr || target_size == 0U) {
+        return;
+    }
+    if (source == nullptr) {
+        target[0] = '\0';
+        return;
+    }
+    strncpy(target, source, target_size - 1U);
+    target[target_size - 1U] = '\0';
 }
 
-void loop() {
-    if (!mqtt.connected()) {
-        uint32_t now = millis();
-        if (now - g_reconnect_ts >= RECONNECT_DELAY_MS) {
-            g_reconnect_ts = now;
-            if (WiFi.status() != WL_CONNECTED) {
-                wifiConnect();
+static void copyFixedText(char* target, size_t target_size,
+                          const char* source, size_t source_len) {
+    if (target == nullptr || target_size == 0U) {
+        return;
+    }
+    size_t len = source_len;
+    if (len > (target_size - 1U)) {
+        len = target_size - 1U;
+    }
+    memcpy(target, source, len);
+    target[len] = '\0';
+}
+
+static void macToText(const uint8_t* mac, char* buffer, size_t buffer_size) {
+    if (buffer == nullptr || buffer_size == 0U) {
+        return;
+    }
+    if (mac == nullptr || !SmartHome::isValidMac(mac)) {
+        copyText(buffer, buffer_size, "00:00:00:00:00:00");
+        return;
+    }
+    char local[18] = {0};
+    SmartHome::macToString(mac, local);
+    copyText(buffer, buffer_size, local);
+}
+
+static uint16_t helloCaps(const SmartHome::HelloPayload& payload) {
+    return (uint16_t)(((uint16_t)payload.caps_hi << 8) | payload.caps_lo);
+}
+
+static const char* powerTypeText(uint8_t power_type) {
+    return power_type == SH_POWER_BATTERY ? "battery" : "mains";
+}
+
+static const char* controlModeText(uint8_t control_mode) {
+    switch (control_mode) {
+        case SH_CONTROL_MODE_RELAY: return "relay";
+        case SH_CONTROL_MODE_RELAY_LIGHT: return "relay_light";
+        case SH_CONTROL_MODE_DUAL_RELAY: return "dual_relay";
+        case SH_CONTROL_MODE_DUAL_RELAY_LIGHT: return "dual_relay_light";
+        case SH_CONTROL_MODE_COVER: return "cover";
+        case SH_CONTROL_MODE_NONE:
+        default: return "none";
+    }
+}
+
+static const char* configProfileText(uint8_t config_profile) {
+    switch (config_profile) {
+        case SH_PROFILE_HALL_LIGHT: return "hall_light";
+        case SH_PROFILE_KITCHEN_LIGHT: return "kitchen_light";
+        case SH_PROFILE_COVER_BASIC: return "cover_basic";
+        case SH_PROFILE_NONE:
+        default: return "none";
+    }
+}
+
+static const char* reportingModeText(uint8_t reporting_mode) {
+    switch (reporting_mode) {
+        case SH_REPORTING_PERIODIC: return "periodic";
+        case SH_REPORTING_EVENT_DRIVEN: return "event_driven";
+        case SH_REPORTING_HYBRID: return "hybrid";
+        case SH_REPORTING_SLEEP_PERIODIC: return "sleep_periodic";
+        case SH_REPORTING_SLEEP_EVENT: return "sleep_event";
+        default: return "unknown";
+    }
+}
+
+static const char* coverStateText() {
+    switch (g_node.cover_state) {
+        case SH_COVER_STATE_MOVING_UP:
+            return "opening";
+        case SH_COVER_STATE_MOVING_DOWN:
+            return "closing";
+        case SH_COVER_STATE_STOPPED:
+        default:
+            if (g_node.cover_calibrated && g_node.cover_position == 100U) {
+                return "open";
             }
-            mqttConnect();
-        }
-        return;
-    }
-    mqtt.loop();
-}
-
-static void wifiConnect() {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(CONF_WIFI_SSID, CONF_WIFI_PASS);
-    Serial.print("[wifi] connecting");
-    uint8_t attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-    Serial.println();
-    if (WiFi.status() == WL_CONNECTED) {
-        WiFi.macAddress().toCharArray(g_mac, sizeof(g_mac));
-        Serial.print("[wifi] IP=");
-        Serial.print(WiFi.localIP());
-        Serial.print("  MAC=");
-        Serial.println(g_mac);
-    } else {
-        Serial.println("[wifi] connection failed - will retry in loop");
-        strlcpy(g_mac, "00:00:00:00:00:00", sizeof(g_mac));
+            if (g_node.cover_calibrated && g_node.cover_position == 0U) {
+                return "closed";
+            }
+            return "stopped";
     }
 }
 
-static void mqttConnect() {
-    StaticJsonDocument<256> lwtDoc;
-    lwtDoc["master_id"] = CONF_MASTER_ID;
-    lwtDoc["online"] = false;
-    lwtDoc["wifi"] = false;
-    lwtDoc["mqtt"] = false;
-    lwtDoc["espnow"] = false;
-    lwtDoc["fw"] = CONF_FW_VERSION;
-    char lwtBuf[256];
-    serializeJson(lwtDoc, lwtBuf, sizeof(lwtBuf));
-
-    Serial.print("[mqtt] connecting");
-    bool connected = false;
-
-    for (uint8_t i = 0; i < 5; i++) {
-        const char* user = strlen(CONF_MQTT_USER) > 0 ? CONF_MQTT_USER : nullptr;
-        const char* pass = strlen(CONF_MQTT_PASS) > 0 ? CONF_MQTT_PASS : nullptr;
-
-        connected = mqtt.connect(
-            CONF_MASTER_ID,
-            user,
-            pass,
-            TOPIC_MASTER_STATUS,
-            1,
-            true,
-            lwtBuf
-        );
-        if (connected) {
-            break;
-        }
-        Serial.print(".");
-        delay(1500);
+static const char* ackStatusText(uint8_t status) {
+    switch (status) {
+        case SH_ACK_OK:
+            return "ok";
+        case SH_ACK_REJECTED:
+            return "rejected";
+        case SH_ACK_ERROR:
+        default:
+            return "error";
     }
-
-    if (!connected) {
-        Serial.print(" failed, rc=");
-        Serial.println(mqtt.state());
-        return;
-    }
-    Serial.println(" OK");
-
-    mqtt.subscribe(TOPIC_NODE_CMD_SUB);
-    publishAll();
 }
 
-static void publishAll() {
-    publishMasterStatus(true);
-    publishNodeMeta();
-    publishNodeAvailability();
-    publishNodeState();
+static void buildNodeTopic(const char* device_id, const char* suffix,
+                           char* buffer, size_t buffer_size) {
+    snprintf(buffer, buffer_size, "smarthome/device/%s/%s",
+             device_id != nullptr ? device_id : "unknown", suffix);
 }
 
 static void publishMasterStatus(bool online) {
@@ -192,243 +207,738 @@ static void publishMasterStatus(bool online) {
     doc["online"] = online;
     doc["wifi"] = (WiFi.status() == WL_CONNECTED);
     doc["mqtt"] = online;
-    doc["espnow"] = false;
+    doc["espnow"] = g_espnow_ready;
     doc["fw"] = CONF_FW_VERSION;
-    char buf[256];
-    serializeJson(doc, buf, sizeof(buf));
-    mqtt.publish(TOPIC_MASTER_STATUS, (uint8_t*)buf, strlen(buf), true);
+
+    char payload[256];
+    serializeJson(doc, payload, sizeof(payload));
+    mqtt.publish(TOPIC_MASTER_STATUS, (uint8_t*)payload, strlen(payload), true);
 }
 
 static void publishNodeMeta() {
+    if (!g_node.registered_node || !g_node.meta_known) {
+        return;
+    }
+
+    char topic[96];
+    char mac_text[18];
+    buildNodeTopic(g_node.device_id, "meta", topic, sizeof(topic));
+    macToText(g_node.mac_known ? g_node.mac : nullptr, mac_text, sizeof(mac_text));
+
     StaticJsonDocument<768> doc;
     doc["device_id"] = g_node.device_id;
     doc["device_name"] = g_node.device_name;
     doc["device_class"] = "net_zrl";
-    doc["power_type"] = "mains";
-    doc["fw_version"] = 100;
-    doc["caps"] = 8195;
-    doc["mac_address"] = g_mac;
-    doc["meta_schema_version"] = 1;
-    doc["control_mode"] = "cover";
-    doc["config_profile"] = "cover_basic";
-    doc["reporting_mode"] = "hybrid";
-    doc["sensor_mask"] = "XXXXXXXXXX";
-    doc["input_mask"] = "XXXXX";
-    char buf[768];
-    serializeJson(doc, buf, sizeof(buf));
-    mqtt.publish(TOPIC_NODE_META, (uint8_t*)buf, strlen(buf), true);
+    doc["power_type"] = powerTypeText(g_node.power_type);
+    doc["fw_version"] = g_node.fw_version;
+    doc["caps"] = g_node.caps;
+    doc["mac_address"] = mac_text;
+    doc["meta_schema_version"] = g_node.meta_schema_version;
+    doc["control_mode"] = controlModeText(g_node.control_mode);
+    doc["config_profile"] = configProfileText(g_node.config_profile);
+    doc["reporting_mode"] = reportingModeText(g_node.reporting_mode);
+    doc["sensor_mask"] = g_node.sensor_mask;
+    doc["input_mask"] = g_node.input_mask;
+
+    char payload[768];
+    serializeJson(doc, payload, sizeof(payload));
+    mqtt.publish(topic, (uint8_t*)payload, strlen(payload), true);
 }
 
 static void publishNodeAvailability() {
+    if (!g_node.registered_node) {
+        return;
+    }
+
+    char topic[96];
+    buildNodeTopic(g_node.device_id, "availability", topic, sizeof(topic));
+
     StaticJsonDocument<192> doc;
     doc["device_id"] = g_node.device_id;
-    doc["availability"] = g_node.available ? "online" : "offline";
-    doc["online"] = g_node.available;
-    doc["power_type"] = "mains";
-    char buf[192];
-    serializeJson(doc, buf, sizeof(buf));
-    mqtt.publish(TOPIC_NODE_AVAIL, (uint8_t*)buf, strlen(buf), true);
+    doc["availability"] = g_node.online ? "online" : "offline";
+    doc["online"] = g_node.online;
+    doc["power_type"] = powerTypeText(g_node.power_type);
+
+    char payload[192];
+    serializeJson(doc, payload, sizeof(payload));
+    mqtt.publish(topic, (uint8_t*)payload, strlen(payload), true);
 }
 
 static void publishNodeState() {
+    if (!g_node.registered_node || !g_node.state_known) {
+        return;
+    }
+
+    char topic[96];
+    buildNodeTopic(g_node.device_id, "state", topic, sizeof(topic));
+
     StaticJsonDocument<256> doc;
     doc["device_id"] = g_node.device_id;
     doc["relay_1"] = g_node.relay_1;
     doc["relay_2"] = g_node.relay_2;
     doc["cover_mode"] = g_node.cover_mode;
-    doc["cover_state"] = g_node.cover_state;
+    doc["cover_state"] = coverStateText();
     doc["cover_calibrated"] = g_node.cover_calibrated;
     doc["fault"] = g_node.fault;
 
-    if (g_node.cover_calibrated && g_node.cover_position >= 0) {
+    if (g_node.cover_calibrated && g_node.cover_position <= 100U) {
         doc["cover_position"] = g_node.cover_position;
     } else {
         doc["cover_position"] = nullptr;
     }
 
-    char buf[256];
-    serializeJson(doc, buf, sizeof(buf));
-    mqtt.publish(TOPIC_NODE_STATE, (uint8_t*)buf, strlen(buf), true);
+    char payload[256];
+    serializeJson(doc, payload, sizeof(payload));
+    mqtt.publish(topic, (uint8_t*)payload, strlen(payload), true);
 }
 
-static void publishNodeAck(const char* device_id, const char* request_id,
-                           const char* status, int status_code,
-                           uint8_t ack_msg_type, const char* source) {
-    g_node.ack_seq++;
-
-    char topic[64];
-    snprintf(topic, sizeof(topic), "smarthome/device/%s/ack", device_id);
+static void publishNodeAckById(const char* device_id, const char* request_id,
+                               const char* status, int status_code,
+                               uint8_t ack_msg_type, uint8_t ack_seq,
+                               const char* source) {
+    char topic[96];
+    buildNodeTopic(device_id, "ack", topic, sizeof(topic));
 
     StaticJsonDocument<256> doc;
     doc["device_id"] = device_id;
-    doc["request_id"] = request_id;
+    doc["request_id"] = request_id != nullptr ? request_id : "";
     doc["channel"] = "command";
     doc["status"] = status;
     doc["status_code"] = status_code;
     doc["ack_msg_type"] = ack_msg_type;
-    doc["ack_seq"] = g_node.ack_seq;
+    doc["ack_seq"] = ack_seq;
     doc["source"] = source;
 
-    char buf[256];
-    serializeJson(doc, buf, sizeof(buf));
-    mqtt.publish(topic, (uint8_t*)buf, strlen(buf), false);
+    char payload[256];
+    serializeJson(doc, payload, sizeof(payload));
+    mqtt.publish(topic, (uint8_t*)payload, strlen(payload), false);
 }
 
-static void onMqttMessage(const char* topic, byte* payload, unsigned int len) {
-    const char* p = topic;
-    int slashes = 0;
-    const char* id_start = nullptr;
-    const char* id_end = nullptr;
-    while (*p) {
-        if (*p == '/') {
-            slashes++;
-            if (slashes == 2) {
-                id_start = p + 1;
-            }
-            if (slashes == 3) {
-                id_end = p;
-                break;
-            }
+static void publishNodeAck(const char* request_id, const char* status,
+                           int status_code, uint8_t ack_msg_type,
+                           uint8_t ack_seq, const char* source) {
+    publishNodeAckById(g_node.device_id, request_id, status, status_code,
+                       ack_msg_type, ack_seq, source);
+}
+
+static void publishAllKnown() {
+    publishMasterStatus(true);
+    publishNodeMeta();
+    publishNodeAvailability();
+    publishNodeState();
+}
+
+static bool ensurePeer(const uint8_t* mac) {
+    if (!SmartHome::isValidMac(mac)) {
+        return false;
+    }
+    if (esp_now_is_peer_exist(mac)) {
+        return true;
+    }
+
+    esp_now_peer_info_t peer = {};
+    memcpy(peer.peer_addr, mac, 6);
+    peer.channel = (uint8_t)(WiFi.status() == WL_CONNECTED ? WiFi.channel() : 0);
+    peer.encrypt = false;
+
+    return esp_now_add_peer(&peer) == ESP_OK;
+}
+
+static bool sendPacketWithOptions(const uint8_t* dest_mac, uint8_t msg_type,
+                                  const void* payload, size_t payload_len,
+                                  uint8_t flags, bool fixed_seq, uint8_t seq,
+                                  uint8_t* used_seq) {
+    if (!g_espnow_ready || !SmartHome::isValidMac(dest_mac) ||
+        payload_len > SH_MAX_PAYLOAD_BYTES) {
+        return false;
+    }
+    if (!ensurePeer(dest_mac)) {
+        return false;
+    }
+
+    uint8_t buffer[SH_ESPNOW_MAX_BYTES] = {0};
+    SmartHome::MsgHeader header = {};
+    const uint8_t effective_seq = fixed_seq ? seq : g_next_seq++;
+    SmartHome::fillHeader(header, msg_type, effective_seq, flags,
+                          (uint16_t)payload_len);
+
+    if (payload_len > 0U && payload != nullptr) {
+        memcpy(buffer + SH_HEADER_SIZE, payload, payload_len);
+    }
+
+    SmartHome::finalizePacketCrc(header, buffer + SH_HEADER_SIZE);
+    memcpy(buffer, &header, sizeof(header));
+
+    if (used_seq != nullptr) {
+        *used_seq = effective_seq;
+    }
+
+    return esp_now_send(dest_mac, buffer, SH_HEADER_SIZE + payload_len) == ESP_OK;
+}
+
+static bool sendPacket(const uint8_t* dest_mac, uint8_t msg_type,
+                       const void* payload, size_t payload_len) {
+    return sendPacketWithOptions(dest_mac, msg_type, payload, payload_len,
+                                 0U, false, 0U, nullptr);
+}
+
+static bool sendCommand(uint8_t cmd_type, uint8_t param1, uint8_t param2,
+                        const char* request_id) {
+    if (!g_node.registered_node || !g_node.mac_known) {
+        return false;
+    }
+
+    SmartHome::CmdPayload payload = {};
+    payload.cmd_type = cmd_type;
+    payload.param1 = param1;
+    payload.param2 = param2;
+
+    uint8_t seq = 0U;
+    if (!sendPacketWithOptions(g_node.mac, SH_MSG_CMD, &payload, sizeof(payload),
+                               SH_FLAG_ACK_REQUEST, false, 0U, &seq)) {
+        return false;
+    }
+
+    g_node.pending = {};
+    g_node.pending.active = true;
+    g_node.pending.seq = seq;
+    g_node.pending.msg_type = SH_MSG_CMD;
+    g_node.pending.cmd_type = cmd_type;
+    g_node.pending.param1 = param1;
+    g_node.pending.param2 = param2;
+    g_node.pending.sent_ms = millis();
+    copyText(g_node.pending.request_id, sizeof(g_node.pending.request_id),
+             request_id);
+    return true;
+}
+
+static void requestFreshState() {
+    if (!g_node.registered_node || !g_node.mac_known) {
+        return;
+    }
+
+    SmartHome::CmdPayload payload = {};
+    payload.cmd_type = SH_CMD_STATE_REQUEST;
+    sendPacket(g_node.mac, SH_MSG_CMD, &payload, sizeof(payload));
+}
+
+static void refreshNodeContact(const uint8_t* sender_mac) {
+    const bool was_offline = !g_node.online;
+    g_node.last_contact_ms = millis();
+    g_node.online = true;
+
+    if (sender_mac != nullptr && SmartHome::isValidMac(sender_mac)) {
+        const bool mac_changed = !g_node.mac_known ||
+                                 memcmp(g_node.mac, sender_mac, 6) != 0;
+        memcpy(g_node.mac, sender_mac, 6);
+        g_node.mac_known = true;
+        if (mac_changed) {
+            ensurePeer(g_node.mac);
         }
-        p++;
-    }
-    if (!id_start || !id_end || id_end <= id_start) {
-        return;
     }
 
-    size_t id_len = (size_t)(id_end - id_start);
-    char device_id[32];
-    if (id_len >= sizeof(device_id)) {
-        return;
+    if (was_offline && mqtt.connected()) {
+        publishNodeAvailability();
     }
-    memcpy(device_id, id_start, id_len);
-    device_id[id_len] = '\0';
-
-    char pstr[MQTT_BUF_SIZE];
-    if (len >= sizeof(pstr)) {
-        len = sizeof(pstr) - 1;
-    }
-    memcpy(pstr, payload, len);
-    pstr[len] = '\0';
-
-    Serial.print("[cmd] device=");
-    Serial.print(device_id);
-    Serial.print(" payload=");
-    Serial.println(pstr);
-
-    handleCommand(device_id, pstr, len);
 }
 
-static void handleCommand(const char* device_id,
-                          const char* payload_str, unsigned int len) {
+static void sendHelloAck(const uint8_t* dest_mac, uint8_t ack_status) {
+    SmartHome::HelloAckPayload payload = {};
+    payload.channel = (uint8_t)(WiFi.status() == WL_CONNECTED ? WiFi.channel() : 0);
+    payload.ack_status = ack_status;
+    sendPacket(dest_mac, SH_MSG_HELLO_ACK, &payload, sizeof(payload));
+}
+
+static bool isKnownDeviceId(const char* device_id) {
+    return g_node.registered_node &&
+           strncmp(g_node.device_id, device_id, SH_DEVICE_ID_LEN) == 0;
+}
+
+static void handleHello(const uint8_t* sender_mac,
+                        const SmartHome::HelloPayload& payload) {
+    char device_id[SH_DEVICE_ID_LEN];
+    char device_name[SH_DEVICE_NAME_LEN];
+    char sensor_mask[SH_SENSOR_MASK_LEN];
+    char input_mask[SH_INPUT_MASK_LEN];
+
+    copyFixedText(device_id, sizeof(device_id), payload.device_id,
+                  sizeof(payload.device_id));
+    copyFixedText(device_name, sizeof(device_name), payload.device_name,
+                  sizeof(payload.device_name));
+    copyFixedText(sensor_mask, sizeof(sensor_mask), payload.sensor_mask,
+                  sizeof(payload.sensor_mask));
+    copyFixedText(input_mask, sizeof(input_mask), payload.input_mask,
+                  sizeof(payload.input_mask));
+
+    if (!SmartHome::isValidDeviceId(device_id) ||
+        payload.device_class != SH_CLASS_NET_ZRL ||
+        (payload.power_type != SH_POWER_MAINS &&
+         payload.power_type != SH_POWER_BATTERY)) {
+        sendHelloAck(sender_mac, SH_ACK_REJECTED);
+        return;
+    }
+
+    if (g_node.registered_node && !isKnownDeviceId(device_id)) {
+        sendHelloAck(sender_mac, SH_ACK_REJECTED);
+        return;
+    }
+
+    g_node.registered_node = true;
+    g_node.meta_known = true;
+    copyText(g_node.device_id, sizeof(g_node.device_id), device_id);
+    copyText(g_node.device_name, sizeof(g_node.device_name), device_name);
+    copyText(g_node.sensor_mask, sizeof(g_node.sensor_mask), sensor_mask);
+    copyText(g_node.input_mask, sizeof(g_node.input_mask), input_mask);
+    g_node.caps = helloCaps(payload);
+    g_node.fw_version = payload.fw_version;
+    g_node.power_type = payload.power_type;
+    g_node.meta_schema_version = payload.meta_schema_version;
+    g_node.control_mode = payload.control_mode;
+    g_node.config_profile = payload.config_profile;
+    g_node.reporting_mode = payload.reporting_mode;
+
+    refreshNodeContact(sender_mac);
+    publishNodeMeta();
+    publishNodeAvailability();
+    if (g_node.state_known) {
+        publishNodeState();
+    }
+
+    sendHelloAck(sender_mac, SH_ACK_OK);
+    requestFreshState();
+}
+
+static void handleHeartbeat(const uint8_t* sender_mac,
+                            const SmartHome::HeartbeatPayload& payload) {
+    char node_id[SH_DEVICE_ID_LEN];
+    copyFixedText(node_id, sizeof(node_id), payload.node_id,
+                  sizeof(payload.node_id));
+    if (!isKnownDeviceId(node_id)) {
+        return;
+    }
+
+    refreshNodeContact(sender_mac);
+    publishNodeAvailability();
+}
+
+static void handleZrlState(const uint8_t* sender_mac, const char* node_id,
+                           const SmartHome::ZrlStateReportPayload& state) {
+    if (!isKnownDeviceId(node_id)) {
+        return;
+    }
+
+    refreshNodeContact(sender_mac);
+    g_node.relay_1 = (state.relay_1 != 0U);
+    g_node.relay_2 = (state.relay_2 != 0U);
+    g_node.cover_mode = (state.cover_mode != 0U);
+    g_node.cover_state = state.cover_state;
+    g_node.cover_position = state.cover_position;
+    g_node.cover_calibrated = (state.cover_calibrated != 0U);
+    g_node.fault = (state.fault != 0U);
+    g_node.state_known = true;
+
+    publishNodeState();
+    publishNodeAvailability();
+}
+
+static void handleStateReport(const uint8_t* sender_mac,
+                              const uint8_t* payload,
+                              uint16_t payload_len) {
+    if (payload == nullptr || payload_len < SH_DEVICE_ID_LEN) {
+        return;
+    }
+
+    char node_id[SH_DEVICE_ID_LEN];
+    copyFixedText(node_id, sizeof(node_id),
+                  reinterpret_cast<const char*>(payload), SH_DEVICE_ID_LEN);
+
+    if (payload_len == sizeof(SmartHome::ZrlStateReportPayload)) {
+        handleZrlState(sender_mac, node_id,
+                       *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload));
+        return;
+    }
+
+    if (payload_len == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
+        const SmartHome::ZrlConfigStateReportPayload& state =
+            *reinterpret_cast<const SmartHome::ZrlConfigStateReportPayload*>(payload);
+        SmartHome::ZrlStateReportPayload live_state = {};
+        copyFixedText(live_state.node_id, sizeof(live_state.node_id),
+                      state.node_id, sizeof(state.node_id));
+        live_state.relay_1 = state.relay_1;
+        live_state.relay_2 = state.relay_2;
+        live_state.cover_mode = state.cover_mode;
+        live_state.cover_state = state.cover_state;
+        live_state.cover_position = state.cover_position;
+        live_state.cover_calibrated = state.cover_calibrated;
+        live_state.fault = state.fault;
+        handleZrlState(sender_mac, node_id, live_state);
+    }
+}
+
+static void handleAck(const uint8_t* sender_mac,
+                      const SmartHome::AckPayload& payload) {
+    if (!g_node.registered_node || !g_node.mac_known ||
+        memcmp(g_node.mac, sender_mac, 6) != 0) {
+        return;
+    }
+    refreshNodeContact(sender_mac);
+
+    if (!g_node.pending.active ||
+        payload.ack_msg_type != g_node.pending.msg_type ||
+        payload.ack_seq != g_node.pending.seq) {
+        return;
+    }
+
+    publishNodeAck(g_node.pending.request_id, ackStatusText(payload.status),
+                   (int)payload.status, payload.ack_msg_type,
+                   payload.ack_seq, "node_ack");
+    g_node.pending = {};
+}
+
+static void handleEspNowPacket(const uint8_t* sender_mac,
+                               const uint8_t* data, int length) {
+    if (sender_mac == nullptr || data == nullptr ||
+        length < (int)sizeof(SmartHome::MsgHeader)) {
+        return;
+    }
+    if (!SmartHome::hasValidPacketCrc(data, (size_t)length)) {
+        return;
+    }
+
+    const SmartHome::MsgHeader* header =
+        reinterpret_cast<const SmartHome::MsgHeader*>(data);
+    const uint8_t* payload = data + SH_HEADER_SIZE;
+
+    switch (header->msg_type) {
+        case SH_MSG_HELLO:
+            if (header->payload_len == sizeof(SmartHome::HelloPayload)) {
+                handleHello(sender_mac,
+                            *reinterpret_cast<const SmartHome::HelloPayload*>(payload));
+            }
+            break;
+        case SH_MSG_HEARTBEAT:
+            if (header->payload_len == sizeof(SmartHome::HeartbeatPayload)) {
+                handleHeartbeat(sender_mac,
+                                *reinterpret_cast<const SmartHome::HeartbeatPayload*>(payload));
+            }
+            break;
+        case SH_MSG_STATE:
+            handleStateReport(sender_mac, payload, header->payload_len);
+            break;
+        case SH_MSG_ACK:
+            if (header->payload_len == sizeof(SmartHome::AckPayload)) {
+                handleAck(sender_mac,
+                          *reinterpret_cast<const SmartHome::AckPayload*>(payload));
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+static void onEspNowReceive(const esp_now_recv_info_t* info,
+                            const uint8_t* data, int length) {
+    if (info == nullptr) {
+        return;
+    }
+    handleEspNowPacket(info->src_addr, data, length);
+}
+#else
+static void onEspNowReceive(const uint8_t* sender_mac,
+                            const uint8_t* data, int length) {
+    handleEspNowPacket(sender_mac, data, length);
+}
+#endif
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+static void onEspNowSent(const esp_now_send_info_t* info,
+                         esp_now_send_status_t status) {
+    (void)info;
+    (void)status;
+}
+#else
+static void onEspNowSent(const uint8_t* mac, esp_now_send_status_t status) {
+    (void)mac;
+    (void)status;
+}
+#endif
+
+static bool tryGetLong(const JsonDocument& doc, const char* key, long* value) {
+    if (!doc.containsKey(key) || value == nullptr) {
+        return false;
+    }
+    JsonVariantConst variant = doc[key];
+    if (!variant.is<long>() && !variant.is<int>() && !variant.is<unsigned int>()) {
+        return false;
+    }
+    *value = variant.as<long>();
+    return true;
+}
+
+static void handleCommand(const char* device_id, const char* payload_str,
+                          unsigned int len) {
     StaticJsonDocument<512> doc;
-    DeserializationError err = deserializeJson(doc, payload_str, len);
-    if (err) {
-        Serial.print("[cmd] JSON error: ");
-        Serial.println(err.c_str());
+    if (deserializeJson(doc, payload_str, len) != DeserializationError::Ok) {
         return;
     }
 
     if (!doc.containsKey("request_id") || doc["request_id"].isNull()) {
-        Serial.println("[cmd] no request_id - silent drop");
         return;
     }
     const char* request_id = doc["request_id"].as<const char*>();
     const char* command = doc["command"] | "";
 
-    if (strcmp(device_id, g_node.device_id) != 0) {
-        publishNodeAck(device_id, request_id,
-                       "unknown_device", -6, 7, "master_registry");
+    if (!g_node.registered_node || !isKnownDeviceId(device_id)) {
+        publishNodeAckById(device_id, request_id, "unknown_device", -6,
+                           SH_MSG_CMD, 0U, "master_registry");
+        return;
+    }
+
+    if (g_node.pending.active) {
+        publishNodeAck(request_id, "busy", -2, g_node.pending.msg_type,
+                       g_node.pending.seq, "master_busy");
+        return;
+    }
+
+    if (!g_espnow_ready || !g_node.mac_known) {
+        publishNodeAck(request_id, "send_failed", -4, SH_MSG_CMD, 0U,
+                       "master_send");
         return;
     }
 
     if (strcmp(command, "get_state") == 0) {
-        publishNodeState();
-        publishNodeAck(device_id, request_id, "ok", 0, 7, "node_ack");
+        if (!sendCommand(SH_CMD_STATE_REQUEST, 0U, 0U, request_id)) {
+            publishNodeAck(request_id, "send_failed", -4, SH_MSG_CMD, 0U,
+                           "master_send");
+        }
         return;
     }
 
     if (strcmp(command, "open") == 0) {
-        g_node.relay_1 = true;
-        g_node.relay_2 = false;
-        strlcpy(g_node.cover_state, "opening", sizeof(g_node.cover_state));
-        if (g_node.cover_calibrated) {
-            g_node.cover_position = 100;
-            strlcpy(g_node.cover_state, "open", sizeof(g_node.cover_state));
-            g_node.relay_1 = false;
+        if (!sendCommand(SH_CMD_COVER, SH_COVER_CMD_OPEN, 0U, request_id)) {
+            publishNodeAck(request_id, "send_failed", -4, SH_MSG_CMD, 0U,
+                           "master_send");
         }
-        publishNodeState();
-        publishNodeAck(device_id, request_id, "ok", 0, 7, "node_ack");
         return;
     }
 
     if (strcmp(command, "close") == 0) {
-        g_node.relay_1 = false;
-        g_node.relay_2 = true;
-        strlcpy(g_node.cover_state, "closing", sizeof(g_node.cover_state));
-        if (g_node.cover_calibrated) {
-            g_node.cover_position = 0;
-            strlcpy(g_node.cover_state, "closed", sizeof(g_node.cover_state));
-            g_node.relay_2 = false;
+        if (!sendCommand(SH_CMD_COVER, SH_COVER_CMD_CLOSE, 0U, request_id)) {
+            publishNodeAck(request_id, "send_failed", -4, SH_MSG_CMD, 0U,
+                           "master_send");
         }
-        publishNodeState();
-        publishNodeAck(device_id, request_id, "ok", 0, 7, "node_ack");
         return;
     }
 
     if (strcmp(command, "stop") == 0) {
-        g_node.relay_1 = false;
-        g_node.relay_2 = false;
-        strlcpy(g_node.cover_state, "stopped", sizeof(g_node.cover_state));
-        publishNodeState();
-        publishNodeAck(device_id, request_id, "ok", 0, 7, "node_ack");
+        if (!sendCommand(SH_CMD_COVER, SH_COVER_CMD_STOP, 0U, request_id)) {
+            publishNodeAck(request_id, "send_failed", -4, SH_MSG_CMD, 0U,
+                           "master_send");
+        }
         return;
     }
 
     if (strcmp(command, "set_position") == 0) {
-        int val = doc["value"] | -1;
-        if (!g_node.cover_calibrated && val > 0 && val < 100) {
-            publishNodeAck(device_id, request_id,
-                           "not_calibrated", -5, 7, "master_validation");
+        long position = -1L;
+        if (!tryGetLong(doc, "value", &position)) {
+            (void)tryGetLong(doc, "position", &position);
+        }
+        if (position < 0L || position > 100L) {
+            publishNodeAck(request_id, "invalid_payload", -21,
+                           SH_MSG_CMD, 0U, "master_validation");
             return;
         }
-        if (val < 0 || val > 100) {
-            publishNodeAck(device_id, request_id,
-                           "invalid_payload", -21, 7, "master_validation");
+        if (g_node.state_known && !g_node.cover_calibrated &&
+            position > 0L && position < 100L) {
+            publishNodeAck(request_id, "not_calibrated", -5,
+                           SH_MSG_CMD, 0U, "master_validation");
             return;
         }
-        g_node.cover_position = val;
-        g_node.relay_1 = false;
-        g_node.relay_2 = false;
-        if (val == 100) {
-            strlcpy(g_node.cover_state, "open", sizeof(g_node.cover_state));
-        } else if (val == 0) {
-            strlcpy(g_node.cover_state, "closed", sizeof(g_node.cover_state));
-        } else {
-            strlcpy(g_node.cover_state, "stopped", sizeof(g_node.cover_state));
+        if (!sendCommand(SH_CMD_COVER, SH_COVER_CMD_SET_POSITION,
+                         (uint8_t)position, request_id)) {
+            publishNodeAck(request_id, "send_failed", -4, SH_MSG_CMD, 0U,
+                           "master_send");
         }
-        publishNodeState();
-        publishNodeAck(device_id, request_id, "ok", 0, 7, "node_ack");
         return;
     }
 
-#ifdef CONF_ENABLE_SIM_HOOKS
-    if (strcmp(command, "simulate_calibrated") == 0) {
-        bool val = doc["value"] | false;
-        g_node.cover_calibrated = val;
-        if (val && g_node.cover_position < 0) {
-            g_node.cover_position = 0;
-        }
-        if (!val) {
-            g_node.cover_position = -1;
-            strlcpy(g_node.cover_state, "stopped", sizeof(g_node.cover_state));
-        }
-        publishNodeState();
-        publishNodeAck(device_id, request_id, "ok", 0, 7, "node_ack");
+    publishNodeAck(request_id, "unsupported", -2, SH_MSG_CMD, 0U,
+                   "master_validation");
+}
+
+static void onMqttMessage(char* topic, byte* payload, unsigned int len) {
+    if (topic == nullptr || payload == nullptr) {
         return;
     }
-#endif
 
-    publishNodeAck(device_id, request_id,
-                   "unsupported", -2, 7, "master_validation");
+    const char* prefix = "smarthome/device/";
+    if (strncmp(topic, prefix, strlen(prefix)) != 0) {
+        return;
+    }
+
+    const char* id_start = topic + strlen(prefix);
+    const char* suffix = strchr(id_start, '/');
+    if (suffix == nullptr || strcmp(suffix, "/command") != 0) {
+        return;
+    }
+
+    size_t id_len = (size_t)(suffix - id_start);
+    if (id_len == 0U || id_len >= SH_DEVICE_ID_LEN) {
+        return;
+    }
+
+    char device_id[SH_DEVICE_ID_LEN];
+    memcpy(device_id, id_start, id_len);
+    device_id[id_len] = '\0';
+
+    char json[MQTT_BUF_SIZE];
+    if (len >= sizeof(json)) {
+        len = sizeof(json) - 1U;
+    }
+    memcpy(json, payload, len);
+    json[len] = '\0';
+
+    handleCommand(device_id, json, len);
+}
+
+static void wifiConnect() {
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+    WiFi.begin(CONF_WIFI_SSID, CONF_WIFI_PASS);
+    g_last_wifi_attempt_ms = millis();
+    Serial.print("[wifi] connecting");
+
+    uint8_t attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 40U) {
+        delay(500);
+        Serial.print(".");
+        attempts++;
+    }
+    Serial.println();
+
+    g_wifi_ok = (WiFi.status() == WL_CONNECTED);
+    if (g_wifi_ok) {
+        Serial.print("[wifi] IP=");
+        Serial.println(WiFi.localIP());
+    } else {
+        Serial.println("[wifi] connection failed - will retry in loop");
+    }
+}
+
+static void initEspNowIfNeeded() {
+    if (g_espnow_ready || WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+
+    if (esp_now_init() != ESP_OK) {
+        g_espnow_ready = false;
+        return;
+    }
+
+    esp_now_register_send_cb(onEspNowSent);
+    esp_now_register_recv_cb(onEspNowReceive);
+    g_espnow_ready = true;
+}
+
+static void mqttConnect() {
+    StaticJsonDocument<256> lwt_doc;
+    lwt_doc["master_id"] = CONF_MASTER_ID;
+    lwt_doc["online"] = false;
+    lwt_doc["wifi"] = false;
+    lwt_doc["mqtt"] = false;
+    lwt_doc["espnow"] = false;
+    lwt_doc["fw"] = CONF_FW_VERSION;
+
+    char lwt_payload[256];
+    serializeJson(lwt_doc, lwt_payload, sizeof(lwt_payload));
+
+    const char* user = strlen(CONF_MQTT_USER) > 0 ? CONF_MQTT_USER : nullptr;
+    const char* pass = strlen(CONF_MQTT_PASS) > 0 ? CONF_MQTT_PASS : nullptr;
+
+    if (!mqtt.connect(CONF_MASTER_ID, user, pass, TOPIC_MASTER_STATUS, 1, true,
+                      lwt_payload)) {
+        return;
+    }
+
+    mqtt.subscribe(TOPIC_NODE_CMD_SUB);
+    publishAllKnown();
+}
+
+static void ensureConnectivity() {
+    const bool wifi_now = (WiFi.status() == WL_CONNECTED);
+    if (!wifi_now && (millis() - g_last_wifi_attempt_ms) >= WIFI_RETRY_INTERVAL_MS) {
+        WiFi.disconnect();
+        WiFi.begin(CONF_WIFI_SSID, CONF_WIFI_PASS);
+        g_last_wifi_attempt_ms = millis();
+    }
+    g_wifi_ok = wifi_now;
+
+    if (!g_wifi_ok) {
+        return;
+    }
+
+    initEspNowIfNeeded();
+
+    if (!mqtt.connected() &&
+        (millis() - g_last_mqtt_attempt_ms) >= RECONNECT_DELAY_MS) {
+        g_last_mqtt_attempt_ms = millis();
+        mqttConnect();
+    }
+}
+
+static void checkPendingTimeout() {
+    if (!g_node.pending.active) {
+        return;
+    }
+    if ((millis() - g_node.pending.sent_ms) < COMMAND_TIMEOUT_MS) {
+        return;
+    }
+
+    publishNodeAck(g_node.pending.request_id, "timeout", (int)SH_ERROR_ACK_TIMEOUT,
+                   g_node.pending.msg_type, g_node.pending.seq, "master_timeout");
+    g_node.pending = {};
+}
+
+static void checkNodeOffline() {
+    if (!g_node.registered_node || !g_node.online) {
+        return;
+    }
+    if ((millis() - g_node.last_contact_ms) <= NODE_OFFLINE_TIMEOUT_MS) {
+        return;
+    }
+
+    g_node.online = false;
+    if (mqtt.connected()) {
+        publishNodeAvailability();
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    delay(500);
+    Serial.println("[master_compat] boot");
+
+    copyText(g_node.sensor_mask, sizeof(g_node.sensor_mask), "XXXXXXXXXX");
+    copyText(g_node.input_mask, sizeof(g_node.input_mask), "XXXXX");
+
+    mqtt.setServer(CONF_MQTT_HOST, CONF_MQTT_PORT);
+    mqtt.setBufferSize(MQTT_BUF_SIZE);
+    mqtt.setCallback(onMqttMessage);
+
+    wifiConnect();
+    initEspNowIfNeeded();
+    mqttConnect();
+}
+
+void loop() {
+    ensureConnectivity();
+
+    if (mqtt.connected()) {
+        mqtt.loop();
+    }
+
+    checkPendingTimeout();
+    checkNodeOffline();
+    delay(10);
 }
