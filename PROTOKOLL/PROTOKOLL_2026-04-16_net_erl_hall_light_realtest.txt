@@ -6,10 +6,8 @@ Thema
 
 Ausgangsstand
 - Oeffentliches Repo: C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt
-- Privates Repo: C:\Users\mries\Documents\LocalRepos\smarthome-technikerprojekt-private
-- Beide Repos standen auf main.
+- Das oeffentliche Repo stand auf main.
 - Oeffentliches Repo vor dem Lauf: 1468d81 firmware: haerte hall light vor realtest
-- Privates Repo vor dem Lauf: c428e31 docs: add active codex prompt for hall light realtest and finish
 
 Ports / Hardware
 - Master: COM3
