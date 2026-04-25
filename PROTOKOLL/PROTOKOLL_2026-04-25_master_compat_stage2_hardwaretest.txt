@@ -1,0 +1,64 @@
+Datum: 2026-04-25
+Branch: feature/master-compat-stage1
+Ziel: Erster echter Hardwaretest des Pfads master_compat_stage1 / Stage-2-Minimal-Bridge mit realem ESP32-C3, WLAN, MQTT, ESP-NOW und mindestens einer echten net_zrl-Node.
+
+Build-Ergebnis:
+- Befehl: C:\Users\mries\.platformio\penv\Scripts\pio.exe run -e master_compat_stage1
+- Ergebnis: erfolgreich
+
+Flash-Port:
+- COM15
+- Hardware-ID: USB VID:PID=303A:1001 SER=8C:D0:B2:A9:34:5A
+- Flash-Befehl: C:\Users\mries\.platformio\penv\Scripts\pio.exe run -e master_compat_stage1 -t upload --upload-port COM15
+- Ergebnis: erfolgreich
+
+Serial-Befunde:
+- Bootmeldung gesehen: [master_compat] boot
+- WLAN-Connect gesehen
+- IP des Masters waehrend des Laufs: 192.168.178.92
+- Ein Socket-Fehler vor MQTT-Stabilisierung sichtbar:
+  [E][NetworkClient.cpp:278] connect(): socket error on fd 48, errno: 113, "Software caused connection abort"
+- Im beobachteten Startfenster keine serielle Reconnect-Schleife erkennbar
+- ESP-NOW-Initialisierung wird in diesem Pfad nicht explizit seriell geloggt
+
+MQTT-/ESP-NOW-Befunde:
+- Broker lokal auf Port 1883 erreichbar
+- CONF_MQTT_HOST zeigte auf die LAN-IP des PCs/Brokers
+- Master-Status wurde retained publiziert:
+  {"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"1.0.0"}
+- Bereits vorhandene retained Device-Topics fuer NET-ZRL-901 waren zunaechst sichtbar, wurden aber nicht als Testnachweis gewertet
+- Die vorhandenen retained Topics wurden bewusst geloescht und der Broker neu gestartet, um Altbestand auszuschliessen
+- Nach Bereinigung und MQTT-Reconnect erschienen keine Device-Topics einer echten Node neu
+- Ein Testkommando get_state mit request_id an smarthome/device/NET-ZRL-901/command lieferte:
+  {"device_id":"NET-ZRL-901","request_id":"stage2-check-001","channel":"command","status":"unknown_device","status_code":-6,"ack_msg_type":5,"ack_seq":0,"source":"master_registry"}
+
+Bestandene Tests:
+- Build des Stage-2-Pfads
+- Flash auf den ESP32-C3
+- Master bootet
+- WLAN verbindet
+- MQTT verbindet
+- Master-Status retained vorhanden
+- Master-Status zeigt online=true, wifi=true, mqtt=true, espnow=true
+
+Nicht bestandene / nicht nachgewiesene Tests:
+- Keine echte net_zrl-Node sichtbar
+- Kein verifizierter HELLO-Empfang
+- Kein verifizierter HELLO_ACK-Versand
+- Keine neu erzeugte Meta-Publikation einer echten Node
+- Keine neu erzeugte Availability-Publikation einer echten Node
+- Keine neu erzeugte State-Publikation einer echten Node
+- Kein Command-Roundtrip zu einer echten Node
+- Kein Node-ACK als MQTT-Ack
+
+Ehrliche Grenze:
+- Dieser Lauf ist kein bestandener Stage-2-Hardwarenachweis.
+- Der Masterpfad auf dem ESP32-C3, WLAN, MQTT und der interne ESP-NOW-Status sind gezeigt.
+- Der entscheidende Nachweis einer echten ESP-NOW-net_zrl-Node fehlt.
+- Alte retained Brokerdaten haetten einen falschen positiven Eindruck erzeugen koennen; sie wurden deshalb bereinigt und aus der Bewertung ausgeschlossen.
+
+Naechste Schritte:
+- Echte net_zrl-Node physisch verfuegbar machen
+- Node bewusst neu starten, damit HELLO sicher erneut gesendet wird
+- Broker nach Bereinigung erneut verwenden
+- Danach Meta, Availability, State, get_state, open, stop, close und set_position mit echter Node erneut pruefen
