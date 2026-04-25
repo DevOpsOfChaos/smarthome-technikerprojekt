@@ -1,0 +1,103 @@
+globals:
+  - id: relay_1_state
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+script:
+  - id: publish_relay_contract_state
+    then:
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/state
+          retain: true
+          payload: |-
+            root["device_id"] = "${device_id}";
+            root["relay_1"] = id(relay_1_state);
+            root["fault"] = id(contract_fault);
+
+mqtt:
+  on_json_message:
+    - topic: smarthome/device/${device_id}/command
+      then:
+        - lambda: |-
+            std::string request_id = "";
+            if (x.containsKey("request_id") && !x["request_id"].isNull()) {
+              request_id = x["request_id"].as<std::string>();
+            }
+
+            if (request_id.empty()) {
+              id(contract_fault) = true;
+              id(contract_last_status_code) = -20;
+              id(contract_last_status_text) = "missing_request_id";
+              ESP_LOGW("contract", "Ignoring command without request_id");
+              return;
+            }
+
+            std::string command = "";
+            if (x.containsKey("command") && !x["command"].isNull()) {
+              command = x["command"].as<std::string>();
+            }
+
+            auto queue_ack = [&](const char *status, int status_code, const char *source) {
+              id(ack_request_id) = request_id;
+              id(ack_status) = status;
+              id(ack_status_code) = status_code;
+              id(ack_source) = source;
+              id(flush_command_ack).execute();
+            };
+
+            if (command == "get_state") {
+              id(clear_contract_fault).execute();
+              id(publish_relay_contract_state).execute();
+              queue_ack("ok", 0, "esphome_state");
+              return;
+            }
+
+            if (command == "set_relay") {
+              bool relay_value = false;
+              bool relay_value_ok = false;
+
+              if (x.containsKey("relay_1") && !x["relay_1"].isNull()) {
+                if (x["relay_1"].is<bool>()) {
+                  relay_value = x["relay_1"].as<bool>();
+                  relay_value_ok = true;
+                } else if (x["relay_1"].is<int>()) {
+                  relay_value = x["relay_1"].as<int>() != 0;
+                  relay_value_ok = true;
+                } else if (x["relay_1"].is<const char*>()) {
+                  std::string relay_text = x["relay_1"].as<std::string>();
+                  if (relay_text == "true" || relay_text == "1" || relay_text == "on") {
+                    relay_value = true;
+                    relay_value_ok = true;
+                  } else if (relay_text == "false" || relay_text == "0" || relay_text == "off") {
+                    relay_value = false;
+                    relay_value_ok = true;
+                  }
+                }
+              }
+
+              if (!relay_value_ok) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "esphome_validation");
+                return;
+              }
+
+              if (relay_value) {
+                id(relay_1_output).turn_on();
+              } else {
+                id(relay_1_output).turn_off();
+              }
+
+              id(relay_1_state) = relay_value;
+              id(clear_contract_fault).execute();
+              id(publish_relay_contract_state).execute();
+              queue_ack("ok", 0, "esphome_command");
+              return;
+            }
+
+            id(contract_fault) = true;
+            id(contract_last_status_code) = -2;
+            id(contract_last_status_text) = "unsupported";
+            queue_ack("unsupported", -2, "esphome_validation");

@@ -1,0 +1,42 @@
+globals:
+  - id: ack_request_id
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: ack_status
+    type: std::string
+    restore_value: no
+    initial_value: '"ok"'
+  - id: ack_source
+    type: std::string
+    restore_value: no
+    initial_value: '"esphome_command"'
+  - id: ack_status_code
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: command_ack_seq
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+script:
+  - id: flush_command_ack
+    then:
+      - lambda: |-
+          id(command_ack_seq) = (id(command_ack_seq) + 1) & 0xFF;
+          id(contract_last_request_id) = id(ack_request_id);
+          id(contract_last_status_code) = id(ack_status_code);
+          id(contract_last_status_text) = id(ack_status);
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/ack
+          retain: false
+          payload: |-
+            root["device_id"] = "${device_id}";
+            root["request_id"] = id(ack_request_id).c_str();
+            root["channel"] = "command";
+            root["status"] = id(ack_status).c_str();
+            root["status_code"] = id(ack_status_code);
+            root["ack_msg_type"] = 5;
+            root["ack_seq"] = id(command_ack_seq);
+            root["source"] = id(ack_source).c_str();

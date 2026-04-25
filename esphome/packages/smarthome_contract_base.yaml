@@ -1,0 +1,73 @@
+substitutions:
+  device_id: esp_device_example
+  device_name: ESPHome Example Device
+  device_class: net_erl
+  power_type: mains
+  fw_version: esphome-example
+  caps: "0"
+  meta_schema_version: "1"
+  control_mode: none
+  config_profile: none
+  reporting_mode: hybrid
+  sensor_mask: XXXXXXXXXX
+  input_mask: XXXXX
+
+globals:
+  - id: contract_online
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: contract_fault
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: contract_last_status_code
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: contract_last_status_text
+    type: std::string
+    restore_value: no
+    initial_value: '"ok"'
+  - id: contract_last_request_id
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+script:
+  - id: clear_contract_fault
+    then:
+      - lambda: |-
+          id(contract_fault) = false;
+          id(contract_last_status_code) = 0;
+          id(contract_last_status_text) = "ok";
+
+  - id: publish_contract_meta
+    then:
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/meta
+          retain: true
+          payload: |-
+            root["device_id"] = "${device_id}";
+            root["device_name"] = "${device_name}";
+            root["device_class"] = "${device_class}";
+            root["power_type"] = "${power_type}";
+            root["fw_version"] = "${fw_version}";
+            root["caps"] = atoi("${caps}");
+            root["meta_schema_version"] = atoi("${meta_schema_version}");
+            root["control_mode"] = "${control_mode}";
+            root["config_profile"] = "${config_profile}";
+            root["reporting_mode"] = "${reporting_mode}";
+            root["sensor_mask"] = "${sensor_mask}";
+            root["input_mask"] = "${input_mask}";
+
+  - id: publish_contract_availability
+    then:
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/availability
+          retain: true
+          payload: |-
+            root["device_id"] = "${device_id}";
+            root["availability"] = id(contract_online) ? "online" : "offline";
+            root["online"] = id(contract_online);
+            root["power_type"] = "${power_type}";

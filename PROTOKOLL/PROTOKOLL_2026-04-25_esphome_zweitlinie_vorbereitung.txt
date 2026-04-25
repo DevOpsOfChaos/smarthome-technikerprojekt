@@ -1,0 +1,56 @@
+# PROTOKOLL 2026-04-25 - ESPHome Zweitlinie Vorbereitung
+
+## Was wurde vorbereitet?
+
+Es wurde ein additiver ESPHome-Pfad unter `esphome/` angelegt, der den bestehenden MQTT-/JSON-Vertrag des kompatiblen Masterpfads nachbildet, ohne den bisherigen Firmware-, Master-, ESP-NOW- oder Serverkern zu veraendern.
+
+Vorbereitet wurden:
+- gemeinsame Vertragsbasis fuer `meta`, `availability` und Status-/Fehlergrundlagen
+- ACK-Helfer fuer den Command-Pfad
+- ein Relais-Beispielpfad mit `set_relay` und `get_state`
+- ein Sensor-Beispielpfad fuer Temperatur und Feuchte mit `get_state`
+- ein vorbereiteter Cover-Beispielpfad mit `open`, `close`, `stop`, `set_position` und Kalibrierungsregel
+- eine begleitende README zur klaren Abgrenzung der Zweitlinie
+
+## Warum additiv und getrennt?
+
+Die bestehende Hauptlinie des Technikerprojekts bleibt bewusst unveraendert:
+- der eigene Master bleibt die Hauptbruecke
+- das bestehende ESP-NOW-Protokoll bleibt unberuehrt
+- der bestehende Serververtrag bleibt unveraendert
+
+Der ESPHome-Pfad ist deshalb nur ein alternativer, vertragskompatibler MQTT-Geraetepfad. Er soll den bestehenden Kern nicht ersetzen und auch nicht stillschweigend umdefinieren.
+
+## Welche Dateien wurden angelegt?
+
+- `esphome/README.md`
+- `esphome/packages/smarthome_contract_base.yaml`
+- `esphome/packages/smarthome_command_ack.yaml`
+- `esphome/packages/smarthome_relay_contract.yaml`
+- `esphome/packages/smarthome_cover_contract.yaml`
+- `esphome/devices/esp_net_erl_light_example.yaml`
+- `esphome/devices/esp_net_sen_env_example.yaml`
+- `esphome/devices/esp_net_zrl_cover_example.yaml`
+- `PROTOKOLL/PROTOKOLL_2026-04-25_esphome_zweitlinie_vorbereitung.txt`
+
+## Was wurde nicht getestet?
+
+Nicht getestet wurden:
+- Build mit echtem ESPHome-Tooling
+- Flash auf reale Hardware
+- GPIO-/Relaisbelegung an realen Platinen
+- Sensorwerte an realen Sensoren
+- Cover-Fahrlogik, Laufzeiten, Endlagen und Verriegelung
+- MQTT-Ende-zu-Ende gegen den laufenden Server
+
+Der Cover-Beispielpfad ist ausdruecklich nur vorbereitet und nicht hardwarevalidiert.
+
+## Welche spaeteren Tests sind noetig?
+
+- YAML gegen echtes ESPHome-Tooling validieren
+- Relais-Beispiel auf echter Hardware flashen und `set_relay` / `get_state` gegen MQTT pruefen
+- Sensor-Beispiel auf echter Hardware flashen und `temp_01c` / `hum_01pct` gegen MQTT pruefen
+- Cover-Beispiel um echte Fahr- und Stoplogik ergaenzen, dann `open`, `close`, `stop`, `set_position` pruefen
+- Negativtest fuer `set_position` mit `cover_calibrated = false` und Zwischenwert bestaetigen
+- Retained-Verhalten von `meta`, `availability` und `state` sowie nicht-retained `ack` gegen Broker pruefen
+- Server-Smoke bzw. Ingest-Pfad mit diesen MQTT-Payloads gegen den bestehenden Server pruefen
