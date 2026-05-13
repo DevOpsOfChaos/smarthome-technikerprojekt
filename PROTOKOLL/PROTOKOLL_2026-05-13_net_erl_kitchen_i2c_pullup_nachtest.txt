@@ -1,0 +1,96 @@
+PROTOKOLL 2026-05-13 - NET-ERL Kitchen I2C-Pullup-Nachtest VEML7700
+
+Thema
+- Nachtest des Kitchen-I2C-Busses nach dem Entfernen erster Pullups auf Sensor-Zusatzboards.
+- Schwerpunkt war die Frage, ob der VEML7700 nach der Hardwareaenderung weiterhin erreichbar ist.
+
+Ausgangslage
+- Vorheriger Realtest hatte gezeigt:
+  - I2C-Adressen korrekt: VEML7700 0x10, ENS160 0x52, BME680 0x76
+  - Bus bei ca. 1,9 kOhm Gesamtpullup und 100 kHz instabil
+  - Bus bei 10 kHz stabil
+- Danach wurden erste Pullups auf Zusatzboards entfernt.
+- Der gemessene Gesamtpullup lag danach bei etwa 2,4 kOhm.
+- Beim Entfernen der Pullups wurde am VEML7700-Modul ein Widerstandsbereich beruehrt beziehungsweise veraendert, deshalb sollte der VEML7700 gezielt nachgeprueft werden.
+
+Erster schneller Firmware-Logtest
+- Zunaechst wurde die laufende Kitchen-Firmware seriell beobachtet.
+- Befund:
+  - VEML7700 wurde in einem Start zunaechst als bereit gemeldet.
+  - Danach traten I2C-Fehler ESP_ERR_INVALID_STATE auf.
+  - ENS160-Initialisierung schlug fehl.
+  - In weiteren Starts schlugen teils auch BME680 und VEML7700 fehl.
+  - Es kam zu Watchdog- beziehungsweise Panic-Reboots.
+- Bewertung:
+  - Dieser Zwischenstand war kein belastbarer positiver VEML7700-Nachweis.
+  - Das Fehlerbild deutete auf einen waehrend der Hardwareaenderung instabilen oder zeitweise nicht sauber hochgezogenen Bus hin.
+
+Isolierter VEML7700-Schnelltest im Zwischenzustand
+- Ein minimaler I2C-Test wurde temporaer geflasht.
+- Ergebnis:
+  - Bei 10 kHz: scan_count=0
+  - Bei 100 kHz: scan_count=0
+  - VEML7700 auf 0x10 wurde nicht gefunden.
+- Bewertung:
+  - Zu diesem Zeitpunkt war der I2C-Bus nicht funktionsfaehig.
+  - Das wurde nicht als defekter VEML7700 bewertet, sondern als Hinweis auf fehlende oder nicht wirksame Pullups beziehungsweise eine offene Leitung im Zwischenzustand.
+
+Finaler Nachtest bei ca. 2,4 kOhm Gesamtpullup
+- Nach weiterer Korrektur beziehungsweise erneutem Herstellen des Buszustands wurde ein isolierter I2C-Recheck geflasht.
+- Getestete Pins:
+  - SDA=GPIO1
+  - SCL=GPIO0
+- Getestete Takte:
+  - 10 kHz
+  - 100 kHz
+
+Ergebnis bei 10 kHz
+- Gefundene I2C-Adressen:
+  - 0x10
+  - 0x52
+  - 0x76
+- Registerbefunde:
+  - BME_ID=0x61 BME680
+  - VEML_CONFIG=0x0000
+  - ENS_PART=0x0160 ENS160
+
+Ergebnis bei 100 kHz
+- Gefundene I2C-Adressen:
+  - 0x10
+  - 0x52
+  - 0x76
+- Registerbefunde:
+  - BME_ID=0x61 BME680
+  - VEML_CONFIG=0x0000
+  - ENS_PART=0x0160 ENS160
+
+Bewertung
+- Der VEML7700 lebt und antwortet weiterhin auf 0x10.
+- Der BME680 ist weiterhin als BME680 auf 0x76 bestaetigt.
+- Der ENS160 ist weiterhin als ENS160 auf 0x52 bestaetigt.
+- Der Bus ist mit etwa 2,4 kOhm Gesamtpullup deutlich stabiler als im vorherigen 1,9-kOhm-Zustand.
+- Im isolierten Test funktionierte der Bus auch bei 100 kHz stabil.
+- Der zwischenzeitliche Komplettausfall war sehr wahrscheinlich ein Hardware-Zwischenzustand waehrend Pullup-Entfernung, Kontaktpruefung oder Wiederanschluss.
+
+Firmwarestand nach Test
+- Nach dem isolierten I2C-Recheck wurde die Kitchen-Firmware wieder auf den ESP32-C3 zurueckgeflasht.
+- Es wurden fuer diesen Nachtest keine dauerhaften Firmwareaenderungen vorgenommen.
+
+Bestandene Tests
+- VEML7700 auf 0x10 gefunden.
+- VEML7700-Konfigurationsregister lesbar.
+- BME680 auf 0x76 gefunden und per Chip-ID 0x61 bestaetigt.
+- ENS160 auf 0x52 gefunden und per Part-ID 0x0160 bestaetigt.
+- I2C-Scan bei 10 kHz stabil.
+- I2C-Scan bei 100 kHz stabil.
+- Kitchen-Firmware nach dem Diagnoseflash wiederhergestellt.
+
+Nicht vollstaendig nachgewiesen in diesem Lauf
+- Langzeitlauf der vollstaendigen Kitchen-Firmware nach Pullup-Korrektur.
+- Voller Master-Online-Test mit HELLO, HELLO_ACK, STATE, HEARTBEAT und ESP-NOW-Ende-zu-Ende.
+- Endgueltige Pullup-Auslegung fuer Serien- oder Abschlussaufbau.
+
+Ergebnis
+- Der VEML7700 ist nach der Pullup-Aenderung nicht defekt.
+- Der aktuelle I2C-Buszustand mit etwa 2,4 kOhm Gesamtpullup ist im isolierten Test stabil.
+- Fuer den finalen Aufbau bleibt das Ziel, den Gesamtpullup weiter bewusst zu dimensionieren und danach den vollstaendigen Kitchen-Firmwarelauf erneut zu beobachten.
