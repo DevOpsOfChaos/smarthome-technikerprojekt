@@ -1,0 +1,174 @@
+PROTOKOLL 2026-05-13 - NET-ERL Kitchen I2C-Realtest und Sensorstart
+
+Thema
+- Realtest des Geraetepfads net_erl_kitchen auf echter ESP32-C3-Hardware.
+- Schwerpunkt war der I2C-Bus mit BME680, VEML7700 und ENS160.
+- Ein Master war in diesem Lauf nicht online; Masterbindung und ESP-NOW-Ende-zu-Ende wurden deshalb nicht als Ziel bewertet.
+
+Ausgangslage
+- Der Kitchen-Node war per USB als ESP32-C3 auf COM8 angeschlossen.
+- Die Firmware sollte gebaut, hochgeladen und auf Sensorstart geprueft werden.
+- Nach dem ersten Upload startete die Firmware, aber BME680, VEML7700 und ENS160 wurden zunaechst nicht korrekt initialisiert.
+- Der Verdacht lag zuerst auf falschen I2C-Adressen oder einer Verdrahtungsabweichung.
+
+Soll-Konfiguration laut Firmware
+- BME680:
+  - Primaeradresse 0x76
+  - Fallbackadresse 0x77
+- VEML7700:
+  - Adresse 0x10
+- ENS160:
+  - Primaeradresse 0x52
+  - Fallbackadresse 0x53
+- Weitere Kitchen-Pins:
+  - Button: GPIO6
+  - LD2410 OUT: GPIO7
+  - NeoPixel-Ring: GPIO8
+  - Relais: GPIO10
+  - LD2410 UART RX/TX: GPIO20/GPIO21
+
+I2C-Pinbefund
+- Ein I2C-Scan wurde mit beiden naheliegenden Pinvarianten ausgefuehrt.
+- Variante SDA=GPIO0 / SCL=GPIO1:
+  - keine erwarteten I2C-Sensoren gefunden
+- Variante SDA=GPIO1 / SCL=GPIO0:
+  - 0x10 gefunden
+  - 0x52 gefunden
+  - 0x76 gefunden
+- Bewertung:
+  - Die Firmware-Pinbelegung war gegenueber dem real wirksamen Aufbau vertauscht.
+  - Die Adressen selbst waren nicht das Hauptproblem.
+
+Register- und Sensor-Identifikation
+- BME/BMP-ID-Register 0xD0 an Adresse 0x76 gelesen:
+  - Ergebnis: 0x61
+  - Bewertung: BME680 bestaetigt
+- ENS160-Part-ID an Adresse 0x52 gelesen:
+  - Ergebnis: 0x0160
+  - Bewertung: ENS160 bestaetigt
+- VEML7700:
+  - Adresse 0x10 bestaetigt
+  - Konfigurationsregisterzugriff bei stabilem Bus erfolgreich
+
+I2C-Taktbefund
+- Bei 100 kHz war der I2C-Bus nicht stabil.
+- Beobachtete Fehlerbilder:
+  - zeitweise verschwindender ENS160
+  - wechselnde beziehungsweise nicht plausible Zusatzadressen im Scan
+  - ESP32-I2C-Fehler ESP_ERR_INVALID_STATE bei Registerzugriffen
+  - Firmware-Haenger beziehungsweise Watchdog-Ausloesung waehrend der Sensorinitialisierung
+- Bei 10 kHz lief derselbe Bus stabil:
+  - 0x10, 0x52 und 0x76 wurden wiederholt korrekt gefunden
+  - BME680-ID 0x61 wurde wiederholt korrekt gelesen
+  - ENS160-Part-ID 0x0160 wurde wiederholt korrekt gelesen
+  - VEML7700-Registerzugriff war stabil
+
+Hardwarebewertung
+- Der Fehler ist nicht als falsche I2C-Adresse zu bewerten.
+- Der Befund passt zu einem grenzwertigen I2C-Bus.
+- Im Aufbau wurden etwa 1,9 kOhm effektiver Pullup-Widerstand gemessen.
+- Ursache ist sehr wahrscheinlich die Parallelschaltung mehrerer Pullups auf den Sensorboards plus Pullups auf der Hauptplatine.
+- Fuer den finalen Aufbau ist ein einziges wirksames Pullup-Paar am I2C-Bus sinnvoll.
+- Zielbereich fuer den Gesamtpullup: grob 4,7 kOhm bis 10 kOhm gegen 3,3 V.
+- Die Versorgung und die Pullup-Spannung muessen weiter 3,3 V bleiben; 5-V-Pullups auf SDA/SCL waeren fuer ESP32-C3 und 3,3-V-Sensoren kritisch.
+
+Firmware-Aenderungen
+1. PinConfig.h:
+   - PIN_SENSOR_SDA von GPIO0 auf GPIO1 geaendert.
+   - PIN_SENSOR_SCL von GPIO1 auf GPIO0 geaendert.
+
+2. DeviceConfig.h:
+   - NET_ERL_I2C_CLOCK_HZ von 100000 auf 10000 reduziert.
+   - Begruendung: Der reale Bus war bei 100 kHz instabil, bei 10 kHz stabil.
+
+3. main.cpp:
+   - I2C-Timeout fuer Wire gesetzt.
+   - Task-Watchdog an ESP-IDF-5-API angepasst.
+   - Watchdog-Zeitfenster auf 15 s erhoeht.
+   - ESP-NOW-Sendecallback fuer neuere ESP-IDF-Versionen kompatibel gemacht.
+
+Geaenderte Dateien
+- firmware/src/devices/net_erl_kitchen/PinConfig.h
+- firmware/src/devices/net_erl_kitchen/DeviceConfig.h
+- firmware/src/devices/net_erl_kitchen/main.cpp
+
+Build
+- Befehl:
+  pio run -e net_erl_kitchen
+- Ergebnis:
+  SUCCESS
+- Speicherbild nach der finalen Aenderung:
+  RAM: 39108 bytes / 327680 bytes, 11,9 %
+  Flash: 1087383 bytes / 1310720 bytes, 83,0 %
+
+Flash
+- Ziel:
+  COM8
+- Geraet:
+  ESP32-C3
+- Ergebnis:
+  Upload erfolgreich
+- Flash-Verifikation:
+  Hash der geschriebenen Daten verifiziert
+
+Serielle Befunde nach finalem Flash
+- Firmware startete als:
+  NET-ERL-002 / NET-ERL Kitchen / net_erl_kitchen
+- Sensorwerte wurden im Snapshot ausgegeben:
+  temp_01c=240
+  hum_01pct=368
+  lux=15
+  pressure_pa=98464
+  gas_ohm=4294967295
+  aqi=65535
+  tvoc_ppb=65535
+  eco2_ppm=65535
+  motion=true
+  relay_1=true
+  fault=false
+- Bewertung:
+  - BME680, VEML7700 und der Sensorpfad laufen im beobachteten Fenster.
+  - fault=false bestaetigt den stabilen Startzustand des Umweltpfads.
+  - gas_ohm, AQI, TVOC und eCO2 bleiben direkt nach Start erwartbar noch nicht belastbar, weil Warm-up beziehungsweise gueltige ENS160-Laufzeit fehlt.
+
+ESP-NOW / Master
+- Im seriellen Log wurden ESP-NOW-Sendefehler gesehen.
+- Bewertung:
+  - Das ist in diesem Lauf erwartbar, weil kein Master online war.
+  - Der Befund wurde nicht als Firmwarefehler bewertet.
+  - Masterbindung, HELLO_ACK, STATE-Verarbeitung auf Masterseite und Kommando-Roundtrip bleiben ein separater Nachweis.
+
+Bestandene Tests
+- Build des aktiven net_erl_kitchen-Environments.
+- Flash auf realen ESP32-C3 an COM8.
+- I2C-Pinadaption real bestaetigt.
+- BME680 an 0x76 per Chip-ID 0x61 bestaetigt.
+- VEML7700 an 0x10 bestaetigt.
+- ENS160 an 0x52 per Part-ID 0x0160 bestaetigt.
+- Stabiler I2C-Betrieb bei 10 kHz bestaetigt.
+- Firmware startet nach finalem Flash ohne Watchdog-Abbruch.
+- Snapshot mit plausiblen Umweltwerten und fault=false gesehen.
+
+Nicht vollstaendig nachgewiesen in diesem Lauf
+- Masterbindung und HELLO_ACK, da kein Master online war.
+- ESP-NOW-Ende-zu-Ende-Verarbeitung auf Masterseite.
+- MQTT-/Serverpfade.
+- Langzeitstabilitaet nach Entfernen beziehungsweise Aendern der Pullups.
+- Betrieb bei 100 kHz nach Hardwarekorrektur.
+- Voll belastbare ENS160-Luftqualitaetswerte nach Warm-up.
+
+Ergebnis
+- Der Kitchen-I2C-Fehler wurde auf zwei Punkte eingegrenzt:
+  1. Die reale I2C-Pinbelegung ist SDA=GPIO1 und SCL=GPIO0.
+  2. Der Bus ist bei 100 kHz elektrisch instabil und laeuft bei 10 kHz stabil.
+- Die I2C-Adressen sind korrekt.
+- Die Firmware wurde angepasst, gebaut und erfolgreich auf den realen Kitchen-Node geflasht.
+- Der Node startet danach mit Umweltwerten und fault=false.
+
+Offen / naechste Schritte
+- Pullups auf Zusatzsensorboards entfernen oder reduzieren.
+- Hauptplatinen-Pullups von 4,7 kOhm auf 10 kOhm pruefen beziehungsweise fuer den Gesamtbus passend dimensionieren.
+- Effektiven Pullup nach Hardwarekorrektur erneut messen.
+- Sicherstellen, dass SDA/SCL gegen 3,3 V und nicht gegen 5 V gezogen werden.
+- Danach I2C wieder mit 100 kHz testen.
+- Separaten Master-Online-Test fuer HELLO, HELLO_ACK, STATE, HEARTBEAT, Relais, Motion, Button und Kommandoverhalten durchfuehren.

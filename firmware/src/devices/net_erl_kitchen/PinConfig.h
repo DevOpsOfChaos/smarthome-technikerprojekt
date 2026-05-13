@@ -1,8 +1,8 @@
 #pragma once
 
 // Pinlinie aus dem erprobten Kitchen-Aufbau.
-#define PIN_SENSOR_SDA 0
-#define PIN_SENSOR_SCL 1
+#define PIN_SENSOR_SDA 1
+#define PIN_SENSOR_SCL 0
 #define PIN_BUTTON_1 6
 #define PIN_LD2410_OUT 7
 #define PIN_LED_RING 8

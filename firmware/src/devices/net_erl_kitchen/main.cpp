@@ -21,6 +21,10 @@
   #include <esp_arduino_version.h>
 #endif
 
+#if __has_include(<esp_idf_version.h>)
+  #include <esp_idf_version.h>
+#endif
+
 #ifndef ESP_ARDUINO_VERSION_MAJOR
   #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
@@ -70,7 +74,8 @@ constexpr uint32_t GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t AIR_METRIC_UNGUELTIG = 0xFFFFU;
 constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;
 constexpr uint8_t LED_RING_HELLIGKEIT = 24U;
-constexpr uint32_t TASK_WDT_TIMEOUT_S = 8UL;
+constexpr uint32_t TASK_WDT_TIMEOUT_S = 15UL;
+constexpr uint16_t I2C_TIMEOUT_MS = 50U;
 
 Adafruit_BME680 bme680;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
@@ -216,7 +221,22 @@ uint16_t clampHum01pct(long value) {
 void logf(const char* level, const char* format, ...);
 
 void initialisiereTaskWatchdog() {
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    const esp_task_wdt_config_t config = {
+        .timeout_ms = TASK_WDT_TIMEOUT_S * 1000U,
+        .idle_core_mask = 0U,
+        .trigger_panic = true,
+    };
+    const esp_err_t initErr = esp_task_wdt_init(&config);
+    if (initErr == ESP_ERR_INVALID_STATE) {
+        const esp_err_t reconfigureErr = esp_task_wdt_reconfigure(&config);
+        if (reconfigureErr != ESP_OK) {
+            logf("WARN", "Task-Watchdog Reconfigure fehlgeschlagen (err=%d)", (int)reconfigureErr);
+        }
+    }
+#else
     const esp_err_t initErr = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+#endif
     if (initErr != ESP_OK && initErr != ESP_ERR_INVALID_STATE) {
         logf("WARN", "Task-Watchdog Init fehlgeschlagen (err=%d)", (int)initErr);
         return;
@@ -902,11 +922,21 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
 }
 #endif
 
-void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+void logEspNowSendStatus(esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
         logf("WARN", "ESP-NOW Versand fehlgeschlagen");
     }
 }
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+void onEspNowSend(const esp_now_send_info_t* /*info*/, esp_now_send_status_t status) {
+    logEspNowSendStatus(status);
+}
+#else
+void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+    logEspNowSendStatus(status);
+}
+#endif
 
 void initialisiereFunk() {
     if (runtime.funk_bereit || runtime.setup_mode) return;
@@ -987,6 +1017,7 @@ bool initialisiereEns160() {
 void initialisiereSensorik() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
     Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
+    Wire.setTimeOut(I2C_TIMEOUT_MS);
 
     runtime.bme_ok = initialisiereBme680();
     if (!runtime.bme_ok) {
