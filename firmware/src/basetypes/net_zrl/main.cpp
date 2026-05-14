@@ -1,3 +1,35 @@
+// =============================================================================
+// main.cpp – NET-ZRL Basistyp: Netz-Rollladen (ESP-NOW)
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/basetypes/net_zrl/main.cpp
+//
+// Datei-Funktion:
+//   ESP-NOW-basierte Rollladen/Jalousie-Steuerung mit 2 Relais (Auf/Ab).
+//   Vollstaendige Kalibrierungs-State-Machine, Positionsschaetzung waehrend
+//   der Fahrt, Teil-Positionierung (set_position), 3-Tasten-Bedienung
+//   (Up/Down/Stop) mit Hold-Gesten, LED-Rueckmeldung und serielle Konsole.
+//   Integriert Web-Provisioning (Kalibrierwerte, Relais-Zuordnung) und
+//   Factory-Reset.
+//
+// Protokoll-Nachrichten:
+//   Senden:   HELLO, HEARTBEAT, STATE, EVENT (COVER_UP/DOWN/STOP/CALIB_START/DONE), ACK
+//   Empfangen: HELLO_ACK, CMD (COVER-Kommandos, STATE_REQUEST), CFG
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+//
+// Aenderungshistorie:
+//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch, Doxygen-Stil)
+//
+// Abhaengigkeiten (externe Libs):
+//   Arduino.h, ShNodeProvisioning.h, WiFi.h, esp_now.h, esp_wifi.h
+//
+// Abhaengigkeiten (Projekt-intern):
+//   NetZrlProvisioning.h, HardwarePinStandard.h, ProjectVersion.h,
+//   lib/sh_protocol (DeviceTypes.h, Protocol.h)
+// =============================================================================
 
 #include <Arduino.h>
 #include <ShNodeProvisioning.h>
@@ -23,10 +55,19 @@
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 #include "../../../lib/sh_protocol/src/Protocol.h"
 
+// Alle Konstanten, Typen und Hilfsfunktionen liegen im anonymen Namespace
+// (interne Kapselung, kein externer Linker-Zugriff).
 namespace {
 
+// =============================================================================
+// KONSTANTEN – Geraete-Identifikation, Pins, Timing, Buffer
+// =============================================================================
+
+// Kurzbezeichnung des Geraetetyps fuer Log-Ausgaben
 constexpr char DATEI_GERAET[] = "NET-ZRL";
+// Firmware-Version als String
 constexpr char DATEI_VERSION[] = "0.4.0";
+// ESP-NOW Broadcast-Adresse (MAC FF:FF:FF:FF:FF:FF)
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 #ifndef NET_ZRL_DEVICE_ID
@@ -160,31 +201,57 @@ static_assert(
 constexpr uint32_t NET_ZRL_SETUP_MAGIC = 0x5A524C32UL;
 constexpr uint16_t NET_ZRL_SETUP_VERSION = 1U;
 
+// =============================================================================
+// ENUMS – Zustaende, Richtungen, Kalibrier-Phasen, LED-Modi, Aktionen
+// =============================================================================
+
+// CoverState – Bewegungszustand des Rollladens
 enum class CoverState : uint8_t { Stopped = 0, Moving = 1 };
+
+// CoverDirection – Fahrtrichtung
 enum class CoverDirection : uint8_t { None = 0, Up = 1, Down = 2 };
+
+// CalibrationPhase – Zustand der Kalibrierungs-State-Machine
 enum class CalibrationPhase : uint8_t {
-    Idle = 0,
-    MovingToTop,
-    WaitForDownStart,
-    MeasuringDown,
-    WaitForUpStart,
-    MeasuringUp,
-    SuccessBlink
+    Idle = 0,             // Keine Kalibrierung aktiv
+    MovingToTop,          // Faehrt in Ausgangslage ganz oben
+    WaitForDownStart,     // Wartet auf Benutzerkommando zum Runterfahren
+    MeasuringDown,        // Misst Fahrzeit nach unten
+    WaitForUpStart,       // Wartet auf Benutzerkommando zum Hochfahren
+    MeasuringUp,          // Misst Fahrzeit nach oben
+    SuccessBlink          // Blinkt Erfolg, speichert dann Kalibrierwerte
 };
-enum class LedMode : uint8_t { Off = 0, BothBlink, UpBlink, DownBlink, UpOn, DownOn };
+
+// LedMode – LED-Anzeigemodus
+enum class LedMode : uint8_t {
+    Off = 0,     // Beide LEDs aus
+    BothBlink,   // Beide blinken synchron (Kalibrierung aktiv)
+    UpBlink,     // Nur Up-LED blinkt (warte auf Up-Start)
+    DownBlink,   // Nur Down-LED blinkt (warte auf Down-Start)
+    UpOn,        // Up-LED dauerhaft (Fahrt nach oben)
+    DownOn       // Down-LED dauerhaft (Fahrt nach unten)
+};
+
+// PendingAction – Aktion nach Hold-Geste (wird nach Blinkmuster ausgefuehrt)
 enum class PendingAction : uint8_t { None = 0, SetupEnter, FactoryReset };
 
+// =============================================================================
+// STRUKTUREN – Persistenz, Setup-Snapshots, Laufzeitzustand
+// =============================================================================
+
+// NetZrlPersistedSetupData – Roh-Persistenzdaten im NVS (Preferences)
 struct NetZrlPersistedSetupData {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t reserved;
-    uint32_t travelTimeUpMs;
-    uint32_t travelTimeDownMs;
-    uint32_t defaultEstimatedTravelTimeMs;
-    uint8_t relayUpUsesRelayA;
-    uint8_t reservedBytes[3];
+    uint32_t magic;                       // Magic zur Validierung (NET_ZRL_SETUP_MAGIC)
+    uint16_t version;                     // Datenstruktur-Version
+    uint16_t reserved;                    // Reserviert / Alignment
+    uint32_t travelTimeUpMs;              // Kalibrierte Fahrzeit hoch (0=nicht kalibriert)
+    uint32_t travelTimeDownMs;            // Kalibrierte Fahrzeit runter
+    uint32_t defaultEstimatedTravelTimeMs;// Fallback-Fahrzeit
+    uint8_t relayUpUsesRelayA;            // 1=RelaisA fuer Up, 0=RelaisB
+    uint8_t reservedBytes[3];             // Reserviert / Alignment
 };
 
+// NetZrlSetupSnapshot – Snapshot fuer Rollback bei fehlgeschlagener Persistenz
 struct NetZrlSetupSnapshot {
     uint32_t travelTimeUpMs;
     uint32_t travelTimeDownMs;
@@ -192,88 +259,101 @@ struct NetZrlSetupSnapshot {
     bool relayUpUsesRelayA;
 };
 
+// RuntimeState – Zentraler Geraetezustand (alle Laufzeitdaten, ~70 Felder)
+// =============================================================================
 struct RuntimeState {
-    CoverState coverState;
-    CoverDirection coverDirection;
-    bool relayAActive;
-    bool relayBActive;
-    bool relayUpUsesRelayA;
-    bool masterMacValid;
-    uint8_t masterMac[6];
-    bool calibrationMode;
-    bool setupMode;
-    bool isCalibrated;
-    bool setupApActive;
-    bool restartPending;
-    bool funkBereit;
-    bool masterBound;
-    bool stateReportOffen;
-    bool movementTargetsIntermediatePosition;
-    int16_t coverPosition;
-    int16_t movementTargetPosition;
-    uint32_t travelTimeUpMs;
-    uint32_t travelTimeDownMs;
-    uint32_t candidateTravelTimeUpMs;
-    uint32_t candidateTravelTimeDownMs;
-    uint32_t defaultEstimatedTravelTimeMs;
-    uint32_t statusSendIntervalS;
-    uint32_t sensorSendIntervalS;
-    CalibrationPhase calibrationPhase;
-    unsigned long movementStartedAtMs;
-    unsigned long movementAutoStopMs;
-    unsigned long restartRequestedAtMs;
-    unsigned long letztesHelloMs;
-    unsigned long letzterHeartbeatMs;
-    unsigned long letzterStateMs;
-    int16_t movementStartPosition;
-    bool movementTargetsEndPosition;
-    uint8_t naechsteSeq;
-    bool lastCmdAckValid;
-    bool lastCfgAckValid;
-    uint8_t lastCmdSeq;
-    uint8_t lastCfgSeq;
-    uint8_t lastCmdAckStatus;
-    uint8_t lastCfgAckStatus;
+    // ---- Bewegung ----
+    CoverState coverState;                // Bewegungszustand (stopped/moving)
+    CoverDirection coverDirection;        // Fahrtrichtung (none/up/down)
+    bool relayAActive;                    // Relais A aktiv (HIGH)
+    bool relayBActive;                    // Relais B aktiv (HIGH)
+    bool relayUpUsesRelayA;               // Relais-Zuordnung: true=A=Up, false=B=Up
+    bool masterMacValid;                  // Master-MAC wurde provisioniert
+    uint8_t masterMac[6];                 // Provisionierte Master-MAC
+    bool calibrationMode;                 // Kalibriermodus aktiv
+    bool setupMode;                       // Setup-Modus aktiv
+    bool isCalibrated;                    // Kalibrierung abgeschlossen
+    bool setupApActive;                   // Setup-AP laeuft
+    bool restartPending;                  // Neustart angefordert
+    bool funkBereit;                      // ESP-NOW initialisiert
+    bool masterBound;                     // HELLO_ACK vom Master empfangen
+    bool stateReportOffen;                // STATE muss gesendet werden (dirty-Flag)
+    bool movementTargetsIntermediatePosition; // Teil-Positionsfahrt
+    int16_t coverPosition;                // Geschaetzte Position (0-100, 255=unbekannt)
+    int16_t movementTargetPosition;       // Zielposition der aktuellen Fahrt
+    uint32_t travelTimeUpMs;              // Kalibrierte Fahrzeit hoch
+    uint32_t travelTimeDownMs;            // Kalibrierte Fahrzeit runter
+    uint32_t candidateTravelTimeUpMs;     // Kandidat-Fahrzeit hoch (Messung)
+    uint32_t candidateTravelTimeDownMs;   // Kandidat-Fahrzeit runter (Messung)
+    uint32_t defaultEstimatedTravelTimeMs;// Fallback-Fahrzeit
+    uint32_t statusSendIntervalS;         // STATE-Sendeintervall (Sekunden)
+    uint32_t sensorSendIntervalS;         // Sensor-Intervall (ungenutzt)
+    CalibrationPhase calibrationPhase;    // Aktuelle Kalibrierungsphase
+    unsigned long movementStartedAtMs;    // Zeitstempel Fahrtbeginn
+    unsigned long movementAutoStopMs;     // Auto-Stop-Dauer (0=kein)
+    unsigned long restartRequestedAtMs;   // Zeitstempel Restart
+    unsigned long letztesHelloMs;         // Zeitstempel letztes HELLO
+    unsigned long letzterHeartbeatMs;     // Zeitstempel letzter HEARTBEAT
+    unsigned long letzterStateMs;         // Zeitstempel letzter STATE
+    int16_t movementStartPosition;        // Position bei Fahrtbeginn
+    bool movementTargetsEndPosition;      // Fahrt zielt auf Endlage (0/100)
+    uint8_t naechsteSeq;                  // Naechste ESP-NOW-Sequenz
 
-    unsigned long lastButtonPollMs;
-    bool upButtonStableActive;
-    bool downButtonStableActive;
-    bool stopButtonStableActive;
-    bool upButtonRawActive;
-    bool downButtonRawActive;
-    bool stopButtonRawActive;
-    unsigned long upButtonRawChangedAtMs;
+    // ---- ACK-Tracking ----
+    bool lastCmdAckValid;                 // Letzter CMD-ACK gueltig
+    bool lastCfgAckValid;                 // Letzter CFG-ACK gueltig
+    uint8_t lastCmdSeq;                   // Sequenz letzter bestaetigter CMD
+    uint8_t lastCfgSeq;                   // Sequenz letzter bestaetigter CFG
+    uint8_t lastCmdAckStatus;             // Status letzter CMD-ACK
+    uint8_t lastCfgAckStatus;             // Status letzter CFG-ACK
+
+    // ---- Taster-Entprellung ----
+    unsigned long lastButtonPollMs;       // Zeitstempel letzte Abfrage
+    bool upButtonStableActive;            // Up stabil (entprellt)
+    bool downButtonStableActive;          // Down stabil (entprellt)
+    bool stopButtonStableActive;          // Stop stabil (entprellt)
+    bool upButtonRawActive;               // Up Rohwert
+    bool downButtonRawActive;             // Down Rohwert
+    bool stopButtonRawActive;             // Stop Rohwert
+    unsigned long upButtonRawChangedAtMs; // Zeit letzte Raw-Aenderung Up
     unsigned long downButtonRawChangedAtMs;
     unsigned long stopButtonRawChangedAtMs;
-    bool lastUpButtonActive;
+    bool lastUpButtonActive;              // Letzter Up-Zustand
     bool lastDownButtonActive;
     bool lastStopButtonActive;
-    unsigned long upPressedAtMs;
-    unsigned long downPressedAtMs;
-    unsigned long stopPressedAtMs;
-    bool upHoldConsumed;
-    bool downHoldConsumed;
-    bool stopHoldConsumed;
+    unsigned long upPressedAtMs;          // Zeitstempel Up gedrueckt
+    unsigned long downPressedAtMs;        // Zeitstempel Down gedrueckt
+    unsigned long stopPressedAtMs;        // Zeitstempel Stop gedrueckt
+    bool upHoldConsumed;                  // Up-Hold bereits verarbeitet
+    bool downHoldConsumed;                // Down-Hold bereits verarbeitet
+    bool stopHoldConsumed;                // Stop-Hold bereits verarbeitet
 
-    LedMode ledMode;
-    LedMode ledModeAfterAck;
-    bool ledBlinkState;
-    unsigned long ledLastTickMs;
-    bool ledAckActive;
-    unsigned long ledAckStartedAtMs;
-    uint8_t successBlinkToggleCount;
+    // ---- LED-Steuerung ----
+    LedMode ledMode;                      // Aktueller LED-Modus
+    LedMode ledModeAfterAck;              // LED-Modus nach ACK
+    bool ledBlinkState;                   // Blink-Zustand (on/off)
+    unsigned long ledLastTickMs;          // Zeitstempel letzter LED-Tick
+    bool ledAckActive;                    // ACK-LED laeuft
+    unsigned long ledAckStartedAtMs;      // Startzeit ACK-LED
+    uint8_t successBlinkToggleCount;      // Verbleibende Blink-Wechsel (Success)
 
-    PendingAction pendingAction;
-    uint8_t pendingActionBlinkToggleCount;
+    // ---- Ausstehende Aktionen ----
+    PendingAction pendingAction;           // Ausstehende Aktion
+    uint8_t pendingActionBlinkToggleCount; // Verbleibende Blink-Wechsel
 
-    char setupApSsid[SETUP_SSID_BUFFER_SIZE];
-    char serialBuffer[SERIAL_BUFFER_SIZE];
-    size_t serialLength;
+    // ---- Setup / Serielle Konsole ----
+    char setupApSsid[SETUP_SSID_BUFFER_SIZE];  // SSID Setup-AP
+    char serialBuffer[SERIAL_BUFFER_SIZE];      // Serieller Eingabepuffer
+    size_t serialLength;                        // Eingabelaenge
 };
 
 RuntimeState runtime = {};
 
-void logf(const char* level, const char* format, ...) {
+// =============================================================================
+// HILFSFUNKTIONEN – Logging, Enum-to-Text, Validierung, MAC, Strings
+// =============================================================================
+
+// logf – Formatiertes Logging (nur bei aktiviertem Debug)
     if (!DEBUG_AKTIV) return;
 
     char message[240];
@@ -445,11 +525,16 @@ void baueInputMask(char* target, size_t targetSize) {
     SmartHome::safeCopyMask("BTN3X", target, targetSize, 'X');
 }
 
+// holeHelloZielMac – Bestimmt Ziel-MAC fuer HELLO (Master oder Broadcast)
 const uint8_t* holeHelloZielMac() {
     return runtime.masterMacValid ? runtime.masterMac : BROADCAST_MAC;
 }
 
-bool stellePeerSicher(const uint8_t* mac) {
+// =============================================================================
+// KOMMUNIKATION – ESP-NOW Senden: Peer, Paket, ACK, Sender-Validierung
+// =============================================================================
+
+// stellePeerSicher – Registriert eine MAC als ESP-NOW-Peer
     if (mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
@@ -545,6 +630,11 @@ String travelTimeText(uint32_t valueMs) {
     return valueMs > 0UL ? String(valueMs) : String();
 }
 
+// =============================================================================
+// HARDWARE – GPIO lesen/schreiben, Taster entprellen, LEDs, Relais-Zuordnung
+// =============================================================================
+
+// leseButtonAktiv – Liest physischen Taster-Pin (beruecksichtigt active-HIGH/LOW)
 bool leseButtonAktiv(int pin) {
     if (pin < 0) return false;
     const int raw = digitalRead(pin);
@@ -584,6 +674,7 @@ void setzeLedMode(LedMode mode) {
     runtime.ledLastTickMs = millis();
 }
 
+// istZeitfensterAbgelaufen – Prueft ob durationMs seit startedAtMs vergangen (millis-wrap-sicher)
 bool istZeitfensterAbgelaufen(unsigned long startedAtMs, unsigned long durationMs, unsigned long jetztMs) {
     return durationMs > 0UL && (jetztMs - startedAtMs) >= durationMs;
 }
@@ -652,7 +743,11 @@ bool activeHighFuerRichtung(CoverDirection direction) {
     return useRelayA ? RELAY_A_ACTIVE_HIGH : RELAY_B_ACTIVE_HIGH;
 }
 
-void berechneKalibrierstatus() {
+// =============================================================================
+// KALIBRIERUNG – Fahrzeiten berechnen, loeschen, persistieren
+// =============================================================================
+
+// berechneKalibrierstatus – Aktualisiert isCalibrated (beide Fahrzeiten gueltig)
     runtime.isCalibrated =
         isTravelTimeValid(runtime.travelTimeUpMs) && isTravelTimeValid(runtime.travelTimeDownMs);
     if (!runtime.isCalibrated) {
@@ -729,6 +824,11 @@ void wendeNetZrlPersistenzdatenAn(const NetZrlPersistedSetupData& data) {
     berechneKalibrierstatus();
 }
 
+// =============================================================================
+// PROVISIONING-HANDLER – Web-Konfiguration (NetZrlProvisioningHandler)
+//   Stellt Kalibrierwerte und Relais-Zuordnung im Setup-Portal bereit.
+//   Aktion: reset_calibration (Kalibrierung loeschen mit Rollback).
+// =============================================================================
 class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
   public:
     const char* pageTitle() const override { return "NET-ZRL Provisioning"; }
@@ -1102,7 +1202,11 @@ bool sendeCoverEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16_
     return sendePaket(runtime.masterMac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
 }
 
-void setzeRelaisNeutral(const char* grund) {
+// =============================================================================
+// BEWEGUNGSSTEUERUNG – Relais setzen, Fahrt starten/stoppen, Position schaetzen
+// =============================================================================
+
+// setzeRelaisNeutral – Schaltet beide Relais aus (sichere Ruhestellung)
     schreibePin(PIN_RELAY_A, false, RELAY_A_ACTIVE_HIGH);
     schreibePin(PIN_RELAY_B, false, RELAY_B_ACTIVE_HIGH);
     runtime.relayAActive = false;
@@ -1344,7 +1448,11 @@ void fuehreFactoryResetAus() {
     logf("INFO", "Factory Reset ausgefuehrt");
 }
 
-void starteKalibriermodus() {
+// =============================================================================
+// KALIBRIERMODUS – Starten, Messung uebernehmen, Beenden
+// =============================================================================
+
+// starteKalibriermodus – Startet Kalibrierungs-State-Machine (faehrt zuerst nach oben)
     if (runtime.coverState == CoverState::Moving || runtime.setupMode || hatAusstehendeAktion()) return;
 
     runtime.calibrationMode = true;
@@ -1393,6 +1501,11 @@ void uebernehmeKalibrierMessung(CoverDirection direction) {
     }
 }
 
+// =============================================================================
+// LED-TICK – Blinken, ACK-Bestaetigung, Pending Actions, Success-Blink
+// =============================================================================
+
+// tickLeds – Aktualisiert LED-Zustand (jeder Loop-Aufruf)
 void tickLeds() {
     const unsigned long jetztMs = millis();
 
@@ -1481,6 +1594,11 @@ void tickLeds() {
     setzeLedPins(upOn, downOn);
 }
 
+// =============================================================================
+// NORMALE FAHRTEN – Up/Down mit Auto-Stop und EVENTS
+// =============================================================================
+
+// starteNormaleFahrtNachOben – Startet Aufwaertsfahrt (Auto-Stop: 12/10 Fahrzeit)
 bool starteNormaleFahrtNachOben(const char* grund, uint8_t trigger = SH_TRIGGER_MANUAL_BUTTON) {
     unsigned long autoStopMs = 0UL;
     if (runtime.isCalibrated && isTravelTimeValid(runtime.travelTimeUpMs)) {
@@ -1528,6 +1646,11 @@ bool starteEndlagenfahrtOhneKalibrierung(int16_t zielPosition, const char* grund
     return false;
 }
 
+// =============================================================================
+// SERIELLE KONSOLE – parseUInt, Status, Hilfe, Setup-Befehle, Befehlsparser
+// =============================================================================
+
+// parseUIntValue – Parst String in uint32_t
 bool parseUIntValue(const char* text, uint32_t& outValue) {
     if (text == nullptr || *text == '\0') return false;
 
@@ -1814,6 +1937,11 @@ void verarbeiteSerielleBefehle() {
     }
 }
 
+// =============================================================================
+// BEWEGUNGS-TIMEOUTS – Auto-Stop erreicht, Kalibrierungs-Timeouts
+// =============================================================================
+
+// verarbeiteBewegungsTimeouts – Prueft ob aktive Fahrt Auto-Stop erreicht hat
 void verarbeiteBewegungsTimeouts() {
     if (runtime.coverState != CoverState::Moving) return;
     if (runtime.movementAutoStopMs == 0UL) return;
@@ -1847,6 +1975,12 @@ void verarbeiteBewegungsTimeouts() {
     setzeLedNachNormalemStop();
 }
 
+// =============================================================================
+// TASTER-HANDLER – Up/Down/Stop mit Hold-Gesten (5s)
+//   Stop+5s=Kalibrierung, Up+5s=FactoryReset, Down+5s=Setup
+// =============================================================================
+
+// behandleStopButton – Stop-Taster: kurz=Stop, lang(5s)=Kalibrierung starten
 void behandleStopButton(bool stopActive, unsigned long jetztMs) {
     if (stopActive && !runtime.lastStopButtonActive) {
         loggeButtonKante("stop", true, 0UL);
@@ -2033,6 +2167,11 @@ void pollButtons() {
     behandleDownButton(runtime.downButtonStableActive, jetztMs);
 }
 
+// =============================================================================
+// PROTOKOLL-VERARBEITUNG – HELLO_ACK, CMD (Cover-Kommandos), CFG
+// =============================================================================
+
+// uebernehmeReportIntervalAusCfg – Wendet neues Report-Intervall aus CFG an
 bool uebernehmeReportIntervalAusCfg(uint16_t value) {
     if (!isSendIntervalValid(value)) return false;
 
@@ -2181,6 +2320,11 @@ void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
     }
 }
 
+// =============================================================================
+// ESP-NOW – Paket-Empfang, Callbacks, Funk-Initialisierung
+// =============================================================================
+
+// verarbeiteEspNowPaket – Validiert CRC und leitet an Handler weiter (switch/msg_type)
 void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int len) {
     if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
     if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) {
@@ -2294,7 +2438,9 @@ void initialisierePin(int pin, uint8_t mode) {
     if (pin >= 0) pinMode(pin, mode);
 }
 
-}  // namespace
+// =============================================================================
+// SETUP / LOOP – Arduino-Hauptroutinen
+// =============================================================================
 
 void setup() {
     // Serial bleibt hier bewusst aktiv: NET-ZRL nutzt die Konsole nicht nur fuer Debug,
