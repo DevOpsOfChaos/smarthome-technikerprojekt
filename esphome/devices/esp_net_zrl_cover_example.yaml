@@ -183,17 +183,21 @@ cover:
       - switch.turn_off: cover_relay_up
       - switch.turn_off: cover_relay_down
     open_duration: !lambda |-
+      // Prueft ob eine Teil-Positionsfahrt aktiv ist → nur Teilzeit fahren
       if (id(cover_partial_active)) {
         return id(cover_partial_duration_ms);
       }
+      // Prueft ob Kalibrier-Phase 1 (Hochfahrt) → max. 180s fahren
       if (id(cover_calib_phase) == 1) {
         return 180000;
       }
       return id(cover_contract_travel_up_ms);
     close_duration: !lambda |-
+      // Prueft ob eine Teil-Positionsfahrt aktiv ist → nur Teilzeit fahren
       if (id(cover_partial_active)) {
         return id(cover_partial_duration_ms);
       }
+      // Prueft ob Kalibrier-Phase 3 (Runterfahrt) → max. 180s fahren
       if (id(cover_calib_phase) == 3) {
         return 180000;
       }
@@ -201,12 +205,16 @@ cover:
     on_open:
       then:
         - lambda: |-
+            // Prueft ob eine Teilfahrt beendet wurde → Zielposition uebernehmen
             if (id(cover_partial_active)) {
               id(cover_partial_active) = false;
+              // Prueft ob kalibriert → berechnete Zielposition setzen
               if (id(cover_contract_calibrated)) {
                 id(cover_contract_position) = id(cover_contract_target_position);
               }
             } else {
+              // Vollfahrt hoch beendet → Position 100% (ganz offen)
+              // Nicht setzen wenn Kalibrier-Phase 1 (Hochfahrt-Messung laeuft)
               if (id(cover_contract_calibrated) && id(cover_calib_phase) != 1) {
                 id(cover_contract_position) = 100;
               }
@@ -216,12 +224,16 @@ cover:
     on_close:
       then:
         - lambda: |-
+            // Prueft ob eine Teilfahrt beendet wurde → Zielposition uebernehmen
             if (id(cover_partial_active)) {
               id(cover_partial_active) = false;
+              // Prueft ob kalibriert → berechnete Zielposition setzen
               if (id(cover_contract_calibrated)) {
                 id(cover_contract_position) = id(cover_contract_target_position);
               }
             } else {
+              // Vollfahrt runter beendet → Position 0% (ganz geschlossen)
+              // Nicht setzen wenn Kalibrier-Phase 3 (Runterfahrt-Messung laeuft)
               if (id(cover_contract_calibrated) && id(cover_calib_phase) != 3) {
                 id(cover_contract_position) = 0;
               }
@@ -252,6 +264,7 @@ script:
     then:
       - cover.stop: zrl_cover
       - lambda: |-
+          // Prueft ob eine Teilfahrt aktiv war → Flag zuruecksetzen
           if (id(cover_partial_active)) {
             id(cover_partial_active) = false;
           }
@@ -270,6 +283,7 @@ script:
       target_position: int
     then:
       - lambda: |-
+          // Prueft ob Cover nicht kalibriert ist → Teilpositionierung nicht moeglich
           if (!id(cover_contract_calibrated)) {
             ESP_LOGW("cover", "set_position ignored: not calibrated");
             return;
@@ -277,20 +291,26 @@ script:
           id(sync_cover_position).execute();
           int current = id(cover_contract_position);
           int target = target_position;
+          // Prueft ob Zielposition bereits erreicht ist → keine Aktion noetig
           if (current == target) return;
 
+          // Berechnet absolute Abweichung zwischen Ziel- und aktueller Position
           int delta_abs = target > current ? target - current : current - target;
+          // Waehlt Fahrzeit je nach Richtung (aufwaerts/abwaerts)
           int travel_ms = target > current ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
           int partial_ms = (travel_ms * delta_abs) / 100;
+          // Prueft ob berechnete Zeit unter 500ms → Minimum setzen (Ruckler vermeiden)
           if (partial_ms < 500) partial_ms = 500;
 
           id(cover_partial_active) = true;
           id(cover_partial_duration_ms) = partial_ms;
           id(cover_contract_target_position) = target;
+      # Prueft ob Teilfahrt aktiv ist → Richtung bestimmen und Fahrt starten
       - if:
           condition:
             lambda: 'return id(cover_partial_active);'
           then:
+            # Prueft ob Ziel ueber aktueller Position → aufwaerts fahren
             - if:
                 condition:
                   lambda: 'return id(cover_contract_target_position) > id(cover_contract_position);'

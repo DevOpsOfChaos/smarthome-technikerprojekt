@@ -110,18 +110,24 @@ mqtt:
               bool relay_value = false;
               bool relay_value_ok = false;
 
+              // Prueft ob "relay_1"-Schluessel im JSON-Payload vorhanden ist
               if (x.containsKey("relay_1") && !x["relay_1"].isNull()) {
+                // Prueft ob der Wert ein bool ist → direkt uebernehmen
                 if (x["relay_1"].is<bool>()) {
                   relay_value = x["relay_1"].as<bool>();
                   relay_value_ok = true;
+                // Prueft ob der Wert ein int ist → != 0 = true
                 } else if (x["relay_1"].is<int>()) {
                   relay_value = x["relay_1"].as<int>() != 0;
                   relay_value_ok = true;
+                // Prueft ob der Wert ein String ist → Text parsen
                 } else if (x["relay_1"].is<const char*>()) {
                   std::string relay_text = x["relay_1"].as<std::string>();
+                  // Prueft auf "true"/"1"/"on" → Relais EIN
                   if (relay_text == "true" || relay_text == "1" || relay_text == "on") {
                     relay_value = true;
                     relay_value_ok = true;
+                  // Prueft auf "false"/"0"/"off" → Relais AUS
                   } else if (relay_text == "false" || relay_text == "0" || relay_text == "off") {
                     relay_value = false;
                     relay_value_ok = true;
@@ -129,6 +135,7 @@ mqtt:
                 }
               }
 
+              // Prueft ob kein gueltiger Wert uebergeben wurde → Fehler -21
               if (!relay_value_ok) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -21;
@@ -138,6 +145,7 @@ mqtt:
               }
 
               // Relais physisch schalten via ESPHome-Switch-API
+              // Prueft ob Relais ein- oder ausgeschaltet werden soll
               if (relay_value) {
                 id(relay_1_output).turn_on();
               } else {

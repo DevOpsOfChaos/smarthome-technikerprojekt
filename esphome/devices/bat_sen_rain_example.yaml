@@ -175,8 +175,11 @@ sensor:
       then:
         - lambda: |-
             id(rain_raw) = (int) lroundf(x * 4095.0f);
+            // Prueft ob Rohwert ueber Nass-Schwelle (2200) → Regen erkannt
             if (id(rain_raw) > atoi("${rain_wet_threshold_raw}")) {
               id(rain_detected) = true;
+            // Prueft ob Rohwert unter Trocken-Schwelle (2050) → kein Regen
+            // Hysterese (2050-2200) verhindert Flattern bei Grenzwert
             } else if (id(rain_raw) < atoi("${rain_clear_threshold_raw}")) {
               id(rain_detected) = false;
             }

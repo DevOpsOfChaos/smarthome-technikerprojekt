@@ -177,9 +177,11 @@ mqtt:
         - lambda: |-
             // request_id aus JSON extrahieren und validieren
             std::string request_id = "";
+            // Prueft ob "request_id"-Schluessel im JSON vorhanden und nicht null ist
             if (x.containsKey("request_id") && !x["request_id"].isNull()) {
               request_id = x["request_id"].as<std::string>();
             }
+            // Prueft ob request_id leer ist → Fehler -20, Kommando ignorieren
             if (request_id.empty()) {
               id(contract_fault) = true;
               id(contract_last_status_code) = -20;
