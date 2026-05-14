@@ -1,27 +1,38 @@
-/*
-====================================================================
- Projekt   : SmartHome ESP32
- Geraet    : Master (ESP32-C3)
- Datei     : main.cpp
- Version   : 0.4.0
- Stand     : 2026-04-08
-
- Funktion:
- Dynamischer Master als Funk- und MQTT-Bruecke.
-
- Ziel dieses Stands:
- - HELLO / HELLO_ACK / HEARTBEAT / STATE / EVENT / ACK
- - dynamische Node-Registry statt fester Geraeteliste
- - einfache Availability auf Basis der Registry
- - set_relay / get_state / minimales set_config
- - Cover-Befehle open / close / stop / set_position
- - Pending-/ACK-Modell pro Geraet
-
- Wichtige Architekturgrenze:
- Der Master ist Bruecke und einfache Projektion,
- aber kein halber Server und kein Dashboard-Generator.
-====================================================================
-*/
+// =============================================================================
+// main.cpp – Master: ESP-NOW to MQTT Bridge
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/basetypes/master/main.cpp
+//
+// Datei-Funktion:
+//   Dynamischer Master als ESP-NOW ↔ MQTT-Bruecke. Empfaengt HELLO,
+//   HEARTBEAT, STATE (5 Formate), EVENT und ACK von Nodes. Verarbeitet
+//   eingehende MQTT-Kommandos (set_relay, get_state, set_config,
+//   open/close/stop/set_position) und sendet sie via ESP-NOW an Nodes.
+//   Dynamische Node-Registry (max. 16 Nodes) mit automatischer Erkennung
+//   und Online-Zeitueberwachung.
+//
+// Protokoll (ESP-NOW):
+//   Empfangen: HELLO, HEARTBEAT, STATE, EVENT, ACK
+//   Senden:    HELLO_ACK, CMD (set_relay, set_position, ...), CFG
+//
+// Protokoll (MQTT):
+//   smarthome/master/{DEVICE_ID}/{status,event}
+//   smarthome/device/{node_id}/{meta,availability,state,ack,event}
+//   smarthome/device/{node_id}/command (eingehend)
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+//
+// Aenderungshistorie:
+//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch, Doxygen-Stil)
+//
+// Abhaengigkeiten:
+//   AppConfig.h, PinConfig.h, Secrets.h (Zugangsdaten)
+//   lib/sh_protocol (Protocol.h, DeviceTypes.h)
+//   lib/sh_storage (ShStorage.h)
+// =============================================================================
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -73,13 +84,22 @@
 
 namespace {
 
+// =============================================================================
+// KONSTANTEN – Debug, Version, MQTT-Topics, Request-ID, Status-Codes, Ungueltig
+// =============================================================================
+
 constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "MASTER";
 constexpr char DATEI_VERSION[] = "0.4.0";
+// MQTT-Topic fuer eingehende Device-Kommandos (+ = Wildcard fuer device_id)
 constexpr char MQTT_TOPIC_COMMAND_SUB[] = "smarthome/device/+/command";
+// Maximale Laenge der request_id (aus MQTT-Kommando)
 constexpr size_t REQUEST_ID_LEN = 96U;
+// Grenzen fuer report_interval_s aus dem Storage-Framework
 constexpr long CFG_REPORT_INTERVAL_MIN = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MIN_S;
 constexpr long CFG_REPORT_INTERVAL_MAX = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MAX_S;
+
+// Ungueltigkeits-Marker fuer STATE-Payload-Felder (wenn Sensor nicht vorhanden)
 constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
@@ -88,86 +108,97 @@ constexpr uint16_t BATTERY_MV_UNGUELTIG = 0U;
 constexpr uint8_t WINDOW_STATE_UNGUELTIG = 0xFFU;
 constexpr uint16_t RAIN_RAW_UNGUELTIG = 0xFFFFU;
 constexpr uint8_t COVER_POSITION_UNBEKANNT = 0xFFU;
-constexpr int STATUS_CODE_NOT_CALIBRATED = -5;
-constexpr int STATUS_CODE_UNKNOWN_DEVICE = -6;
-constexpr int STATUS_CODE_REGISTRY_FULL = -7;
 
+// Fehler-Codes fuer MQTT-ACK-Antworten
+constexpr int STATUS_CODE_NOT_CALIBRATED = -5;     // set_position ohne Kalibrierung
+constexpr int STATUS_CODE_UNKNOWN_DEVICE = -6;      // device_id nicht in Registry
+constexpr int STATUS_CODE_REGISTRY_FULL = -7;       // Registry voll (max. 16 Nodes)
+
+// =============================================================================
+// STRUKTUREN – Pending-Nachrichten, Node-Registry, Master-Status
+// =============================================================================
+
+// PendingCmdRequest – Ausstehende CMD-Nachricht (ACK noch nicht eingetroffen)
 struct PendingCmdRequest {
-    bool aktiv;
-    uint8_t seq;
-    uint8_t retries;
-    uint8_t cmd_type;
-    uint8_t param1;
-    uint8_t param2;
-    unsigned long letztes_senden_ms;
-    char request_id[REQUEST_ID_LEN];
-    char command_channel[24];
+    bool aktiv;                          // true = Pending laeuft
+    uint8_t seq;                         // ESP-NOW-Sequenznummer der Nachricht
+    uint8_t retries;                     // Anzahl bereits erfolgter Retries
+    uint8_t cmd_type;                    // Kommando-Typ (SH_CMD_SET_RELAY, SH_CMD_COVER, ...)
+    uint8_t param1;                      // Parameter 1 (z.B. Relais-Index)
+    uint8_t param2;                      // Parameter 2 (z.B. Ziel-Zustand)
+    unsigned long letztes_senden_ms;     // Zeitstempel letzter Sendevorgang
+    char request_id[REQUEST_ID_LEN];     // request_id aus MQTT-Kommando (fuer ACK)
+    char command_channel[24];            // MQTT-Channel (fuer ACK-Routing)
 };
 
+// PendingConfigRequest – Ausstehende CFG-Nachricht (ACK noch nicht eingetroffen)
 struct PendingConfigRequest {
-    bool aktiv;
-    uint8_t seq;
-    uint8_t retries;
-    uint8_t param_id;
-    uint16_t value;
-    unsigned long letztes_senden_ms;
-    char request_id[REQUEST_ID_LEN];
-    char command_channel[24];
+    bool aktiv;                          // true = Pending laeuft
+    uint8_t seq;                         // ESP-NOW-Sequenznummer
+    uint8_t retries;                     // Retry-Zaehler
+    uint8_t param_id;                    // Konfig-Parameter-ID (z.B. SH_CFG_REPORT_INTERVAL_S)
+    uint16_t value;                      // Konfig-Wert
+    unsigned long letztes_senden_ms;     // Zeitstempel letzter Sendevorgang
+    char request_id[REQUEST_ID_LEN];     // request_id aus MQTT-Kommando
+    char command_channel[24];            // MQTT-Channel
 };
 
+// NodeRuntime – Laufzeitzustand einer einzelnen Node in der Registry
+//   Jede Node hat einen Slot mit Zustand, Sensorwerten, MAC und Pending-Requests.
 struct NodeRuntime {
-    bool belegt;
-    bool meta_bekannt;
-    bool online;
-    bool state_bekannt;
-    bool mac_bekannt;
-    bool fault;
-    bool relay_1;
-    bool relay_2;
-    bool cover_mode;
-    bool cover_calibrated;
-    uint8_t cover_state;
-    uint8_t cover_position;
-    int16_t temp_01c;
-    uint16_t hum_01pct;
-    uint16_t lux;
-    uint32_t pressure_pa;
-    uint32_t gas_ohm;
-    uint16_t aqi;
-    uint16_t tvoc_ppb;
-    uint16_t eco2_ppm;
-    bool motion;
-    uint8_t battery_pct;
-    uint16_t battery_mv;
-    uint8_t window_open;
-    uint16_t rain_raw;
-    uint8_t button_flags;
-    uint32_t uptime_s;
-    uint16_t caps;
-    uint16_t fw_version;
-    uint8_t device_class;
-    uint8_t power_type;
-    uint8_t meta_schema_version;
-    uint8_t control_mode;
-    uint8_t config_profile;
-    uint8_t reporting_mode;
-    char device_id[SH_DEVICE_ID_LEN];
-    char sensor_mask[SH_SENSOR_MASK_LEN];
-    char input_mask[SH_INPUT_MASK_LEN];
-    char device_name[SH_DEVICE_NAME_LEN];
-    uint8_t mac[6];
-    unsigned long letzter_kontakt_ms;
-    PendingCmdRequest pending_cmd;
-    PendingConfigRequest pending_cfg;
+    bool belegt;                         // Slot belegt (true = Node registriert)
+    bool meta_bekannt;                   // HELLO wurde empfangen (Meta vorhanden)
+    bool online;                         // Node antwortet (Heartbeat/Kontakt in Timeout)
+    bool state_bekannt;                  // Mindestens ein STATE empfangen
+    bool mac_bekannt;                    // MAC-Adresse bekannt
+    bool fault;                          // Fehlerstatus der Node
+    bool relay_1;                        // Relais 1 Zustand
+    bool relay_2;                        // Relais 2 Zustand
+    bool cover_mode;                     // Cover-Modus aktiv
+    bool cover_calibrated;               // Cover kalibriert
+    uint8_t cover_state;                 // Cover-State-Code (SH_COVER_STATE_*)
+    uint8_t cover_position;              // Cover-Position (0-100, 255=unbekannt)
+    int16_t temp_01c;                    // Temperatur in Zehntel-Grad
+    uint16_t hum_01pct;                  // Feuchte in Zehntel-Prozent
+    uint16_t lux;                        // Lux-Wert
+    uint32_t pressure_pa;                // Luftdruck in Pascal
+    uint32_t gas_ohm;                    // Gaswiderstand in Ohm
+    uint16_t aqi;                        // Luftqualitaetsindex
+    uint16_t tvoc_ppb;                   // TVOC in ppb
+    uint16_t eco2_ppm;                   // eCO2 in ppm
+    bool motion;                         // Bewegung erkannt
+    uint8_t battery_pct;                 // Batteriestand in Prozent
+    uint16_t battery_mv;                 // Batteriespannung in mV
+    uint8_t window_open;                 // Fensterkontakt (0/1, 255=unbekannt)
+    uint16_t rain_raw;                   // Regen-ADC-Rohwert
+    uint8_t button_flags;                // Tastenflags
+    uint32_t uptime_s;                   // Uptime der Node in Sekunden
+    uint16_t caps;                       // Faehigkeiten (Bitmaske)
+    uint16_t fw_version;                 // Firmware-Version
+    uint8_t device_class;                // Geraeteklasse (SH_CLASS_NET_ERL, ...)
+    uint8_t power_type;                  // Stromversorgung (mains/battery)
+    uint8_t meta_schema_version;         // Meta-Daten-Schema-Version
+    uint8_t control_mode;                // Steuerungsmodus
+    uint8_t config_profile;              // Konfigurationsprofil
+    uint8_t reporting_mode;              // Report-Modus
+    char device_id[SH_DEVICE_ID_LEN];    // Geraete-ID
+    char sensor_mask[SH_SENSOR_MASK_LEN];// Sensor-Maske
+    char input_mask[SH_INPUT_MASK_LEN];  // Input-Maske
+    char device_name[SH_DEVICE_NAME_LEN];// Geraete-Name
+    uint8_t mac[6];                      // MAC-Adresse der Node
+    unsigned long letzter_kontakt_ms;    // Zeitstempel letzte Kommunikation
+    PendingCmdRequest pending_cmd;       // Ausstehendes CMD (falls aktiv)
+    PendingConfigRequest pending_cfg;    // Ausstehendes CFG (falls aktiv)
 };
 
+// MasterState – Zentraler Master-Status (Verbindungen, Sequenz)
 struct MasterState {
-    bool wlan_verbunden;
-    bool mqtt_verbunden;
-    bool espnow_bereit;
-    unsigned long letzter_wlan_versuch_ms;
-    unsigned long letzter_mqtt_versuch_ms;
-    uint8_t naechste_seq;
+    bool wlan_verbunden;                 // true = WLAN verbunden
+    bool mqtt_verbunden;                 // true = MQTT verbunden
+    bool espnow_bereit;                  // true = ESP-NOW initialisiert
+    unsigned long letzter_wlan_versuch_ms; // Zeitstempel letzter WLAN-Connect-Versuch
+    unsigned long letzter_mqtt_versuch_ms; // Zeitstempel letzter MQTT-Connect-Versuch
+    uint8_t naechste_seq;                // Naechste ESP-NOW-Sequenznummer
 };
 
 WiFiClient wifiClient;
@@ -214,6 +245,10 @@ void macText(const uint8_t* mac, char* buffer, size_t bufferSize) {
 const char* mqttBrokerTypText() {
     return mqttBrokerNutzeDirekteIp ? "ip" : "host";
 }
+
+// =============================================================================
+// HILFSFUNKTIONEN – Device-Klasse, Power-Typ, Cover-Status, Control-Modus
+// =============================================================================
 
 const char* deviceClassText(uint8_t deviceClass) {
     switch (deviceClass) {
@@ -298,6 +333,10 @@ bool istPowerTypeGueltig(uint8_t powerType) {
 unsigned long offlineTimeoutMsForPowerType(uint8_t powerType) {
     return powerType == SH_POWER_BATTERY ? BATTERY_NODE_OFFLINE_TIMEOUT_MS : NODE_OFFLINE_TIMEOUT_MS;
 }
+
+// =============================================================================
+// NODE-REGISTRY – Initialisierung, Suche (per ID/MAC/frei), Cap-Pruefung
+// =============================================================================
 
 void initialisiereNodeSlot(NodeRuntime& node) {
     node = {};
@@ -441,6 +480,10 @@ bool stellePeerSicher(const uint8_t* mac) {
     return true;
 }
 
+// =============================================================================
+// ESP-NOW SENDEN – Paket mit/ohne Optionen an Peer senden
+// =============================================================================
+
 bool sendePaketMitOptionen(
     const uint8_t* zielMac,
     uint8_t msgType,
@@ -486,6 +529,10 @@ bool sendePaketMitOptionen(
 bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
     return sendePaketMitOptionen(zielMac, msgType, payload, payloadLen, label, 0U, false, 0U, nullptr);
 }
+
+// =============================================================================
+// MQTT / JSON-HELFER – Topic und Payload bauen, publishen (retained/transient)
+// =============================================================================
 
 void baueMasterTopic(const char* channel, char* buffer, size_t bufferSize) {
     snprintf(buffer, bufferSize, "smarthome/master/%s/%s", DEVICE_ID, channel);
@@ -866,6 +913,10 @@ void aktualisiereNodeKontakt(size_t nodeIndex, const uint8_t* mac) {
     }
 }
 
+// =============================================================================
+// PROTOKOLL-VERARBEITUNG (ESP-NOW) – HELLO, HEARTBEAT, STATE, EVENT, ACK
+// =============================================================================
+
 void sendeHelloAck(const uint8_t* zielMac, uint8_t ackStatus) {
     SmartHome::HelloAckPayload payload = {};
     payload.channel = (uint8_t)(masterStatus.wlan_verbunden ? WiFi.channel() : WLAN_KANAL);
@@ -1177,6 +1228,10 @@ void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payloa
     logf("WARN", "ACK ignoriert: passt zu keinem offenen Request");
 }
 
+// =============================================================================
+// ESP-NOW EMPFANG – Paket validieren und an Handler weiterleiten (switch/msg_type)
+// =============================================================================
+
 void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* daten, int laenge) {
     if (!senderMac || !daten || laenge < (int)sizeof(SmartHome::MsgHeader)) {
         logf("WARN", "ESP-NOW Paket verworfen: ungueltige Eingabe");
@@ -1191,18 +1246,22 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* daten, int l
     const SmartHome::MsgHeader* header = reinterpret_cast<const SmartHome::MsgHeader*>(daten);
     const uint8_t* payload = daten + SH_HEADER_SIZE;
 
+    // Anhand msg_type an den richtigen Handler weiterleiten
     switch (header->msg_type) {
         case SH_MSG_HELLO:
+            // HELLO: Neue Node anmelden oder bestehende aktualisieren
             if (header->payload_len == sizeof(SmartHome::HelloPayload)) {
                 verarbeiteHello(senderMac, *reinterpret_cast<const SmartHome::HelloPayload*>(payload));
             }
             break;
         case SH_MSG_HEARTBEAT:
+            // HEARTBEAT: Kontaktzeit der Node aktualisieren
             if (header->payload_len == sizeof(SmartHome::HeartbeatPayload)) {
                 verarbeiteHeartbeat(senderMac, *reinterpret_cast<const SmartHome::HeartbeatPayload*>(payload));
             }
             break;
         case SH_MSG_STATE:
+            // STATE: Node-Zustand aktualisieren (5 verschiedene Payload-Formate)
             verarbeiteStateReport(senderMac, payload, header->payload_len);
             break;
         case SH_MSG_EVENT:
@@ -1356,6 +1415,11 @@ void loggeMqttConnectFehler() {
     logf("WARN", "MQTT connect fehlgeschlagen (state=%d, broker=%s:%d, typ=%s)", mqttClient.state(), MQTT_HOST, MQTT_PORT, mqttBrokerTypText());
 }
 
+// =============================================================================
+// JSON-HELFER – Manuelles JSON-Parsing (ohne ArduinoJson-Lib)
+//   holeString, holeBool, holeZahl, holeObjekt – simple String-Suche im JSON
+// =============================================================================
+
 bool skipWhitespace(const char*& cursor) {
     if (cursor == nullptr) return false;
     while (*cursor != '\0' && isspace((unsigned char)*cursor)) cursor++;
@@ -1486,6 +1550,10 @@ bool parseSetConfigMinimal(size_t nodeIndex, const char* json, uint8_t* paramId,
     return false;
 }
 
+// =============================================================================
+// COMMAND-VALIDIERUNG – Cover-Geraet, Relay-Zulaessigkeit, ACK-Typ
+// =============================================================================
+
 bool istCoverGeraet(size_t nodeIndex) {
     return nodeStates[nodeIndex].control_mode == SH_CONTROL_MODE_COVER || nodeHasCap(nodeIndex, SH_CAP_COVER);
 }
@@ -1504,6 +1572,10 @@ bool istRelayBefehlZulaessig(size_t nodeIndex, uint8_t relayIndex) {
 uint8_t ackMsgTypeFuerCommand(const char* cmd) {
     return (cmd != nullptr && strcmp(cmd, "set_config") == 0) ? SH_MSG_CFG : SH_MSG_CMD;
 }
+
+// =============================================================================
+// MQTT-COMMAND-HANDLER – mqttCallback: get_state, set_relay, Cover-Kommandos, set_config
+// =============================================================================
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
     char json[256] = {0};
@@ -1546,7 +1618,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     logf("INFO", "MQTT empfangen %s -> %s", topic, json);
 
     const int nodeIndex = findeNodeIndex(nodeId);
+
+    // Kommando-Typ erkennen und an entsprechenden Handler weiterleiten
     if (strcmp(cmd, "get_state") == 0) {
+        // STATE_REQUEST: Zustandsabfrage ohne ACK-Mechanismus
         if (nodeIndex < 0) {
             logf("WARN", "MQTT get_state fuer unbekannte device_id=%s", nodeId);
             return;
@@ -1556,6 +1631,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
 
     char requestId[REQUEST_ID_LEN] = {0};
+    // request_id ist PFLICHT fuer alle Kommandos mit ACK-Erwartung
     if (!jsonHoleString(json, "request_id", requestId, sizeof(requestId)) || requestId[0] == '\0') {
         logf("WARN", "MQTT %s ohne request_id fuer %s verworfen", cmd, nodeId);
         return;
@@ -1564,6 +1640,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     const char* commandChannel = "command";
     const uint8_t ackMsgType = ackMsgTypeFuerCommand(cmd);
 
+    // Wenn nodeIndex < 0: Node nicht registriert → sofort ACK mit "unknown_device"
     if (nodeIndex < 0) {
         publishNodeAckById(nodeId, requestId, commandChannel, "unknown_device", STATUS_CODE_UNKNOWN_DEVICE, ackMsgType, 0U, "master_registry");
         return;
@@ -1669,6 +1746,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     logf("WARN", "MQTT Kommando ignoriert fuer %s", nodeId);
 }
+
+// =============================================================================
+// INITIALISIERUNG – Hardware, WLAN, ESP-NOW, MQTT
+// =============================================================================
 
 void initialisiereHardware() {
     if (PIN_STATUS_LED >= 0) {
@@ -1782,6 +1863,10 @@ void pruefeMqttVerbindung() {
     publishBekannteNodesNachReconnect();
 }
 
+// =============================================================================
+// PENDING-TIMEOUTS – CMD und CFG Timeouts mit Retry-Logik
+// =============================================================================
+
 void pruefePendingCmdTimeouts() {
     for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
         if (!nodeStates[i].belegt || !nodeStates[i].pending_cmd.aktiv) continue;
@@ -1854,6 +1939,10 @@ void pruefeOfflineTimeout() {
     }
 }
 
+// =============================================================================
+// STARTMELDUNG – Konsolenausgabe beim Bootvorgang
+// =============================================================================
+
 void gibStartmeldungAus() {
     if (!DEBUG_LOKAL_AKTIV) return;
 
@@ -1877,7 +1966,9 @@ void gibStartmeldungAus() {
     Serial.println("================================");
 }
 
-}  // namespace
+// =============================================================================
+// ARDUINO – setup() und loop()
+// =============================================================================
 
 void setup() {
     if (DEBUG_LOKAL_AKTIV) {

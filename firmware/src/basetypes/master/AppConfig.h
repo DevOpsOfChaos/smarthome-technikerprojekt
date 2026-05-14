@@ -1,13 +1,40 @@
+// =============================================================================
+// AppConfig.h – Master-Konfiguration (Profile, Timer, Limits)
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/basetypes/master/AppConfig.h
+//
+// Datei-Funktion:
+//   Hauptkonfiguration fuer den ESP-NOW-Master. Definiert zwei Profile
+//   (Primary + Secondary) fuer verschiedene Geraete-IDs, sowie alle
+//   Timing-Parameter (WLAN-Rekonnekt, MQTT-Rekonnekt, ACK-Timeout),
+//   Node-Limits (max. Nodes, Offline-Timeouts), davon abgeleitete
+//   constexpr-Konstanten. Private Zugangsdaten (WLAN, MQTT) liegen in
+//   Secrets.h ausserhalb des Repos.
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+//
+// Aenderungshistorie:
+//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch)
+// =============================================================================
+
 #pragma once
+
+// =============================================================================
+// PROFIL-SYSTEM – Geraete-Identitaet je nach Profil (Primary/Secondary)
+// =============================================================================
 
 #define SH_MASTER_PROFILE_PRIMARY    1U
 #define SH_MASTER_PROFILE_SECONDARY  2U
 
 #ifndef MASTER_PROFILE
-#define MASTER_PROFILE SH_MASTER_PROFILE_PRIMARY
+#define MASTER_PROFILE SH_MASTER_PROFILE_PRIMARY  // Default: Primary
 #endif
 
 #if MASTER_PROFILE == SH_MASTER_PROFILE_PRIMARY
+  // Primary Master (Standard-Geraet)
   #ifndef MASTER_PROFILE_DEVICE_ID
     #define MASTER_PROFILE_DEVICE_ID "MASTER-001"
   #endif
@@ -18,6 +45,7 @@
     #define MASTER_PROFILE_FW_VARIANT "master"
   #endif
 #elif MASTER_PROFILE == SH_MASTER_PROFILE_SECONDARY
+  // Secondary Master (Reserve-Geraet)
   #ifndef MASTER_PROFILE_DEVICE_ID
     #define MASTER_PROFILE_DEVICE_ID "MASTER-002"
   #endif
@@ -31,60 +59,90 @@
   #error "Unbekanntes MASTER_PROFILE."
 #endif
 
+// =============================================================================
+// DEBUG – Serielle Ausgaben
+// =============================================================================
+
 #ifndef MASTER_DEBUG_ENABLED
 #define MASTER_DEBUG_ENABLED 1
 #endif
 
+// =============================================================================
+// FUNK / WLAN – Kanal und Reconnect
+// =============================================================================
+
+// ESP-NOW WLAN-Kanal (muss mit Nodes uebereinstimmen)
 #ifndef MASTER_WLAN_CHANNEL
 #define MASTER_WLAN_CHANNEL 6
 #endif
 
+// WLAN-Reconnect-Intervall (ms) – wie oft WLAN erneut verbinden
 #ifndef MASTER_WIFI_RECONNECT_INTERVAL_MS
 #define MASTER_WIFI_RECONNECT_INTERVAL_MS 10000UL
 #endif
 
+// MQTT-Reconnect-Intervall (ms) – wie oft MQTT erneut verbinden
 #ifndef MASTER_MQTT_RECONNECT_INTERVAL_MS
 #define MASTER_MQTT_RECONNECT_INTERVAL_MS 5000UL
 #endif
 
+// =============================================================================
+// ACK / PENDING – Timeout und Retries fuer Befehle an Nodes
+// =============================================================================
+
+// Timeout bis zum ersten Retry (ms)
 #ifndef MASTER_COMMAND_ACK_TIMEOUT_MS
 #define MASTER_COMMAND_ACK_TIMEOUT_MS 800UL
 #endif
 
+// Maximale Anzahl Retries bevor "timeout" gemeldet wird
 #ifndef MASTER_COMMAND_MAX_RETRIES
 #define MASTER_COMMAND_MAX_RETRIES 2U
 #endif
 
+// =============================================================================
+// NODE-MANAGEMENT – Registry-Groesse und Offline-Timeout
+// =============================================================================
+
+// Offline-Timeout fuer Netz-Nodes (ms, 75s = 3-4 verpasste Heartbeats)
 #ifndef MASTER_NODE_OFFLINE_TIMEOUT_MS
 #define MASTER_NODE_OFFLINE_TIMEOUT_MS 75000UL
 #endif
 
+// Offline-Timeout fuer Batterie-Nodes (ms, 10min)
 #ifndef MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS
 #define MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS 600000UL
 #endif
 
+// Maximale Anzahl dynamischer Nodes in der Registry
 #ifndef MASTER_MAX_DYNAMIC_NODES
 #define MASTER_MAX_DYNAMIC_NODES 16U
 #endif
 
+// =============================================================================
+// MQTT – Buffer-Groesse und Loop-Intervall
+// =============================================================================
+
+// MQTT-Puffergroesse (B) fuer eingehende Nachrichten
 #ifndef MASTER_MQTT_BUFFER_BYTES
 #define MASTER_MQTT_BUFFER_BYTES 768U
 #endif
 
+// Loop-Ausfuehrungsintervall (ms)
 #ifndef MASTER_LOOP_INTERVAL_MS
 #define MASTER_LOOP_INTERVAL_MS 10UL
 #endif
 
-// ============================================================
-// Master - Geraetekonfiguration vor dem Upload
-// ============================================================
-// Diese Datei enthaelt alle Einstellungen, die vor dem Flashen
-// geprueft und ggf. angepasst werden muessen.
-//
-// Private Zugangsdaten (WLAN, MQTT) stehen in Secrets.h,
-// die nicht ins Repository gehoert (liegt in .gitignore).
+// =============================================================================
+// HINWEIS – Zugangsdaten (WLAN, MQTT) in Secrets.h
+// =============================================================================
+// Private Zugangsdaten stehen in Secrets.h (ausserhalb Repo, siehe .gitignore).
 // Vorlage: firmware/include/Secrets.example.h
-// ============================================================
+// =============================================================================
+
+// =============================================================================
+// ABGELEITETE KONSTANTEN – Aus #defines als constexpr
+// =============================================================================
 
 constexpr char DEVICE_ID[]    = MASTER_PROFILE_DEVICE_ID;
 constexpr char DEVICE_NAME[]  = MASTER_PROFILE_DEVICE_NAME;
