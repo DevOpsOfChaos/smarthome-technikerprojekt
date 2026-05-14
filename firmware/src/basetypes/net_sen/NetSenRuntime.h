@@ -1,3 +1,34 @@
+// =============================================================================
+// NetSenRuntime.h – NET-SEN Basistyp: Netz-Sensor (ESP-NOW Runtime)
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/basetypes/net_sen/NetSenRuntime.h
+//
+// Datei-Funktion:
+//   Komplette ESP-NOW-Sensor-Implementierung als Header-only.
+//   Untersuetzt Temperatur (temp_01c), Feuchte (hum_01pct), Lux,
+//   Druck (pressure_pa), Gas (gas_ohm), AQI, TVOC, eCO2 und
+//   Bewegung (motion). Bietet zwei STATE-Payload-Formate (Standard
+//   und Extended) sowie Custom-Sensor-Hooks fuer konkrete Devices.
+//   Inkludiert Task-Watchdog und optionale I2C-Basis-Initialisierung.
+//
+// Protokoll-Nachrichten:
+//   Senden:   HELLO, HEARTBEAT, STATE (Sensor oder Extended-Gas),
+//             EVENT (device-events), ACK
+//   Empfangen: HELLO_ACK, CMD (STATE_REQUEST), CFG
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+//
+// Aenderungshistorie:
+//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch, Doxygen-Stil)
+//
+// Abhaengigkeiten (Projekt-intern):
+//   DeviceConfig.h, PinConfig.h, NetSenProvisioning.h,
+//   lib/sh_protocol (DeviceTypes.h, Protocol.h)
+// =============================================================================
+
 #pragma once
 
 #include <Arduino.h>
@@ -26,19 +57,42 @@
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 #include "../../../lib/sh_protocol/src/Protocol.h"
 
+// =============================================================================
+// KONSTANTEN – Debug, Geraete-Identifikation, Timing, Ungueltigkeits-Marker
+// =============================================================================
+
+// Debug aktiv nur wenn sowohl global als auch geraetespezifisch eingeschaltet
 constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "NET-SEN";
 constexpr char DATEI_VERSION[] = "0.2.0";
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
-constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
-constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
+
+// Marker fuer "nicht gemessen/ungueltig" in STATE-Payloads
+constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;   // Druck ungueltig
+constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;    // Gas ungueltig
+constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;      // AQI/TVOC/eCO2 ungueltig
+
+// Task-Watchdog-Timeout (nach 8s ohne Reset wird das Geraet zurueckgesetzt)
 constexpr uint32_t TASK_WDT_TIMEOUT_S = 8UL;
+// I2C-Bus-Timeout fuer Wire.begin() (50ms)
 constexpr uint16_t I2C_TIMEOUT_MS = 50U;
+
+// Puffergroesse fuer Setup-AP-SSID (DEVICE_ID muss hineinpassen)
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
 static_assert(
     sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
     "NET_SEN_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
+
+// =============================================================================
+// CUSTOM-SENSOR-HOOKS – Device-spezifische Erweiterungen
+// =============================================================================
+// Diese drei Bloecke koennen von konkreten Device-Implementierungen ersetzt
+// werden. Wenn NET_SEN_DEVICE_HAS_CUSTOM_... auf 1 gesetzt wird, muessen die
+// entsprechenden Funktionen vom Device bereitgestellt werden.
+// SensorHook:       Temperatur, Feuchte, Lux, Bewegung, Fehler
+// ExtendedStateHook: Druck, Gas, AQI, TVOC, eCO2
+// EventHook:        Device-Events (z.B. Bewegungserkennung, Schwellwert)
+// =============================================================================
 
 #ifndef NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 0
@@ -52,6 +106,21 @@ static_assert(
 #define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS 0
 #endif
 
+// =============================================================================
+// STRUKTUREN – SensorState und NodeState
+// =============================================================================
+
+// SensorState – Aktuelle Messwerte aller angeschlossenen Sensoren
+//   temp_01c:   Temperatur in Zehntel-Grad (z.B. 235 = 23,5 Grad C)
+//   hum_01pct:  Luftfeuchte in Zehntel-Prozent (z.B. 455 = 45,5%)
+//   lux:        Umgebungslicht in Lux (0xFFFF = ungueltig)
+//   pressure_pa: Luftdruck in Pascal (0xFFFFFFFF = ungueltig)
+//   gas_ohm:    Gaswiderstand in Ohm (0xFFFFFFFF = ungueltig)
+//   aqi:        Luftqualitaetsindex (0xFFFF = ungueltig)
+//   tvoc_ppb:   Gesamtfluechtige organische Verbindungen in ppb
+//   eco2_ppm:   CO2-Aequivalent in ppm
+//   motion:     Bewegung erkannt (0/1)
+//   fault:      Sensorfehler (true = Messung fehlgeschlagen)
 struct SensorState {
     int16_t temp_01c;
     uint16_t hum_01pct;
@@ -65,30 +134,37 @@ struct SensorState {
     bool fault;
 };
 
+// NodeState – Zentraler Geraetezustand (Funk- und System-Status)
 struct NodeState {
-    bool provisioning_bereit;
-    bool setup_mode;
-    bool setup_ap_aktiv;
-    bool restart_pending;
-    bool master_bekannt;
-    bool master_mac_gueltig;
-    bool state_report_offen;
-    bool funk_bereit;
-    unsigned long letztes_hello_ms;
-    unsigned long letzter_heartbeat_ms;
-    unsigned long letzter_state_ms;
-    unsigned long restart_requested_at_ms;
-    unsigned long state_interval_ms;
-    uint32_t report_interval_s;
-    uint32_t stored_sensor_send_interval_s;
-    uint8_t master_mac[6];
-    uint8_t naechste_seq;
-    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
-    SensorState sensor;
+    bool provisioning_bereit;       // true = NodeProvisioning initialisiert
+    bool setup_mode;                // true = Geraet im Setup-Modus
+    bool setup_ap_aktiv;            // true = Setup-AP laeuft
+    bool restart_pending;           // true = Neustart angefordert
+    bool master_bekannt;            // true = HELLO_ACK vom Master empfangen
+    bool master_mac_gueltig;        // true = Master-MAC provisioniert
+    bool state_report_offen;        // true = STATE muss gesendet werden
+    bool funk_bereit;               // true = ESP-NOW initialisiert
+    unsigned long letztes_hello_ms;     // Zeitstempel letztes HELLO
+    unsigned long letzter_heartbeat_ms; // Zeitstempel letzter HEARTBEAT
+    unsigned long letzter_state_ms;     // Zeitstempel letzter STATE
+    unsigned long restart_requested_at_ms; // Zeitstempel Restart
+    unsigned long state_interval_ms;     // STATE-Intervall aus report_interval_s
+    uint32_t report_interval_s;         // Aktuelles Report-Intervall (s)
+    uint32_t stored_sensor_send_interval_s; // Gespeichertes Sensor-Intervall
+    uint8_t master_mac[6];              // Provisionierte Master-MAC
+    uint8_t naechste_seq;               // Naechste ESP-NOW-Sequenz
+    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE]; // Setup-AP-SSID
+    SensorState sensor;                  // Aktuelle Sensorwerte
 };
 
+// Globale Instanz des Geraetezustands
 NodeState nodeStatus = {};
 
+// =============================================================================
+// FORWARD-DEKLARATIONEN – Custom-Sensor-Hooks (werden von konkreten Devices ueberschrieben)
+// =============================================================================
+
+// Basis-Init und Poll fuer Standard-Sensoren (Temp, Feuchte, Lux, Motion)
 #if NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS
 void netSenDeviceSensorInit();
 bool netSenDeviceSensorPoll(
@@ -107,10 +183,11 @@ bool netSenDeviceSensorPoll(
     uint8_t* /*motion*/,
     bool* /*fault*/)
 {
-    return false;
+    return false;  // Keine Aenderung
 }
 #endif
 
+// Basis-Init und Poll fuer erweiterte Sensoren (Druck, Gas, AQI, TVOC, eCO2)
 #if NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS
 void netSenDeviceExtendedStateInit();
 bool netSenDeviceExtendedStatePoll(
@@ -129,10 +206,11 @@ bool netSenDeviceExtendedStatePoll(
     uint16_t* /*tvoc_ppb*/,
     uint16_t* /*eco2_ppm*/)
 {
-    return false;
+    return false;  // Keine Aenderung
 }
 #endif
 
+// Poll fuer Device-Events (z.B. Schwellwertueberschreitung, Bewegung)
 #if NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS
 bool netSenDevicePollEvent(
     uint8_t* event_type,
@@ -146,14 +224,21 @@ bool netSenDevicePollEvent(
     uint8_t* /*param1*/,
     uint16_t* /*param2*/)
 {
-    return false;
+    return false;  // Kein Event
 }
 #endif
 
+// =============================================================================
+// HILFSFUNKTIONEN – Cap-Pruefung, Sensor-Defaults, Logging, Watchdog, Strings, MAC
+// =============================================================================
+
+// netSenVerwendetErweitertenState – Prueft ob Extended-State-Payload verwendet werden soll
+//   true wenn DEVICE_CAPS Druck (SH_CAP_PRESSURE) oder AQI (SH_CAP_AQI) enthaelt.
 bool netSenVerwendetErweitertenState() {
     return (DEVICE_CAPS & (SH_CAP_PRESSURE | SH_CAP_AQI)) != 0U;
 }
 
+// setzeSensorDefaults – Setzt alle Sensorwerte auf Ungueltig-Marker und fault=true
 void setzeSensorDefaults(SensorState* sensor) {
     if (!sensor) return;
     sensor->temp_01c = INT16_MIN;
@@ -165,9 +250,11 @@ void setzeSensorDefaults(SensorState* sensor) {
     sensor->tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
     sensor->eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
     sensor->motion = 0U;
-    sensor->fault = true;
+    sensor->fault = true;  // Solange keine erste Messung: Fehlerstatus
 }
 
+// logf – Formatiertes Logging (nur bei aktiviertem Debug)
+//   Gibt formatierte Meldungen auf Serial aus mit Prefix [level].
 void logf(const char* level, const char* format, ...) {
     if (!DEBUG_LOKAL_AKTIV) return;
 
@@ -183,6 +270,7 @@ void logf(const char* level, const char* format, ...) {
     Serial.println(message);
 }
 
+// provisioningLog – Logging-Callback fuer das Provisioning-Framework
 void provisioningLog(const char* level, const char* message) {
     if (!DEBUG_LOKAL_AKTIV || level == nullptr || message == nullptr) return;
 
@@ -192,6 +280,9 @@ void provisioningLog(const char* level, const char* message) {
     Serial.println(message);
 }
 
+// initialisiereTaskWatchdog – Startet den Task-Watchdog (8s Timeout)
+//   Bei Haengern >8s wird das Geraet automatisch zurueckgesetzt.
+//   Muss periodisch via esp_task_wdt_reset() zurueckgesetzt werden.
 void initialisiereTaskWatchdog() {
     const esp_err_t initErr = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
     if (initErr != ESP_OK && initErr != ESP_ERR_INVALID_STATE) {
@@ -205,6 +296,7 @@ void initialisiereTaskWatchdog() {
     }
 }
 
+// copyText – Sicheres Kopieren eines null-terminierten Strings
 void copyText(char* target, size_t targetSize, const char* source) {
     if (!target || targetSize == 0U) return;
     if (!source) {
@@ -216,25 +308,32 @@ void copyText(char* target, size_t targetSize, const char* source) {
     target[targetSize - 1U] = '\0';
 }
 
+// istBroadcastMac – Prueft ob eine MAC die Broadcast-Adresse ist
 bool istBroadcastMac(const uint8_t* mac) {
     return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
 }
 
+// senderIstProvisionierterMaster – Prueft ob der Sender der provisionierte Master ist
 bool senderIstProvisionierterMaster(const uint8_t* senderMac) {
     return nodeStatus.master_mac_gueltig &&
            senderMac != nullptr &&
            memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) == 0;
 }
 
+// holeHelloZielMac – Ziel-MAC fuer HELLO (Master oder Broadcast)
 const uint8_t* holeHelloZielMac() {
     return nodeStatus.master_mac_gueltig ? nodeStatus.master_mac : BROADCAST_MAC;
 }
 
+// wendeReportIntervalAn – Setzt Report-Intervall und rechnet in ms um
 void wendeReportIntervalAn(uint32_t wertS) {
     nodeStatus.report_interval_s = wertS;
     nodeStatus.state_interval_ms = (unsigned long)nodeStatus.report_interval_s * 1000UL;
 }
 
+// =============================================================================
+// PROVISIONING-HANDLER – NetSenProvisioningHandler (keine zusaetzlichen Felder)
+// =============================================================================
 class NetSenProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
   public:
     const char* pageTitle() const override { return "NET-SEN Provisioning"; }
@@ -261,7 +360,9 @@ class NetSenProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
 SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
 NetSenProvisioningHandler netSenProvisioningHandler;
 
+// speichereReportIntervalMitRollback – Wendet neues Report-Intervall an (mit Rollback)
 bool speichereReportIntervalMitRollback(uint32_t valueS) {
+    // Prueft ob Intervall gueltig
     if (!nodeProvisioning.isSendIntervalValid(valueS)) return false;
 
     SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
@@ -274,11 +375,21 @@ bool speichereReportIntervalMitRollback(uint32_t valueS) {
         return true;
     }
 
+    // Rollback: alten Zustand wiederherstellen
     nodeProvisioning.restoreBasisSnapshot(basisSnapshot);
     wendeReportIntervalAn(nodeStatus.report_interval_s);
     return false;
 }
 
+// =============================================================================
+// SENSOR-MASKE – Dynamischer Maskenaufbau aus DEVICE_CAPS
+// =============================================================================
+
+// buildSensorMask – Baut eine 10-stellige Sensor-Maske aus den Faehigkeiten
+//   Setzt Buchstaben an Position 0-3 je nach gesetzten CAPS-Bits:
+//     T = Temperatur (SH_CAP_TEMP), H = Feuchte (SH_CAP_HUM),
+//     L = Lux (SH_CAP_LUX), M = Motion (SH_CAP_MOTION)
+//   Nicht vorhandene Sensoren: 'X'
 void buildSensorMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
     copyText(target, targetSize, "XXXXXXXXXX");
@@ -290,11 +401,17 @@ void buildSensorMask(char* target, size_t targetSize) {
     target[3] = (DEVICE_CAPS & SH_CAP_MOTION) ? 'M' : 'X';
 }
 
+// buildInputMask – Baut Eingangs-Maske (Sensor-Only, keine Taster)
 void buildInputMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
     copyText(target, targetSize, "XXXXX");
 }
 
+// =============================================================================
+// KOMMUNIKATION – ESP-NOW Senden: Peer, Paket, ACK
+// =============================================================================
+
+// stellePeerSicher – Registriert eine MAC als ESP-NOW-Peer
 bool stellePeerSicher(const uint8_t* mac) {
     if (!nodeStatus.funk_bereit || mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
@@ -314,6 +431,7 @@ bool stellePeerSicher(const uint8_t* mac) {
     return true;
 }
 
+// sendePaket – Zentrale ESP-NOW-Sendefunktion (baut Header+CRC, sendet)
 bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
     if (!nodeStatus.funk_bereit || zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
     if (!stellePeerSicher(zielMac)) return false;
@@ -339,6 +457,7 @@ bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, si
     return true;
 }
 
+// sendeAck – Sendet eine ACK-Bestaetigung
 bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
     SmartHome::AckPayload payload = {};
     payload.ack_seq = ackSeq;
@@ -347,6 +466,11 @@ bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_
     return sendePaket(zielMac, SH_MSG_ACK, &payload, sizeof(payload), "ACK");
 }
 
+// =============================================================================
+// PROTOKOLL-NACHRICHTEN – HELLO, HEARTBEAT, STATE, EVENT
+// =============================================================================
+
+// sendeHello – Sendet HELLO zur Master-Anmeldung mit Sensor/Input-Maske
 bool sendeHello() {
     SmartHome::HelloPayload payload = {};
     char sensorMask[SH_SENSOR_MASK_LEN] = {0};
@@ -374,6 +498,7 @@ bool sendeHello() {
     return sendePaket(holeHelloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
 }
 
+// sendeHeartbeat – Sendet HEARTBEAT an den Master
 bool sendeHeartbeat() {
     if (!nodeStatus.master_bekannt || !nodeStatus.master_mac_gueltig) return false;
 
@@ -389,10 +514,15 @@ bool sendeHeartbeat() {
     return true;
 }
 
+// sendeState – Sendet STATE (2 Formate je nach Caps: Standard oder Extended)
+//   Standard:    SensorConfigStateReportPayload (temp, hum, lux, motion, fault)
+//   Extended:    ExtendedSensorGasConfigStateReportPayload (+pressure, gas, aqi, tvoc, eco2)
+//   Auswahl:    automatisch via netSenVerwendetErweitertenState()
 bool sendeState() {
     if (!nodeStatus.master_bekannt || !nodeStatus.master_mac_gueltig) return false;
 
     const uint16_t reportIntervalS = (uint16_t)(nodeStatus.state_interval_ms / 1000UL);
+    // Prueft ob erweiterter State noetig ist (Druck- oder AQI-Sensor vorhanden)
     if (netSenVerwendetErweitertenState()) {
         SmartHome::ExtendedSensorGasConfigStateReportPayload payload = {};
         copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
@@ -431,6 +561,7 @@ bool sendeState() {
     return true;
 }
 
+// sendeDeviceEvent – Sendet ein Device-Event (z.B. Bewegung erkannt)
 bool sendeDeviceEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16_t param2) {
     if (!nodeStatus.master_bekannt || !nodeStatus.master_mac_gueltig) return false;
 
@@ -444,6 +575,7 @@ bool sendeDeviceEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16
     return sendePaket(nodeStatus.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
 }
 
+// sendeAusstehendesDeviceEvent – Ruft den Event-Hook auf und sendet bei Event
 void sendeAusstehendesDeviceEvent() {
     uint8_t eventType = 0U;
     uint8_t trigger = SH_TRIGGER_UNKNOWN;
@@ -455,17 +587,25 @@ void sendeAusstehendesDeviceEvent() {
     sendeDeviceEvent(eventType, trigger, param1, param2);
 }
 
+// =============================================================================
+// PROTOKOLL-VERARBEITUNG – HELLO_ACK, CMD, CFG
+// =============================================================================
+
+// verarbeiteHelloAck – Verarbeitet HELLO_ACK vom Master
 void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
+    // Prueft ob ACK-Status OK ist
     if (payload.ack_status != SH_ACK_OK) {
         logf("WARN", "HELLO_ACK abgelehnt");
         return;
     }
 
+    // Prueft ob Master-MAC provisioniert wurde
     if (!nodeStatus.master_mac_gueltig) {
         logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
         return;
     }
 
+    // Prueft ob Sender der provisionierte Master ist
     if (!senderIstProvisionierterMaster(senderMac)) {
         logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
         return;
@@ -478,18 +618,23 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     logf("INFO", "HELLO_ACK empfangen");
 }
 
+// verarbeiteCmd – Verarbeitet eingehende CMD (STATE_REQUEST)
 void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::CmdPayload& payload) {
+    // Prueft ob Sender der provisionierte Master ist
     if (!senderIstProvisionierterMaster(senderMac)) {
         logf("WARN", "CMD ignoriert: Sender ist nicht der provisionierte Master");
         return;
     }
 
+    // STATE_REQUEST: dirty-Flag setzen
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         nodeStatus.state_report_offen = true;
     }
 }
 
+// uebernehmeCfg – Wendet CFG-Wert an (nur report_interval unterstuetzt)
 bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
+    // Prueft ob es sich um das Report-Intervall handelt
     if (payload.param_id != SH_CFG_REPORT_INTERVAL_S) return false;
 
     const bool ok = speichereReportIntervalMitRollback(payload.value);
@@ -499,18 +644,26 @@ bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
     return ok;
 }
 
+// verarbeiteCfg – Verarbeitet CFG-Nachricht mit ACK-Unterstuetzung
 void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
+    // Prueft ob Sender der provisionierte Master ist
     if (!senderIstProvisionierterMaster(senderMac)) {
         logf("WARN", "CFG ignoriert: Sender ist nicht der provisionierte Master");
         return;
     }
 
     const bool ok = uebernehmeCfg(payload);
+    // Ggf. ACK senden wenn vom Master angefordert
     if (header.flags & SH_FLAG_ACK_REQUEST) {
         sendeAck(senderMac, header.seq, header.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
     }
 }
 
+// =============================================================================
+// ESP-NOW – Paketverarbeitung, Callbacks, Funk-Initialisierung
+// =============================================================================
+
+// verarbeiteEspNowPaket – CRC-Pruefung + Dispatch an Handler (switch/msg_type)
 void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int len) {
     if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
     if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) return;
@@ -542,6 +695,7 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
     }
 }
 
+// ESP-NOW Recv-Callback (Core v3 und v2)
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 void onEspNowReceive(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
     if (!info) return;
@@ -553,12 +707,14 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
 }
 #endif
 
+// ESP-NOW Send-Callback (Warnung bei Fehlschlag)
 void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
         logf("WARN", "ESP-NOW Versand fehlgeschlagen");
     }
 }
 
+// initialisiereFunk – ESP-NOW initialisieren (WLAN, Callbacks, Peers)
 void initialisiereFunk() {
     if (nodeStatus.funk_bereit || nodeStatus.setup_mode) return;
 
@@ -585,6 +741,11 @@ void initialisiereFunk() {
     }
 }
 
+// =============================================================================
+// SENSORIK – I2C-Init, Sensor-Polling
+// =============================================================================
+
+// initialisiereSensorik – Startet I2C (falls aktiviert) und ruft Sensor-Init-Hooks auf
 void initialisiereSensorik() {
     if (I2C_BASIS_AKTIV) {
         Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
@@ -595,6 +756,8 @@ void initialisiereSensorik() {
     netSenDeviceExtendedStateInit();
 }
 
+// pollSensorik – Ruft alle Sensor-Hooks auf und aktualisiert nodeStatus.sensor
+//   Setzt state_report_offen = true wenn sich Werte geaendert haben.
 void pollSensorik() {
     SensorState neuerState = nodeStatus.sensor;
     bool geaendert = netSenDeviceSensorPoll(
@@ -617,6 +780,11 @@ void pollSensorik() {
     }
 }
 
+// =============================================================================
+// ARDUINO – setup() und loop()
+// =============================================================================
+
+// setup – Arduino-Hauptinitialisierung (Serial, Watchdog, Provisioning, Sensorik, Funk)
 void setup() {
     if (DEBUG_LOKAL_AKTIV) {
         Serial.begin(115200);
@@ -625,6 +793,7 @@ void setup() {
 
     initialisiereTaskWatchdog();
 
+    // Status zuruecksetzen und Defaults laden
     nodeStatus = {};
     nodeStatus.report_interval_s = DEFAULT_REPORT_INTERVAL_S;
     nodeStatus.stored_sensor_send_interval_s = DEFAULT_SENSOR_SEND_INTERVAL_S;
@@ -632,11 +801,13 @@ void setup() {
     nodeStatus.state_report_offen = true;
     setzeSensorDefaults(&nodeStatus.sensor);
 
+    // Optionale Status-LED initialisieren
     if (PIN_STATUS_LED >= 0) {
         pinMode(PIN_STATUS_LED, OUTPUT);
         digitalWrite(PIN_STATUS_LED, LOW);
     }
 
+    // Provisioning konfigurieren und starten
     SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
         SmartHome::NetSenProvisioning::makeConfig(
             DEVICE_ID,
@@ -671,6 +842,7 @@ void setup() {
         return;
     }
 
+    // Intervalle aus persistierten Werten uebernehmen
     wendeReportIntervalAn(nodeProvisioning.sanitizeStatusSendInterval(nodeStatus.report_interval_s));
     nodeStatus.stored_sensor_send_interval_s =
         nodeProvisioning.sanitizeSensorSendInterval(nodeStatus.stored_sensor_send_interval_s);
@@ -681,6 +853,7 @@ void setup() {
          (unsigned long)nodeStatus.report_interval_s,
          (unsigned long)nodeStatus.stored_sensor_send_interval_s);
 
+    // Prueft ob Master-MAC bereits provisioniert ist
     if (!nodeProvisioning.hasStoredMasterMac()) {
         logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
         nodeProvisioning.enterSetupMode();
@@ -692,38 +865,47 @@ void setup() {
     sendeHello();
 }
 
+// loop – Hauptschleife: Watchdog-Reset, Provisioning, Sensor-Polling, Funk-Kommunikation
 void loop() {
     esp_task_wdt_reset();
     nodeProvisioning.update();
 
+    // Prueft ob Provisioning bereit und nicht im Setup-Modus
     if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode) {
         delay(LOOP_INTERVAL_MS);
         return;
     }
 
+    // Prueft ob Funk bereit ist (ggf. nachinitialisieren)
     if (!nodeStatus.funk_bereit) {
         initialisiereFunk();
     }
 
     const unsigned long jetzt = millis();
 
+    // Sensoren abfragen
     pollSensorik();
+
+    // Ausstehende Device-Events senden (wenn Master bekannt)
     if (nodeStatus.master_bekannt && nodeStatus.master_mac_gueltig) {
         sendeAusstehendesDeviceEvent();
     }
 
+    // HELLO senden wenn Master nicht bekannt und Retry-Intervall abgelaufen
     if (!nodeStatus.master_bekannt &&
         (nodeStatus.letztes_hello_ms == 0UL ||
          (jetzt - nodeStatus.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS)) {
         sendeHello();
     }
 
+    // HEARTBEAT senden wenn faellig
     if (nodeStatus.master_bekannt &&
         (nodeStatus.letzter_heartbeat_ms == 0UL ||
          (jetzt - nodeStatus.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS)) {
         sendeHeartbeat();
     }
 
+    // STATE-Sendung wenn dirty-Flag gesetzt oder Intervall abgelaufen
     const bool stateFaellig =
         nodeStatus.master_bekannt &&
         nodeStatus.master_mac_gueltig &&
@@ -738,4 +920,3 @@ void loop() {
 
     delay(LOOP_INTERVAL_MS);
 }
-
