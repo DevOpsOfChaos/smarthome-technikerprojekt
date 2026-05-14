@@ -1,3 +1,41 @@
+# =============================================================================
+# bat_sen_rain_example.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       esphome/devices/bat_sen_rain_example.yaml
+#
+# Datei-Funktion:
+#   Beispiel: Batteriebetriebener Regensensor (ESP32-C3).
+#   Nutzt periodischen Wake (alle 900s = 15 Minuten) und ADC-Messung zur
+#   Nass/Trocken-Erkennung mit Hysterese. Publiziert Status via MQTT
+#   und geht zurueck in den Tiefschlaf.
+#
+# MQTT-Topics:
+#   smarthome/device/{device_id}/meta         – Geraete-Metadaten
+#   smarthome/device/{device_id}/availability – Online/Offline
+#   smarthome/device/{device_id}/state        – Regen-Status (rain_detected, fault)
+#
+# Autor:           DevOpsOfChaos
+# Erstelldatum:    2026-05-14
+# Letzte Änderung: 2026-05-14
+#
+# Aenderungshistorie:
+#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#
+# Abhaengigkeiten:
+#   Importiert: smarthome_contract_base.yaml
+#   Wird importiert von: (keine – Device-Datei)
+# =============================================================================
+
+# =============================================================================
+# SUBSTITUTIONS – Geraetespezifische Konfiguration
+# =============================================================================
+# caps="768" → Bit 8 (Regen erkannt) + Bit 9 (Regen Rohwert)
+# reporting_mode="sleep_event" – Batteriegeraet: nur bei Wake publishen
+# sensor_mask="RXXXXXXXXX" → R=Regen (Position 1)
+# Schwellwerte mit Hysterese (2050-2200) verhindern Flattern bei Nässe-Grenze
 substitutions:
   device_id: bat_sen_rain_01
   device_name: BAT-SEN Rain
@@ -11,19 +49,25 @@ substitutions:
   reporting_mode: sleep_event
   sensor_mask: RXXXXXXXXX
   input_mask: XXXXX
-  rain_pin: GPIO4
-  rain_wet_threshold_raw: "2200"
-  rain_clear_threshold_raw: "2050"
-  wake_interval_s: "900"
-  rx_window_ms: "5000"
+  rain_pin: GPIO4                     # GPIO-Pin für den ADC-Regensensor
+  rain_wet_threshold_raw: "2200"      # ADC-Rohwert, ab dem "nass" erkannt wird (von 4095)
+  rain_clear_threshold_raw: "2050"    # ADC-Rohwert, unter dem "trocken" erkannt wird (von 4095)
+  wake_interval_s: "900"              # Periodischer Wake-Intervall in Sekunden (15 Minuten)
+  rx_window_ms: "5000"                # Zeitfenster nach Wake für MQTT-Kommunikation (ms)
 
+# =============================================================================
+# PACKAGES – Eingebundene Contract-Bausteine
+# =============================================================================
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
 
+# =============================================================================
+# ESPHOME – Basis-Konfiguration und Boot-Verhalten
+# =============================================================================
 esphome:
   name: ${device_id}
   friendly_name: ${device_name}
-  comment: Batterie-Regensensor, MQTT-only, periodischer Wake, nicht hardwarevalidiert.
+  comment: Batterie-Regensensor, MQTT-only, periodischer Wake
   on_boot:
     priority: -10
     then:
@@ -38,15 +82,24 @@ esp32:
   framework:
     type: arduino
 
+# =============================================================================
+# LOGGER – Nur WARN-Level (Energie sparen)
+# =============================================================================
 logger:
   level: WARN
 
+# =============================================================================
+# WIFI – fast_connect + LIGHT power_save (Batterie-Optimierung)
+# =============================================================================
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   fast_connect: true
   power_save_mode: LIGHT
 
+# =============================================================================
+# MQTT – Birth/Will ohne on_connect/on_disconnect (Batterie: kein Dauerbetrieb)
+# =============================================================================
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
@@ -61,22 +114,37 @@ mqtt:
     retain: true
     payload: '{"device_id":"${device_id}","availability":"offline","online":false,"power_type":"${power_type}"}'
 
+# =============================================================================
+# DEEP SLEEP – Batteriesparmodus mit periodischem Wake
+# =============================================================================
+# run_duration:  ${rx_window_ms}ms (5s) – Zeitfenster für WLAN/MQTT nach Wake
+# sleep_duration: ${wake_interval_s}s (900s = 15 Minuten) – Schlaf zwischen Aufwachphasen
+# Kein wakeup_pin → nur Timer-Wake (kein GPIO-Interrupt)
 deep_sleep:
   id: deep_sleep_1
   run_duration: ${rx_window_ms}ms
   sleep_duration: ${wake_interval_s}s
 
+# =============================================================================
+# GLOBALE VARIABLEN – Regen-Status
+# =============================================================================
 globals:
-  - id: rain_detected
+  - id: rain_detected               # true = Regen/Nässe erkannt, false = trocken
     type: bool
     restore_value: no
     initial_value: "false"
-  - id: rain_raw
+  - id: rain_raw                     # Letzter ADC-Rohwert (0-4095, 12-Bit)
     type: int
     restore_value: no
     initial_value: "0"
 
+# =============================================================================
+# SKRIPTE – Status publishen
+# =============================================================================
 script:
+  # publish_bat_sen_contract_state – Veroeffentlicht rain_detected + fault auf .../state (retain)
+  #   Topic: smarthome/device/{device_id}/state
+  #   Parameter: keine  |  Rückgabe: keine
   - id: publish_bat_sen_contract_state
     then:
       - mqtt.publish_json:
@@ -87,6 +155,16 @@ script:
             root["rain_detected"] = id(rain_detected);
             root["fault"] = id(contract_fault);
 
+# =============================================================================
+# SENSOR – ADC-Messung zur Regen/Nässe-Erkennung
+# =============================================================================
+# pin: GPIO4, attenuation: 12db (Eingangsbereich 0-2,6V → ADC-Wert 0-4095)
+# update_interval: 1s – schnelle Messung innerhalb des run_duration-Fensters (5s)
+# on_value:
+#   rain_raw = adc_voltage * 4095 (Skalierung der Float-Spannung auf 12-Bit-ADC-Wert)
+#   Wenn rain_raw > wet_threshold (2200)  → rain_detected = true  (nass)
+#   Wenn rain_raw < clear_threshold (2050) → rain_detected = false (trocken)
+#   Hysterese (2050-2200) verhindert staendiges Umschalten bei Grenzwert-Schwankungen
 sensor:
   - platform: adc
     id: rain_adc

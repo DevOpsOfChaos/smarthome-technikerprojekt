@@ -1,3 +1,40 @@
+# =============================================================================
+# bat_sen_window_contact_example.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       esphome/devices/bat_sen_window_contact_example.yaml
+#
+# Datei-Funktion:
+#   Beispiel: Batteriebetriebener Fensterkontakt (ESP32-C3).
+#   Nutzt GPIO-Wake (Pegelaenderung am Kontakt-Pin) und Deep-Sleep.
+#   Wacht auf bei Kontakt-Oeffnung/-Schliessung, publiziert Status
+#   ueber MQTT und geht sofort zurueck in den Tiefschlaf.
+#
+# MQTT-Topics:
+#   smarthome/device/{device_id}/meta         – Geraete-Metadaten
+#   smarthome/device/{device_id}/availability – Online/Offline
+#   smarthome/device/{device_id}/state        – Kontakt-Status (contact_open, fault)
+#
+# Autor:           DevOpsOfChaos
+# Erstelldatum:    2026-05-14
+# Letzte Änderung: 2026-05-14
+#
+# Aenderungshistorie:
+#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#
+# Abhaengigkeiten:
+#   Importiert: smarthome_contract_base.yaml
+#   Wird importiert von: (keine – Device-Datei)
+# =============================================================================
+
+# =============================================================================
+# SUBSTITUTIONS – Geraetespezifische Konfiguration
+# =============================================================================
+# caps="640" → Bit 7 (Fensterkontakt)
+# reporting_mode="sleep_event" – Batteriegeraet: nur bei Ereignis aufwachen
+# sensor_mask="WXXXXXXXXX" → W=Window (Fensterkontakt, Position 1)
 substitutions:
   device_id: bat_sen_window_contact_01
   device_name: BAT-SEN Window Contact
@@ -11,16 +48,22 @@ substitutions:
   reporting_mode: sleep_event
   sensor_mask: WXXXXXXXXX
   input_mask: XXXXX
-  contact_pin: GPIO4
-  rx_window_ms: "5000"
+  contact_pin: GPIO4                  # GPIO-Pin für den Fensterkontakt (Reed-Schalter)
+  rx_window_ms: "5000"                # Zeitfenster nach Wake für MQTT-Kommunikation (ms)
 
+# =============================================================================
+# PACKAGES – Eingebundene Contract-Bausteine
+# =============================================================================
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
 
+# =============================================================================
+# ESPHOME – Basis-Konfiguration und Boot-Verhalten
+# =============================================================================
 esphome:
   name: ${device_id}
   friendly_name: ${device_name}
-  comment: Batterie-Fensterkontakt, MQTT-only, GPIO-Wake bei Kontaktwechsel, nicht hardwarevalidiert.
+  comment: Batterie-Fensterkontakt, MQTT-only, GPIO-Wake bei Kontaktwechsel
   on_boot:
     priority: -10
     then:
@@ -35,15 +78,26 @@ esp32:
   framework:
     type: arduino
 
+# =============================================================================
+# LOGGER – Nur WARN-Level (Energie sparen, keine DEBUG-Ausgaben im Batteriebetrieb)
+# =============================================================================
 logger:
   level: WARN
 
+# =============================================================================
+# WIFI – fast_connect + LIGHT power_save (Batterie-Optimierung)
+# =============================================================================
+# fast_connect: Ueberspringt Scan nach bekannten Netzwerken (spart Zeit/Strom)
+# power_save_mode: LIGHT – reduziert Sendeleistung wo moeglich
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   fast_connect: true
   power_save_mode: LIGHT
 
+# =============================================================================
+# MQTT – Birth/Will ohne on_connect/on_disconnect (Batterie: kein Dauerbetrieb)
+# =============================================================================
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
@@ -58,6 +112,14 @@ mqtt:
     retain: true
     payload: '{"device_id":"${device_id}","availability":"offline","online":false,"power_type":"${power_type}"}'
 
+# =============================================================================
+# DEEP SLEEP – Batteriesparmodus
+# =============================================================================
+# run_duration:  ${rx_window_ms}ms (5s) – Zeitfenster nach Wake für WLAN/MQTT
+# sleep_duration: 0s – Kein periodischer Wake, nur GPIO-Wake
+# wakeup_pin:    GPIO4 mit INVERT_WAKEUP
+#   INVERT_WAKEUP: Der Pin wacht bei fallender Flanke auf (invertiert zu normal HIGH-Wake)
+#   Dies ist noetig, wenn der Kontakt im Ruhezustand HIGH und bei Ausloesung LOW ist
 deep_sleep:
   id: deep_sleep_1
   run_duration: ${rx_window_ms}ms
@@ -66,13 +128,22 @@ deep_sleep:
     number: ${contact_pin}
     mode: INVERT_WAKEUP
 
+# =============================================================================
+# GLOBALE VARIABLEN – Kontakt-Status
+# =============================================================================
 globals:
-  - id: contact_open
+  - id: contact_open                # true = Fenster geoeffnet, false = Fenster geschlossen
     type: bool
     restore_value: no
     initial_value: "false"
 
+# =============================================================================
+# SKRIPTE – Status publishen
+# =============================================================================
 script:
+  # publish_bat_sen_contract_state – Veroeffentlicht contact_open + fault auf .../state (retain)
+  #   Topic: smarthome/device/{device_id}/state
+  #   Parameter: keine  |  Rückgabe: keine
   - id: publish_bat_sen_contract_state
     then:
       - mqtt.publish_json:
@@ -83,6 +154,13 @@ script:
             root["contact_open"] = id(contact_open);
             root["fault"] = id(contract_fault);
 
+# =============================================================================
+# BINARY SENSOR – GPIO-Eingang mit Entprellung
+# =============================================================================
+# pin: GPIO4 mit Pullup (Pullup=true, Pulldown=false)
+# filters: delayed_on 35ms + delayed_off 35ms (Entprellung gegen Prellen des Reed-Kontakts)
+# on_state: Aktualisiert contact_open und publiziert Status
+#   Nach publish geht das Geraet automatisch in Deep-Sleep (run_duration abgelaufen)
 binary_sensor:
   - platform: gpio
     id: contact_sensor

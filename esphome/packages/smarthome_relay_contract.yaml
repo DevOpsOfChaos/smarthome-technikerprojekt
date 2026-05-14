@@ -1,10 +1,50 @@
+# =============================================================================
+# smarthome_relay_contract.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       esphome/packages/smarthome_relay_contract.yaml
+#
+# Datei-Funktion:
+#   Relais-Contract zum Schalten eines einzelnen Relais (ein/aus).
+#   Stellt das MQTT-Topic .../state für den aktuellen Relais-Status
+#   und .../command für die Kommandos "get_state" und "set_relay" bereit.
+#   set_relay akzeptiert bool, int und String-Werte (type coercion).
+#
+# MQTT-Topics dieses Contracts:
+#   smarthome/device/{device_id}/state    – Relais-Status (relay_1) + Fehler (retain)
+#   smarthome/device/{device_id}/command  – Eingehende Kommandos (set_relay, get_state)
+#
+# Autor:           DevOpsOfChaos
+# Erstelldatum:    2026-05-14
+# Letzte Änderung: 2026-05-14
+#
+# Aenderungshistorie:
+#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#
+# Abhaengigkeiten:
+#   Importiert:    smarthome_contract_base.yaml, smarthome_command_ack.yaml
+#   Wird importiert von: esp_net_erl_light_example.yaml
+# =============================================================================
+
+# =============================================================================
+# GLOBAL – Relais-Zustand
+# =============================================================================
 globals:
-  - id: relay_1_state
+  - id: relay_1_state                # true = Relais EIN, false = Relais AUS
     type: bool
     restore_value: no
     initial_value: "false"
 
+# =============================================================================
+# SKRIPTE – Relais-Status publishen
+# =============================================================================
 script:
+  # publish_relay_contract_state – Veroeffentlicht relay_1 + fault auf .../state (retain)
+  #   Topic: smarthome/device/{device_id}/state
+  #   Payload: {device_id, relay_1(bool), fault(bool)}
+  #   Parameter: keine  |  Rückgabe: keine
   - id: publish_relay_contract_state
     then:
       - mqtt.publish_json:
@@ -15,11 +55,16 @@ script:
             root["relay_1"] = id(relay_1_state);
             root["fault"] = id(contract_fault);
 
+# =============================================================================
+# MQTT – Kommando-Handler für Relais
+# =============================================================================
 mqtt:
   on_json_message:
     - topic: smarthome/device/${device_id}/command
       then:
         - lambda: |-
+            // request_id aus JSON extrahieren
+            // Prueft ob "request_id" vorhanden, sonst Fehler -20 "missing_request_id"
             std::string request_id = "";
             if (x.containsKey("request_id") && !x["request_id"].isNull()) {
               request_id = x["request_id"].as<std::string>();
@@ -33,11 +78,14 @@ mqtt:
               return;
             }
 
+            // command aus JSON extrahieren
             std::string command = "";
             if (x.containsKey("command") && !x["command"].isNull()) {
               command = x["command"].as<std::string>();
             }
 
+            // queue_ack – Hilfsfunktion zum Senden einer ACK-Antwort
+            // Parameter: status(const char*), status_code(int), source(const char*)
             auto queue_ack = [&](const char *status, int status_code, const char *source) {
               id(ack_request_id) = request_id;
               id(ack_status) = status;
@@ -46,6 +94,8 @@ mqtt:
               id(flush_command_ack).execute();
             };
 
+            // Befehl: "get_state" – Fehler loeschen, Status publishen, ACK=ok
+            // Quelle=esphome_state (kein Kommando, sondern Zustandsabfrage)
             if (command == "get_state") {
               id(clear_contract_fault).execute();
               id(publish_relay_contract_state).execute();
@@ -53,6 +103,9 @@ mqtt:
               return;
             }
 
+            // Befehl: "set_relay" – Relais schalten (mit Typ-Konvertierung)
+            // Akzeptiert: bool (true/false), int (1/0), string ("true"/"1"/"on" oder "false"/"0"/"off")
+            // Bei ungueltigem Payload: Fehler -21 "invalid_payload"
             if (command == "set_relay") {
               bool relay_value = false;
               bool relay_value_ok = false;
@@ -84,12 +137,14 @@ mqtt:
                 return;
               }
 
+              // Relais physisch schalten via ESPHome-Switch-API
               if (relay_value) {
                 id(relay_1_output).turn_on();
               } else {
                 id(relay_1_output).turn_off();
               }
 
+              // Neuen Zustand speichern und via MQTT publishen
               id(relay_1_state) = relay_value;
               id(clear_contract_fault).execute();
               id(publish_relay_contract_state).execute();
@@ -97,6 +152,7 @@ mqtt:
               return;
             }
 
+            // Fallback: unbekanntes Kommando → Fehler -2 "unsupported"
             id(contract_fault) = true;
             id(contract_last_status_code) = -2;
             id(contract_last_status_text) = "unsupported";

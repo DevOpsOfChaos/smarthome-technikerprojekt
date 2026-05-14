@@ -1,26 +1,74 @@
+# =============================================================================
+# smarthome_command_ack.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       esphome/packages/smarthome_command_ack.yaml
+#
+# Datei-Funktion:
+#   ACK-Bestaetigungs-Mechanismus für alle eingehenden Kommandos.
+#   Stellt eine standardisierte Quittierung (Bestaetigung/Fehler) auf
+#   dem MQTT-Topic .../ack bereit. Wird von allen aktiven Contracts
+#   (relay_contract, cover_contract) und Device-Codes genutzt.
+#
+# MQTT-Topic dieses Contracts:
+#   smarthome/device/{device_id}/ack – Kommando-Bestaetigung (nicht retain)
+#
+# Autor:           DevOpsOfChaos
+# Erstelldatum:    2026-05-14
+# Letzte Änderung: 2026-05-14
+#
+# Aenderungshistorie:
+#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#
+# Abhaengigkeiten:
+#   Wird importiert von: smarthome_relay_contract.yaml
+#                       smarthome_cover_contract.yaml
+#                       esp_net_erl_light_example.yaml
+#                       esp_net_sen_env_example.yaml
+#                       esp_net_sen_env_bme280.yaml
+#                       esp_net_sen_env_bme680.yaml
+#                       esp_net_sen_env_bme280_veml.yaml
+#                       esp_net_zrl_cover_example.yaml
+#   Importiert selbst:   (keine)
+# =============================================================================
+
+# =============================================================================
+# GLOBALE VARIABLEN – ACK-Zwischenspeicher
+# =============================================================================
 globals:
-  - id: ack_request_id
+  - id: ack_request_id             # request_id des zu bestaetigenden Kommandos
     type: std::string
     restore_value: no
     initial_value: '""'
-  - id: ack_status
+  - id: ack_status                 # Status-Text: "ok", "unsupported", "invalid_payload", …
     type: std::string
     restore_value: no
     initial_value: '"ok"'
-  - id: ack_source
+  - id: ack_source                 # Quell-Contract: "esphome_command", "esphome_state", "esphome_validation"
     type: std::string
     restore_value: no
     initial_value: '"esphome_command"'
-  - id: ack_status_code
+  - id: ack_status_code            # Status-Code: 0=ok, negative=Fehler
     type: int
     restore_value: no
     initial_value: "0"
-  - id: command_ack_seq
+  - id: command_ack_seq            # Hochzaehlende Sequenznummer (0-255, ueberlaeuft)
     type: int
     restore_value: no
     initial_value: "0"
 
+# =============================================================================
+# SKRIPTE – ACK senden
+# =============================================================================
 script:
+  # flush_command_ack – Baut ACK-JSON und sendet es auf .../ack (nicht retain)
+  #   Inkrementiert ack_seq (0-255), kopiert ack-Daten in contract_last_*
+  #   Topic:   smarthome/device/{device_id}/ack
+  #   Payload: JSON mit device_id, request_id, channel="command",
+  #            status, status_code, ack_msg_type=5, ack_seq, source
+  #   Parameter: keine  |  Rückgabe: keine
   - id: flush_command_ack
     then:
       - lambda: |-

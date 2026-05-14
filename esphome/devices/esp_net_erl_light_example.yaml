@@ -1,23 +1,68 @@
-substitutions:
-  device_id: esp_net_erl_light_01
-  device_name: ESP NET ERL Light Example
-  device_class: net_erl
-  power_type: mains
-  fw_version: esphome-example
-  caps: "1"
-  meta_schema_version: "1"
-  control_mode: relay_light
-  config_profile: none
-  reporting_mode: hybrid
-  sensor_mask: XXXXXXXXXX
-  input_mask: XXXXX
-  relay_pin: GPIO4
+# =============================================================================
+# esp_net_erl_light_example.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       esphome/devices/esp_net_erl_light_example.yaml
+#
+# Datei-Funktion:
+#   Beispiel: Netzbetriebenes Relais-Licht (ESP32-C3).
+#   Schaltet ein Relais an GPIO4, publiziert Status via MQTT.
+#   Einfachstes aktives Device – dient als Referenz für neue Relay-Devices.
+#
+# MQTT-Topics:
+#   smarthome/device/{device_id}/meta         – Geraete-Metadaten (Package: contract_base)
+#   smarthome/device/{device_id}/availability – Online/Offline (Package: contract_base)
+#   smarthome/device/{device_id}/state        – Relais-Status (Package: relay_contract)
+#   smarthome/device/{device_id}/ack          – Kommando-Bestaetigung (Package: command_ack)
+#   smarthome/device/{device_id}/command      – Eingehende Kommandos (Package: relay_contract)
+#
+# Autor:           DevOpsOfChaos
+# Erstelldatum:    2026-05-14
+# Letzte Änderung: 2026-05-14
+#
+# Aenderungshistorie:
+#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#
+# Abhaengigkeiten:
+#   Importiert: smarthome_contract_base.yaml
+#              smarthome_command_ack.yaml
+#              smarthome_relay_contract.yaml
+#   Wird importiert von: (keine – Device-Datei)
+# =============================================================================
 
+# =============================================================================
+# SUBSTITUTIONS – Geraetespezifische Konfiguration
+# =============================================================================
+substitutions:
+  device_id: esp_net_erl_light_01       # Eindeutige Geraete-ID – wird als MQTT-Topic-Teil verwendet
+  device_name: ESP NET ERL Light Example # Anzeigename in Home Assistant
+  device_class: net_erl                 # Geraeteklasse: net_erl = Netz-Relais
+  power_type: mains                     # Stromversorgung: Netz (kein Batteriesparmodus)
+  fw_version: esphome-example           # Firmware-Version für Meta-Report
+  caps: "1"                             # Faehigkeiten: Bit 0 (Relais)
+  meta_schema_version: "1"              # Meta-Daten-Schema-Version
+  control_mode: relay_light             # Steuerungsmodus: als Licht (ein/aus)
+  config_profile: none                  # Kein spezielles Konfigurationsprofil
+  reporting_mode: hybrid                # Hybrid-Modus: regelmaessiger Refresh + Event-basiert
+  sensor_mask: XXXXXXXXXX               # Keine Sensoren vorhanden (nur Relais)
+  input_mask: XXXXX                     # Keine Eingaenge vorhanden
+  relay_pin: GPIO4                      # GPIO-Pin für das Relais
+
+# =============================================================================
+# PACKAGES – Eingebundene Contract-Bausteine
+# =============================================================================
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
   command_ack: !include ../packages/smarthome_command_ack.yaml
   relay_contract: !include ../packages/smarthome_relay_contract.yaml
 
+# =============================================================================
+# ESPHOME – Basis-Konfiguration und Boot-Verhalten
+# =============================================================================
+# on_boot: Wird nach erfolgreichem WiFi/MQTT-Verbindungsaufbau ausgeführt
+#   priority=-10: Spaet im Boot-Vorgang (nach WiFi/MQTT-Initialisierung)
 esphome:
   name: ${device_id}
   friendly_name: ${device_name}
@@ -25,6 +70,7 @@ esphome:
     priority: -10
     then:
       - lambda: |-
+          // Geraet als online markieren und Relais-Status initialisieren
           id(contract_online) = true;
           id(relay_1_state) = false;
       - script.execute: publish_contract_meta
@@ -38,10 +84,20 @@ esp32:
 
 logger:
 
+# =============================================================================
+# WIFI – Netzwerkverbindung
+# =============================================================================
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
+# =============================================================================
+# MQTT – Verbindungsaufbau, Birth/Will, Connect/Disconnect
+# =============================================================================
+# birth_message: Wird bei erfolgreichem Verbindungsaufbau gesendet (retain → "online")
+# will_message:  Wird bei unerwartetem Verbindungsabbruch gesendet (retain → "offline")
+# on_connect:    Setzt online=true, republisht alle Status-Topics
+# on_disconnect: Setzt online=false, publisht availability als "offline"
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
@@ -68,6 +124,13 @@ mqtt:
           id(contract_online) = false;
       - script.execute: publish_contract_availability
 
+# =============================================================================
+# SWITCH – GPIO-Relais-Ausgang
+# =============================================================================
+# restore_mode: RESTORE_DEFAULT_OFF – Letzten Zustand im RTC-Speicher merken,
+#                falls keiner gespeichert ist, startet das Relais ausgeschaltet.
+# on_turn_on:  relay_1_state=true, Status publishen
+# on_turn_off: relay_1_state=false, Status publishen
 switch:
   - platform: gpio
     id: relay_1_output
@@ -85,6 +148,9 @@ switch:
             id(relay_1_state) = false;
         - script.execute: publish_relay_contract_state
 
+# =============================================================================
+# INTERVAL – Regelmaessiger Refresh aller Status-Topics (alle 5 Minuten)
+# =============================================================================
 interval:
   - interval: 5min
     then:

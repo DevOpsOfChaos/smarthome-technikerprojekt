@@ -1,40 +1,90 @@
-substitutions:
-  device_id: esp_device_example
-  device_name: ESPHome Example Device
-  device_class: net_erl
-  power_type: mains
-  fw_version: esphome-example
-  caps: "0"
-  meta_schema_version: "1"
-  control_mode: none
-  config_profile: none
-  reporting_mode: hybrid
-  sensor_mask: XXXXXXXXXX
-  input_mask: XXXXX
+# =============================================================================
+# smarthome_contract_base.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Zweck:      MQTT-basierte Alternativ-Firmware fuer Smarthome-Geraete
+#             (zusätzlich zur bestehenden C++/ESP-NOW-Firmware)
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       esphome/packages/smarthome_contract_base.yaml
+#
+# Datei-Funktion:
+#   Basis-Contract für alle ESPHome-Geraete. Stellt Meta-Daten,
+#   Verfuegbarkeits-Status und Fehlerbehandlung bereit.
+#   Wird von jedem Device-Code über !include eingebunden.
+#   Enthaelt keine geraetespezifische Logik.
+#
+# MQTT-Topics dieses Contracts:
+#   smarthome/device/{device_id}/meta         – Geraete-Metadaten (retain)
+#   smarthome/device/{device_id}/availability – Online/Offline-Status (retain)
+#
+# Autor:           DevOpsOfChaos
+# Erstelldatum:    2026-05-14
+# Letzte Änderung: 2026-05-14
+#
+# Aenderungshistorie:
+#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#
+# Abhaengigkeiten:
+#   Wird importiert von: esp_net_erl_light_example.yaml
+#                       esp_net_sen_env_example.yaml
+#                       esp_net_sen_env_bme280.yaml
+#                       esp_net_sen_env_bme680.yaml
+#                       esp_net_sen_env_bme280_veml.yaml
+#                       esp_net_zrl_cover_example.yaml
+#                       bat_sen_window_contact_example.yaml
+#                       bat_sen_rain_example.yaml
+#   Importiert selbst:   (keine – reines Basis-Package)
+# =============================================================================
 
+# =============================================================================
+# SUBSTITUTIONS – Geraetekonfiguration (wird pro Device ueberschrieben)
+# =============================================================================
+substitutions:
+  device_id: esp_device_example            # Eindeutige Geraete-ID (z.B. esp_net_erl_light_01)
+  device_name: ESPHome Example Device      # Anzeigename für Home Assistant / MQTT
+  device_class: net_erl                    # Geraeteklasse: net_erl=Relais, net_sen=Sensor, net_zrl=Cover, bat_sen=Batterie
+  power_type: mains                        # Stromversorgung: mains (Netz) oder battery (Batterie)
+  fw_version: esphome-example             # Firmware-Version für Meta-Report
+  caps: "0"                               # Faehigkeiten als Bitmaske (Bit 0=Relais, 1=Temp, 2=Feuchte, 3=Druck, 4=Gas, 6=Lux, 7=Fensterkontakt, 8-9=Regen)
+  meta_schema_version: "1"                # Version des Meta-Daten-Schemas
+  control_mode: none                      # Steuerungsmodus: none, relay_light, cover, …
+  config_profile: none                    # Konfigurationsprofil
+  reporting_mode: hybrid                  # Report-Modus: hybrid (Netzgeraete), sleep_event (Batterie)
+  sensor_mask: XXXXXXXXXX                 # 10-stellige Sensormaske: T(emp)peratur, H(um)Feuchte, P(ressure)Druck, G(as), L(ux)Licht, W(indow)Fensterkontakt, R(ain)Regen
+  input_mask: XXXXX                       # 5-stellige Eingangsmaske (Reserve)
+
+# =============================================================================
+# GLOBALE VARIABLEN – Contract-uebergreifende Zustaende
+# =============================================================================
 globals:
-  - id: contract_online
+  - id: contract_online                   # true = Geraet ist mit MQTT-Broker verbunden
     type: bool
     restore_value: no
     initial_value: "false"
-  - id: contract_fault
+  - id: contract_fault                    # true = es liegt ein Fehler vor (z.B. unbekannter Befehl, fehlende request_id)
     type: bool
     restore_value: no
     initial_value: "false"
-  - id: contract_last_status_code
+  - id: contract_last_status_code         # Letzter Statuscode (0=ok, negative Werte=Fehler)
     type: int
     restore_value: no
     initial_value: "0"
-  - id: contract_last_status_text
+  - id: contract_last_status_text         # Letzter Statustext (z.B. "ok", "unsupported", "missing_request_id")
     type: std::string
     restore_value: no
     initial_value: '"ok"'
-  - id: contract_last_request_id
+  - id: contract_last_request_id          # request_id des zuletzt verarbeiteten Kommandos
     type: std::string
     restore_value: no
     initial_value: '""'
 
+# =============================================================================
+# SKRIPTE – Hilfsfunktionen für diesen Contract
+# =============================================================================
 script:
+  # clear_contract_fault – Setzt den Fehlerstatus zurueck
+  #   Setzt contract_fault=false, status_code=0, status_text="ok"
+  #   Parameter: keine  |  Rückgabe: keine
   - id: clear_contract_fault
     then:
       - lambda: |-
@@ -42,6 +92,12 @@ script:
           id(contract_last_status_code) = 0;
           id(contract_last_status_text) = "ok";
 
+  # publish_contract_meta – Veroeffentlicht Geraete-Metadaten via MQTT (retain)
+  #   Topic:   smarthome/device/{device_id}/meta
+  #   Payload: JSON mit device_id, device_name, device_class, power_type,
+  #            fw_version, caps, meta_schema_version, control_mode,
+  #            config_profile, reporting_mode, sensor_mask, input_mask
+  #   Parameter: keine  |  Rückgabe: keine
   - id: publish_contract_meta
     then:
       - mqtt.publish_json:
@@ -61,6 +117,10 @@ script:
             root["sensor_mask"] = "${sensor_mask}";
             root["input_mask"] = "${input_mask}";
 
+  # publish_contract_availability – Veroeffentlicht Online/Offline-Status via MQTT (retain)
+  #   Topic:   smarthome/device/{device_id}/availability
+  #   Payload: JSON mit device_id, availability("online"/"offline"), online(bool), power_type
+  #   Parameter: keine  |  Rückgabe: keine
   - id: publish_contract_availability
     then:
       - mqtt.publish_json:

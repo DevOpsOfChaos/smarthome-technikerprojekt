@@ -1,50 +1,99 @@
+# =============================================================================
+# smarthome_cover_contract.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       esphome/packages/smarthome_cover_contract.yaml
+#
+# Datei-Funktion:
+#   Rollladen/Jalousie-Contract mit zeitbasierter Positionssteuerung
+#   und 5-Phasen-Kalibrierung. Unterstuetzt open/close/stop/set_position/
+#   calibrate/clear_calibration. Arbeitet mit kalibrierten Fahrzeiten
+#   und kann Teil-Positionen über prozentuale Zeitberechnung anfahren.
+#
+# MQTT-Topics dieses Contracts:
+#   smarthome/device/{device_id}/state    – Cover-Status (cover_state, cover_position,
+#                                            cover_calibrated, fault) (retain)
+#   smarthome/device/{device_id}/command  – Eingehende Kommandos:
+#     get_state, calibrate, clear_calibration, open, close, stop, set_position
+#
+# Autor:           DevOpsOfChaos
+# Erstelldatum:    2026-05-14
+# Letzte Änderung: 2026-05-14
+#
+# Aenderungshistorie:
+#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#
+# Abhaengigkeiten:
+#   Importiert:    smarthome_contract_base.yaml, smarthome_command_ack.yaml
+#   Wird importiert von: esp_net_zrl_cover_example.yaml
+# =============================================================================
+
+# =============================================================================
+# GLOBALE VARIABLEN – Cover-Zustand, Kalibrierung, Fahrzeiten
+# =============================================================================
+# Kalibrierungs-State-Machine (cover_calib_phase):
+#   0 = Idle – nicht in Kalibrierung
+#   1 = Faehrt hoch (misst Zeit bis STOP-Kommando)
+#   2 = Oben angekommen – wartet auf erneutes calibrate-Kommando
+#   3 = Faehrt runter (misst Zeit bis STOP-Kommando)
+#   4 = Unten angekommen – wartet auf erneutes calibrate-Kommando zum Speichern
+#   5 = Kalibrierung abgeschlossen und gespeichert
+# =============================================================================
 globals:
-  - id: cover_contract_state
+  - id: cover_contract_state           # Aktueller Cover-Status: "opening", "closing", "stopped"
     type: std::string
     restore_value: no
     initial_value: '"stopped"'
-  - id: cover_contract_position
+  - id: cover_contract_position        # Aktuelle Position in Prozent (0=geschlossen, 100=offen)
+    type: int                          # Wird nur bei cover_contract_calibrated=true aktualisiert
+    restore_value: no
+    initial_value: "0"
+  - id: cover_contract_target_position # Zielposition bei Teil-Ansteuerung (set_position)
     type: int
     restore_value: no
     initial_value: "0"
-  - id: cover_contract_target_position
-    type: int
-    restore_value: no
-    initial_value: "0"
-  - id: cover_contract_calibrated
+  - id: cover_contract_calibrated      # true = Kalibrierung abgeschlossen (wird im RTC-Speicher gehalten)
     type: bool
     restore_value: yes
     initial_value: "false"
-  - id: cover_contract_travel_up_ms
-    type: int
+  - id: cover_contract_travel_up_ms    # Gemessene Fahrzeit hoch in ms (Default: 30000 = 30s)
+    type: int                          # Wird im RTC-Speicher gehalten
     restore_value: yes
     initial_value: "30000"
-  - id: cover_contract_travel_down_ms
-    type: int
+  - id: cover_contract_travel_down_ms  # Gemessene Fahrzeit runter in ms (Default: 30000 = 30s)
+    type: int                          # Wird im RTC-Speicher gehalten
     restore_value: yes
     initial_value: "30000"
-  - id: cover_calib_phase
+  - id: cover_calib_phase              # Aktuelle Phase der Kalibrierungs-State-Machine (0-5)
     type: int
     restore_value: no
     initial_value: "0"
-  - id: cover_calib_start_ms
+  - id: cover_calib_start_ms           # Zeitstempel (millis()) beim Start einer Fahrphase
     type: int
     restore_value: no
     initial_value: "0"
-  - id: cover_calib_up_measured
+  - id: cover_calib_up_measured        # true wenn Hochfahrt gemessen wurde (Phase 1→2)
     type: bool
     restore_value: no
     initial_value: "false"
-  - id: cover_calib_temp_up_ms
+  - id: cover_calib_temp_up_ms         # Gemessene Zeit der Hochfahrt (Zwischenspeicher vor dem Speichern)
     type: int
     restore_value: no
     initial_value: "0"
-  - id: cover_calib_temp_down_ms
+  - id: cover_calib_temp_down_ms       # Gemessene Zeit der Runterfahrt (Zwischenspeicher vor dem Speichern)
     type: int
     restore_value: no
     initial_value: "0"
 
+# =============================================================================
+# SKRIPTE – Cover-Logik
+# =============================================================================
 script:
+  # sync_cover_position – Synchronisiert cover_contract_position mit ESPHome-cover.position
+  #   Wenn kalibriert: position = cover.position * 100 (Prozent)
+  #   Parameter: keine  |  Rückgabe: keine
   - id: sync_cover_position
     then:
       - lambda: |-
@@ -52,6 +101,11 @@ script:
             id(cover_contract_position) = (int) lroundf(id(zrl_cover).position * 100.0f);
           }
 
+  # publish_cover_contract_state – Veroeffentlicht Cover-Status auf .../state (retain)
+  #   Ruft sync_cover_position auf
+  #   Topic: smarthome/device/{device_id}/state
+  #   Payload: {device_id, cover_state, cover_calibrated, fault, optional cover_position}
+  #   Parameter: keine  |  Rückgabe: keine
   - id: publish_cover_contract_state
     then:
       - script.execute: sync_cover_position
@@ -67,6 +121,13 @@ script:
               root["cover_position"] = id(cover_contract_position);
             }
 
+  # start_cover_calibration – State-Machine: Fuehrt Kalibrierung Schritt für Schritt aus
+  #   Phase 0 → Phase 1: Werte zurücksetzen, Hochfahrt starten
+  #   Phase 2 (up gemessen) → wartet auf erneutes calibrate
+  #   Phase 2 (up gemessen & erneut calibrate) → Phase 3: Runterfahrt starten
+  #   Phase 4 → finish_cover_calibration: Zeiten speichern
+  #   Phase 5 → Hinweis: bereits kalibriert
+  #   Parameter: keine  |  Rückgabe: keine
   - id: start_cover_calibration
     then:
       - if:
@@ -110,6 +171,11 @@ script:
             - lambda: |-
                 ESP_LOGI("calib", "Cover already calibrated. Use clear_calibration first to recalibrate.");
 
+  # handle_calib_stop – Wird bei STOP während Kalibrierung aufgerufen
+  #   Phase 1: berechnet elapsed=millis()-startMillis → prueft 2000-180000ms → speichert up-Zeit → Phase 2
+  #   Phase 3: berechnet elapsed → prueft 2000-180000ms → speichert down-Zeit → Phase 4
+  #   Ungueltige Zeiten (<2000 oder >180000ms): zurueck zu Phase 0 (Fehler)
+  #   Parameter: keine  |  Rückgabe: keine
   - id: handle_calib_stop
     then:
       - lambda: |-
@@ -136,6 +202,10 @@ script:
             }
           }
 
+  # finish_cover_calibration – Speichert gemessene Fahrzeiten dauerhaft
+  #   Setzt travel_up_ms/travel_down_ms auf gemessene Werte
+  #   Setzt calibrated=true, phase=5, position=100 (ganz offen)
+  #   Parameter: keine  |  Rückgabe: keine
   - id: finish_cover_calibration
     then:
       - lambda: |-
@@ -154,6 +224,9 @@ script:
             id(cover_calib_phase) = 0;
           }
 
+  # clear_cover_calibration – Setzt Kalibrierung auf Default-Werte zurueck
+  #   calibrated=false, travel-Zeiten=30000ms Default, phase=0
+  #   Parameter: keine  |  Rückgabe: keine
   - id: clear_cover_calibration
     then:
       - lambda: |-
@@ -167,11 +240,16 @@ script:
           ESP_LOGI("calib", "Cover calibration cleared");
       - script.execute: publish_cover_contract_state
 
+# =============================================================================
+# MQTT – Kommando-Handler für Cover
+# =============================================================================
 mqtt:
   on_json_message:
     - topic: smarthome/device/${device_id}/command
       then:
         - lambda: |-
+            // request_id aus JSON extrahieren und validieren
+            // Fehlende request_id → Fehler -20 "missing_request_id"
             std::string request_id = "";
             if (x.containsKey("request_id") && !x["request_id"].isNull()) {
               request_id = x["request_id"].as<std::string>();
@@ -185,11 +263,14 @@ mqtt:
               return;
             }
 
+            // command aus JSON extrahieren
             std::string command = "";
             if (x.containsKey("command") && !x["command"].isNull()) {
               command = x["command"].as<std::string>();
             }
 
+            // queue_ack – Hilfsfunktion zum Senden einer standardisierten ACK-Antwort
+            // Parameter: status(const char*), status_code(int), source(const char*)
             auto queue_ack = [&](const char *status, int status_code, const char *source) {
               id(ack_request_id) = request_id;
               id(ack_status) = status;
@@ -198,6 +279,7 @@ mqtt:
               id(flush_command_ack).execute();
             };
 
+            // "get_state" – Fehler loeschen, aktuellen Status publishen, ACK=ok
             if (command == "get_state") {
               id(clear_contract_fault).execute();
               id(publish_cover_contract_state).execute();
@@ -205,6 +287,9 @@ mqtt:
               return;
             }
 
+            // "calibrate" – Kalibrierung starten oder fortsetzen
+            // Phase 1 oder 3: Kalibrierung laeuft bereits → Fehler "calib_in_progress"
+            // Phase 5: bereits kalibriert → Fehler "already_calibrated"
             if (command == "calibrate") {
               if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
                 id(contract_fault) = true;
@@ -226,6 +311,7 @@ mqtt:
               return;
             }
 
+            // "clear_calibration" – Kalibrierung zurücksetzen
             if (command == "clear_calibration") {
               id(clear_cover_calibration).execute();
               id(clear_contract_fault).execute();
@@ -233,6 +319,7 @@ mqtt:
               return;
             }
 
+            // "open" – Prüft ob Kalibrierung laeuft, startet Aufwaertsfahrt
             if (command == "open") {
               if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
                 id(contract_fault) = true;
@@ -249,6 +336,7 @@ mqtt:
               return;
             }
 
+            // "close" – Prüft ob Kalibrierung laeuft, startet Abwaertsfahrt
             if (command == "close") {
               if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
                 id(contract_fault) = true;
@@ -265,6 +353,7 @@ mqtt:
               return;
             }
 
+            // "stop" – Cover anhalten, ggf. Kalibrier-Messung abschliessen
             if (command == "stop") {
               if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
                 id(cover_hw_stop).execute();
@@ -283,6 +372,10 @@ mqtt:
               return;
             }
 
+            // "set_position" – Position anfahren (0-100%)
+            // Akzeptiert "position" oder "value" als Feldname
+            // Prüft Kalibrierung für Intermediate-Positionen (>0 und <100)
+            // target=0 → close, target=100 → open, sonst Teilzeit-Berechnung
             if (command == "set_position") {
               if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
                 id(contract_fault) = true;
@@ -315,6 +408,7 @@ mqtt:
                 return;
               }
 
+              // Intermediate-Position erfordert Kalibrierung
               if (!id(cover_contract_calibrated) && target_position > 0 && target_position < 100) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -5;
@@ -349,6 +443,7 @@ mqtt:
               return;
             }
 
+            // Fallback: unbekanntes Kommando → Fehler -2 "unsupported"
             id(contract_fault) = true;
             id(contract_last_status_code) = -2;
             id(contract_last_status_text) = "unsupported";
