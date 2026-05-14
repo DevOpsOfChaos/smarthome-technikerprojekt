@@ -13,12 +13,48 @@ globals:
     initial_value: "0"
   - id: cover_contract_calibrated
     type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: cover_contract_travel_up_ms
+    type: int
+    restore_value: yes
+    initial_value: "30000"
+  - id: cover_contract_travel_down_ms
+    type: int
+    restore_value: yes
+    initial_value: "30000"
+  - id: cover_calib_phase
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: cover_calib_start_ms
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: cover_calib_up_measured
+    type: bool
     restore_value: no
     initial_value: "false"
+  - id: cover_calib_temp_up_ms
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: cover_calib_temp_down_ms
+    type: int
+    restore_value: no
+    initial_value: "0"
 
 script:
+  - id: sync_cover_position
+    then:
+      - lambda: |-
+          if (id(cover_contract_calibrated)) {
+            id(cover_contract_position) = (int) lroundf(id(zrl_cover).position * 100.0f);
+          }
+
   - id: publish_cover_contract_state
     then:
+      - script.execute: sync_cover_position
       - mqtt.publish_json:
           topic: smarthome/device/${device_id}/state
           retain: true
@@ -30,6 +66,106 @@ script:
             if (id(cover_contract_calibrated)) {
               root["cover_position"] = id(cover_contract_position);
             }
+
+  - id: start_cover_calibration
+    then:
+      - if:
+          condition:
+            lambda: 'return id(cover_calib_phase) == 0;'
+          then:
+            - lambda: |-
+                id(cover_calib_phase) = 1;
+                id(cover_calib_up_measured) = false;
+                id(cover_calib_temp_up_ms) = 0;
+                id(cover_calib_temp_down_ms) = 0;
+                id(cover_contract_calibrated) = false;
+                id(contract_fault) = false;
+                id(cover_calib_start_ms) = millis();
+                ESP_LOGI("calib", "Cover calibration started - moving up");
+            - script.execute: cover_hw_open
+      - if:
+          condition:
+            lambda: 'return id(cover_calib_phase) == 2 && !id(cover_calib_up_measured);'
+          then:
+            - lambda: |-
+                ESP_LOGI("calib", "Cover calibration phase 2 - send calibrate again after reaching top");
+      - if:
+          condition:
+            lambda: 'return id(cover_calib_phase) == 2 && id(cover_calib_up_measured);'
+          then:
+            - lambda: |-
+                id(cover_calib_phase) = 3;
+                id(cover_calib_start_ms) = millis();
+                ESP_LOGI("calib", "Cover calibration - moving down");
+            - script.execute: cover_hw_close
+      - if:
+          condition:
+            lambda: 'return id(cover_calib_phase) == 4;'
+          then:
+            - script.execute: finish_cover_calibration
+      - if:
+          condition:
+            lambda: 'return id(cover_calib_phase) == 5;'
+          then:
+            - lambda: |-
+                ESP_LOGI("calib", "Cover already calibrated. Use clear_calibration first to recalibrate.");
+
+  - id: handle_calib_stop
+    then:
+      - lambda: |-
+          if (id(cover_calib_phase) == 1) {
+            unsigned long elapsed = millis() - (unsigned long)id(cover_calib_start_ms);
+            if (elapsed >= 2000 && elapsed <= 180000) {
+              id(cover_calib_temp_up_ms) = (int)elapsed;
+              id(cover_calib_up_measured) = true;
+              id(cover_calib_phase) = 2;
+              ESP_LOGI("calib", "Up travel measured: %d ms. Send calibrate to continue.", (int)elapsed);
+            } else {
+              ESP_LOGW("calib", "Invalid up travel time: %d ms (need 2000-180000)", (int)elapsed);
+              id(cover_calib_phase) = 0;
+            }
+          } else if (id(cover_calib_phase) == 3) {
+            unsigned long elapsed = millis() - (unsigned long)id(cover_calib_start_ms);
+            if (elapsed >= 2000 && elapsed <= 180000) {
+              id(cover_calib_temp_down_ms) = (int)elapsed;
+              id(cover_calib_phase) = 4;
+              ESP_LOGI("calib", "Down travel measured: %d ms. Send calibrate to save.", (int)elapsed);
+            } else {
+              ESP_LOGW("calib", "Invalid down travel time: %d ms (need 2000-180000)", (int)elapsed);
+              id(cover_calib_phase) = 0;
+            }
+          }
+
+  - id: finish_cover_calibration
+    then:
+      - lambda: |-
+          if (id(cover_calib_temp_up_ms) >= 2000 && id(cover_calib_temp_down_ms) >= 2000) {
+            id(cover_contract_travel_up_ms) = id(cover_calib_temp_up_ms);
+            id(cover_contract_travel_down_ms) = id(cover_calib_temp_down_ms);
+            id(cover_contract_calibrated) = true;
+            id(cover_contract_position) = 100;
+            id(cover_calib_phase) = 5;
+            ESP_LOGI("calib", "Calibration saved: up=%d ms, down=%d ms",
+              id(cover_contract_travel_up_ms),
+              id(cover_contract_travel_down_ms));
+            id(publish_cover_contract_state).execute();
+          } else {
+            ESP_LOGW("calib", "Calibration failed: invalid travel times");
+            id(cover_calib_phase) = 0;
+          }
+
+  - id: clear_cover_calibration
+    then:
+      - lambda: |-
+          id(cover_contract_calibrated) = false;
+          id(cover_contract_travel_up_ms) = 30000;
+          id(cover_contract_travel_down_ms) = 30000;
+          id(cover_calib_phase) = 0;
+          id(cover_calib_up_measured) = false;
+          id(cover_calib_temp_up_ms) = 0;
+          id(cover_calib_temp_down_ms) = 0;
+          ESP_LOGI("calib", "Cover calibration cleared");
+      - script.execute: publish_cover_contract_state
 
 mqtt:
   on_json_message:
@@ -69,7 +205,42 @@ mqtt:
               return;
             }
 
+            if (command == "calibrate") {
+              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -6;
+                id(contract_last_status_text) = "calib_in_progress";
+                queue_ack("calib_in_progress", -6, "esphome_validation");
+                return;
+              }
+              if (id(cover_calib_phase) == 5) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -6;
+                id(contract_last_status_text) = "already_calibrated";
+                queue_ack("already_calibrated", -6, "esphome_validation");
+                return;
+              }
+              id(clear_contract_fault).execute();
+              id(start_cover_calibration).execute();
+              queue_ack("ok", 0, "esphome_command");
+              return;
+            }
+
+            if (command == "clear_calibration") {
+              id(clear_cover_calibration).execute();
+              id(clear_contract_fault).execute();
+              queue_ack("ok", 0, "esphome_command");
+              return;
+            }
+
             if (command == "open") {
+              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -6;
+                id(contract_last_status_text) = "calib_in_progress";
+                queue_ack("calib_in_progress", -6, "esphome_validation");
+                return;
+              }
               id(cover_hw_open).execute();
               id(clear_contract_fault).execute();
               id(cover_contract_state) = "opening";
@@ -79,6 +250,13 @@ mqtt:
             }
 
             if (command == "close") {
+              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -6;
+                id(contract_last_status_text) = "calib_in_progress";
+                queue_ack("calib_in_progress", -6, "esphome_validation");
+                return;
+              }
               id(cover_hw_close).execute();
               id(clear_contract_fault).execute();
               id(cover_contract_state) = "closing";
@@ -88,6 +266,15 @@ mqtt:
             }
 
             if (command == "stop") {
+              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+                id(cover_hw_stop).execute();
+                id(handle_calib_stop).execute();
+                id(cover_contract_state) = "stopped";
+                id(clear_contract_fault).execute();
+                id(publish_cover_contract_state).execute();
+                queue_ack("ok", 0, "esphome_command");
+                return;
+              }
               id(cover_hw_stop).execute();
               id(clear_contract_fault).execute();
               id(cover_contract_state) = "stopped";
@@ -97,6 +284,14 @@ mqtt:
             }
 
             if (command == "set_position") {
+              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -6;
+                id(contract_last_status_text) = "calib_in_progress";
+                queue_ack("calib_in_progress", -6, "esphome_validation");
+                return;
+              }
+
               bool position_ok = false;
               int target_position = -1;
 
@@ -138,6 +333,7 @@ mqtt:
                 id(cover_hw_open).execute();
                 id(cover_contract_state) = "opening";
               } else {
+                id(sync_cover_position).execute();
                 if (target_position > id(cover_contract_position)) {
                   id(cover_contract_state) = "opening";
                 } else if (target_position < id(cover_contract_position)) {

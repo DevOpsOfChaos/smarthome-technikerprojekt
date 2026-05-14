@@ -22,14 +22,13 @@ packages:
 esphome:
   name: ${device_id}
   friendly_name: ${device_name}
-  comment: Vorbereiteter Beispielpfad fuer vertragskompatible MQTT-Cover, nicht hardwarevalidiert.
+  comment: Vertragskompatibles MQTT-Cover mit Kalibrierung und Positionssteuerung, nicht hardwarevalidiert.
   on_boot:
     priority: -10
     then:
       - lambda: |-
           id(contract_online) = true;
           id(cover_contract_state) = "stopped";
-          id(cover_contract_calibrated) = false;
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_cover_contract_state
@@ -76,35 +75,137 @@ switch:
     id: cover_relay_up
     pin: ${relay_up_pin}
     restore_mode: ALWAYS_OFF
+    name: "Cover Relay Up"
   - platform: gpio
     id: cover_relay_down
     pin: ${relay_down_pin}
     restore_mode: ALWAYS_OFF
+    name: "Cover Relay Down"
+
+globals:
+  - id: cover_partial_active
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: cover_partial_duration_ms
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+cover:
+  - platform: time_based
+    id: zrl_cover
+    name: "${device_name}"
+    device_class: shutter
+    open_action:
+      - switch.turn_off: cover_relay_down
+      - switch.turn_on: cover_relay_up
+    close_action:
+      - switch.turn_off: cover_relay_up
+      - switch.turn_on: cover_relay_down
+    stop_action:
+      - switch.turn_off: cover_relay_up
+      - switch.turn_off: cover_relay_down
+    open_duration: !lambda |-
+      if (id(cover_partial_active)) {
+        return id(cover_partial_duration_ms);
+      }
+      if (id(cover_calib_phase) == 1) {
+        return 180000;
+      }
+      return id(cover_contract_travel_up_ms);
+    close_duration: !lambda |-
+      if (id(cover_partial_active)) {
+        return id(cover_partial_duration_ms);
+      }
+      if (id(cover_calib_phase) == 3) {
+        return 180000;
+      }
+      return id(cover_contract_travel_down_ms);
+    on_open:
+      then:
+        - lambda: |-
+            if (id(cover_partial_active)) {
+              id(cover_partial_active) = false;
+              if (id(cover_contract_calibrated)) {
+                id(cover_contract_position) = id(cover_contract_target_position);
+              }
+            } else {
+              if (id(cover_contract_calibrated) && id(cover_calib_phase) != 1) {
+                id(cover_contract_position) = 100;
+              }
+            }
+            id(cover_contract_state) = "stopped";
+        - script.execute: publish_cover_contract_state
+    on_close:
+      then:
+        - lambda: |-
+            if (id(cover_partial_active)) {
+              id(cover_partial_active) = false;
+              if (id(cover_contract_calibrated)) {
+                id(cover_contract_position) = id(cover_contract_target_position);
+              }
+            } else {
+              if (id(cover_contract_calibrated) && id(cover_calib_phase) != 3) {
+                id(cover_contract_position) = 0;
+              }
+            }
+            id(cover_contract_state) = "stopped";
+        - script.execute: publish_cover_contract_state
 
 script:
   - id: cover_hw_open
     then:
-      - switch.turn_off: cover_relay_down
-      - switch.turn_on: cover_relay_up
+      - cover.open: zrl_cover
 
   - id: cover_hw_close
     then:
-      - switch.turn_off: cover_relay_up
-      - switch.turn_on: cover_relay_down
+      - cover.close: zrl_cover
 
   - id: cover_hw_stop
     then:
-      - switch.turn_off: cover_relay_up
-      - switch.turn_off: cover_relay_down
+      - cover.stop: zrl_cover
+      - lambda: |-
+          if (id(cover_partial_active)) {
+            id(cover_partial_active) = false;
+          }
 
   - id: cover_hw_set_position
     parameters:
       target_position: int
     then:
-      - logger.log:
-          level: WARN
-          format: "set_position=%d accepted by contract path; replace with calibrated drive logic before productive use"
-          args: ["target_position"]
+      - lambda: |-
+          if (!id(cover_contract_calibrated)) {
+            ESP_LOGW("cover", "set_position ignored: not calibrated");
+            return;
+          }
+          id(sync_cover_position).execute();
+          int current = id(cover_contract_position);
+          int target = target_position;
+          if (current == target) return;
+
+          int delta_abs = target > current ? target - current : current - target;
+          int travel_ms = target > current ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
+          int partial_ms = (travel_ms * delta_abs) / 100;
+          if (partial_ms < 500) partial_ms = 500;
+
+          id(cover_partial_active) = true;
+          id(cover_partial_duration_ms) = partial_ms;
+          id(cover_contract_target_position) = target;
+      - if:
+          condition:
+            lambda: 'return id(cover_partial_active);'
+          then:
+            - if:
+                condition:
+                  lambda: 'return id(cover_contract_target_position) > id(cover_contract_position);'
+                then:
+                  - lambda: 'id(cover_contract_state) = "opening";'
+                  - cover.open: zrl_cover
+                else:
+                  - lambda: 'id(cover_contract_state) = "closing";'
+                  - cover.close: zrl_cover
+            - script.execute: publish_cover_contract_state
 
 interval:
   - interval: 5min

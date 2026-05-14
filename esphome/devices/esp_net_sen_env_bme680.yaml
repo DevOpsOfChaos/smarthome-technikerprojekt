@@ -1,0 +1,206 @@
+substitutions:
+  device_id: esp_net_sen_env_bme680_01
+  device_name: ESP NET SEN Env BME680
+  device_class: net_sen
+  power_type: mains
+  fw_version: esphome-example
+  caps: "39"
+  meta_schema_version: "1"
+  control_mode: none
+  config_profile: none
+  reporting_mode: hybrid
+  sensor_mask: THPGXXXXXX
+  input_mask: XXXXX
+  i2c_sda: GPIO4
+  i2c_scl: GPIO5
+
+packages:
+  contract_base: !include ../packages/smarthome_contract_base.yaml
+  command_ack: !include ../packages/smarthome_command_ack.yaml
+
+globals:
+  - id: env_has_temp
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_hum
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_temp_01c
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_hum_01pct
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_pressure_pa
+    type: float
+    restore_value: no
+    initial_value: "0"
+  - id: env_gas_ohm
+    type: float
+    restore_value: no
+    initial_value: "0"
+
+script:
+  - id: publish_env_contract_state
+    then:
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/state
+          retain: true
+          payload: |-
+            root["device_id"] = "${device_id}";
+            if (id(env_has_temp)) {
+              root["temp_01c"] = id(env_temp_01c);
+            }
+            if (id(env_has_hum)) {
+              root["hum_01pct"] = id(env_hum_01pct);
+            }
+            root["pressure_pa"] = (uint32_t) lroundf(id(env_pressure_pa));
+            root["gas_ohm"] = (uint32_t) lroundf(id(env_gas_ohm));
+            root["fault"] = id(contract_fault);
+
+esphome:
+  name: ${device_id}
+  friendly_name: ${device_name}
+  on_boot:
+    priority: -10
+    then:
+      - lambda: |-
+          id(contract_online) = true;
+      - script.execute: publish_contract_meta
+      - script.execute: publish_contract_availability
+      - script.execute: publish_env_contract_state
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+logger:
+
+i2c:
+  sda: ${i2c_sda}
+  scl: ${i2c_scl}
+  scan: false
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: ""
+  birth_message:
+    topic: smarthome/device/${device_id}/availability
+    retain: true
+    payload: '{"device_id":"${device_id}","availability":"online","online":true,"power_type":"${power_type}"}'
+  will_message:
+    topic: smarthome/device/${device_id}/availability
+    retain: true
+    payload: '{"device_id":"${device_id}","availability":"offline","online":false,"power_type":"${power_type}"}'
+  on_connect:
+    then:
+      - lambda: |-
+          id(contract_online) = true;
+      - script.execute: publish_contract_meta
+      - script.execute: publish_contract_availability
+      - script.execute: publish_env_contract_state
+  on_disconnect:
+    then:
+      - lambda: |-
+          id(contract_online) = false;
+      - script.execute: publish_contract_availability
+  on_json_message:
+    - topic: smarthome/device/${device_id}/command
+      then:
+        - lambda: |-
+            std::string request_id = "";
+            if (x.containsKey("request_id") && !x["request_id"].isNull()) {
+              request_id = x["request_id"].as<std::string>();
+            }
+
+            if (request_id.empty()) {
+              id(contract_fault) = true;
+              id(contract_last_status_code) = -20;
+              id(contract_last_status_text) = "missing_request_id";
+              ESP_LOGW("contract", "Ignoring sensor command without request_id");
+              return;
+            }
+
+            std::string command = "";
+            if (x.containsKey("command") && !x["command"].isNull()) {
+              command = x["command"].as<std::string>();
+            }
+
+            auto queue_ack = [&](const char *status, int status_code, const char *source) {
+              id(ack_request_id) = request_id;
+              id(ack_status) = status;
+              id(ack_status_code) = status_code;
+              id(ack_source) = source;
+              id(flush_command_ack).execute();
+            };
+
+            if (command == "get_state") {
+              id(clear_contract_fault).execute();
+              id(publish_env_contract_state).execute();
+              queue_ack("ok", 0, "esphome_state");
+              return;
+            }
+
+            id(contract_fault) = true;
+            id(contract_last_status_code) = -2;
+            id(contract_last_status_text) = "unsupported";
+            queue_ack("unsupported", -2, "esphome_validation");
+
+sensor:
+  - platform: bme680
+    address: 0x76
+    update_interval: 30s
+    temperature:
+      id: env_temperature
+      name: "${device_name} Temperature"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_temp_01c) = (int) lroundf(x * 10.0f);
+              id(env_has_temp) = true;
+          - script.execute: clear_contract_fault
+          - script.execute: publish_env_contract_state
+    pressure:
+      id: env_pressure
+      name: "${device_name} Pressure"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_pressure_pa) = x;
+          - script.execute: publish_env_contract_state
+    humidity:
+      id: env_humidity
+      name: "${device_name} Humidity"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_hum_01pct) = (int) lroundf(x * 10.0f);
+              id(env_has_hum) = true;
+          - script.execute: clear_contract_fault
+          - script.execute: publish_env_contract_state
+    gas_resistance:
+      id: env_gas
+      name: "${device_name} Gas Resistance"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_gas_ohm) = x;
+          - script.execute: publish_env_contract_state
+
+interval:
+  - interval: 5min
+    then:
+      - script.execute: publish_contract_meta
+      - script.execute: publish_contract_availability
+      - script.execute: publish_env_contract_state
