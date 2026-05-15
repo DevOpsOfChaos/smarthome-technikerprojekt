@@ -1,7 +1,36 @@
+// =============================================================================
+// main.cpp – NET-SEN Env BME680+VEML+ENS160 (Umweltsensor)
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/devices/net_sen_env_bme680_veml/main.cpp
+// Hardware:   ESP32-C3 + BME680 + VEML7700 + ENS160
+//
+// === EINSATZZWECK ===
+// [HIER EINTRAGEN]
+// === EINSATZZWECK ===
+//
+// Pin-Belegung:
+//   I2C SDA:  GPIO0
+//   I2C SCL:  GPIO1
+//   BME680:   0x76 (Temp/Feuchte/Druck/Rohgas)
+//   VEML7700: 0x10 (Lux)
+//   ENS160:   0x52 (AQI/TVOC/eCO2, mit BME680-Kompensation)
+//
+// Funktionsweise:
+//   Sensor-Poll alle 2500ms. BME680 mit Heizprofil (320 Grad, 150ms).
+//   ENS160-Kompensation via BME680-Temperatur/Feuchte.
+//   gas_ohm erst nach 180s Warmup + 5 Messungen belastbar.
+//   ENS160 stale-detection: 120s ohne gueltige Daten.
+//   Snapshot-Log alle 30s.
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+// =============================================================================
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
-
 #include <Adafruit_BME680.h>
 #include <Adafruit_VEML7700.h>
 #include <ScioSense_ENS160.h>
@@ -16,542 +45,211 @@
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS 1
 void netSenDeviceSensorInit();
-bool netSenDeviceSensorPoll(
-    int16_t* temp_01c,
-    uint16_t* hum_01pct,
-    uint16_t* lux,
-    uint8_t* motion,
-    bool* fault);
+bool netSenDeviceSensorPoll(int16_t*, uint16_t*, uint16_t*, uint8_t*, bool*);
 void netSenDeviceExtendedStateInit();
-bool netSenDeviceExtendedStatePoll(
-    uint32_t* pressure_pa,
-    uint32_t* gas_ohm,
-    uint16_t* aqi,
-    uint16_t* tvoc_ppb,
-    uint16_t* eco2_ppm);
+bool netSenDeviceExtendedStatePoll(uint32_t*, uint32_t*, uint16_t*, uint16_t*, uint16_t*);
 
 #include "../../basetypes/net_sen/NetSenRuntime.h"
 
+// =============================================================================
+// KONSTANTEN + ZUSTAND
+// =============================================================================
+
 namespace {
 constexpr uint32_t I2C_CLOCK_HZ = 100000UL;
-constexpr uint32_t SENSOR_SNAPSHOT_LOG_INTERVAL_MS = 30000UL;
+constexpr unsigned long SENSOR_SNAPSHOT_LOG_INTERVAL_MS = 30000UL;
 constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;
 
-struct ErweiterterState {
-    uint32_t pressure_pa;
-    uint32_t gas_ohm;
-    uint16_t aqi;
-    uint16_t tvoc_ppb;
-    uint16_t eco2_ppm;
-};
+struct ErwState { uint32_t pp; uint32_t go; uint16_t aqi; uint16_t tvoc; uint16_t eco2; };
+struct ErwState last = {0};
 
 Adafruit_BME680 sensorBme680;
-Adafruit_VEML7700 sensorVeml7700 = Adafruit_VEML7700();
-ScioSense_ENS160 sensorEns160Addr52(NET_SEN_ENV_ENS160_PRIMARY_ADDRESS);
-ScioSense_ENS160 sensorEns160Addr53(NET_SEN_ENV_ENS160_FALLBACK_ADDRESS);
-ScioSense_ENS160* sensorEns160 = nullptr;
+Adafruit_VEML7700 sensorVeml = Adafruit_VEML7700();
+ScioSense_ENS160 ens52(NET_SEN_ENV_ENS160_PRIMARY_ADDRESS);
+ScioSense_ENS160 ens53(NET_SEN_ENV_ENS160_FALLBACK_ADDRESS);
+ScioSense_ENS160* ens = nullptr;
 
-bool bme680Bereit = false;
-bool veml7700Bereit = false;
-bool ens160Bereit = false;
-uint8_t bme680Adresse = 0U;
-uint8_t ens160Adresse = 0U;
-
-unsigned long bootMs = 0UL;
-unsigned long letzterSensorPollMs = 0UL;
-unsigned long letzterBmeFehlerLogMs = 0UL;
-unsigned long letzterVemlFehlerLogMs = 0UL;
-unsigned long letzterEnsInfoLogMs = 0UL;
-unsigned long letzterEnsFehlerLogMs = 0UL;
-unsigned long letzterEnsGueltigMs = 0UL;
-unsigned long letzterSnapshotLogMs = 0UL;
-
-uint8_t bme680GueltigeMessungen = 0U;
-bool gasWarmupInfoGeloggt = false;
-bool ensWarteHinweisGeloggt = false;
-
-bool ensCompensationAktiv = false;
-bool ensCompCall = false;
+bool bmeOk = false, vemlOk = false, ensOk = false;
+unsigned long bootMs = 0UL, lastPoll = 0UL, lastBmeLog = 0UL, lastVemlLog = 0UL;
+unsigned long lastEnsInfo = 0UL, lastEnsErr = 0UL, lastEnsValid = 0UL, lastSnap = 0UL;
+uint8_t bmeReads = 0U;
+bool gasWarmupLogged = false, ensWaitLogged = false;
+bool ensCompActive = false, ensCompCalled = false;
 int ensCompResult = -1;
+ErwState erwState = {NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_GAS_OHM_UNGUELTIG,
+                     NET_SEN_AIR_METRIC_UNGUELTIG, NET_SEN_AIR_METRIC_UNGUELTIG,
+                     NET_SEN_AIR_METRIC_UNGUELTIG};
+bool erwChanged = true;
 
-ErweiterterState erweiterterState = {
-    NET_SEN_PRESSURE_UNGUELTIG,
-    NET_SEN_GAS_OHM_UNGUELTIG,
-    NET_SEN_AIR_METRIC_UNGUELTIG,
-    NET_SEN_AIR_METRIC_UNGUELTIG,
-    NET_SEN_AIR_METRIC_UNGUELTIG};
-bool erweiterterStateGeaendert = true;
-
-uint16_t clampToU16(long value) {
-    if (value < 0L) return 0U;
-    if (value > 65535L) return 65535U;
-    return (uint16_t)value;
+// -- Hilfsfunktionen --
+uint16_t c16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
+uint16_t cH(long v) { return v < 0L ? 0U : v > 1000L ? 1000U : (uint16_t)v; }
+uint16_t ad16(uint16_t a, uint16_t b) { return a > b ? a - b : b - a; }
+int16_t adI16(int16_t a, int16_t b) { return a > b ? a - b : b - a; }
+bool chkU32(uint32_t a, uint32_t n, uint32_t inv, uint32_t d) {
+    if (a == n) return false;
+    if (a == inv || n == inv) return true;
+    return (a > n ? a - n : n - a) >= d;
+}
+bool setU32(uint32_t* z, uint32_t n, uint32_t inv, uint32_t d) {
+    if (!z) return false; bool c = chkU32(*z, n, inv, d); *z = n; return c;
 }
 
-uint16_t clampHum01pct(long value) {
-    if (value < 0L) return 0U;
-    if (value > 1000L) return 1000U;
-    return (uint16_t)value;
+bool gasWarmupOk(unsigned long j) {
+    return (j - bootMs) >= NET_SEN_ENV_BME680_GAS_WARMUP_MS && bmeReads >= NET_SEN_ENV_BME680_GAS_WARMUP_MIN_READS;
+}
+bool ensWarmupOk(unsigned long j) { return (j - bootMs) >= NET_SEN_ENV_ENS160_WARMUP_MS; }
+bool ensStale(unsigned long j) {
+    if (!ensWarmupOk(j)) return false;
+    if (!ensOk || !ens) return true;
+    return lastEnsValid == 0UL || (j - lastEnsValid) > NET_SEN_ENV_ENS160_STALE_TIMEOUT_MS;
+}
+uint16_t mapAqi500(uint16_t r) { return (r >= 1U && r <= ENS160_AQI_MAX_BASIC) ? (uint16_t)(r * 100U) : 0U; }
+uint16_t encTemp(float c) { return (uint16_t)((c + 273.15f) * 64.0f); }
+uint16_t encHum(float h) { return (uint16_t)(h * 512.0f); }
+
+int writeEnsEnv(uint8_t addr, float t, float h) {
+    uint8_t buf[4]; uint16_t te = encTemp(t), he = encHum(h);
+    buf[0] = te & 0xFF; buf[1] = (te >> 8) & 0xFF;
+    buf[2] = he & 0xFF; buf[3] = (he >> 8) & 0xFF;
+    Wire.beginTransmission(addr); Wire.write(ENS160_REG_TEMP_IN);
+    Wire.write(buf, 4); return Wire.endTransmission();
 }
 
-uint16_t absDiffU16(uint16_t a, uint16_t b) {
-    return a > b ? (uint16_t)(a - b) : (uint16_t)(b - a);
-}
-
-int16_t absDiffI16(int16_t a, int16_t b) {
-    return a > b ? (int16_t)(a - b) : (int16_t)(b - a);
-}
-
-bool istGasWarmupAbgeschlossen(unsigned long jetztMs) {
-    return (jetztMs - bootMs) >= NET_SEN_ENV_BME680_GAS_WARMUP_MS &&
-           bme680GueltigeMessungen >= NET_SEN_ENV_BME680_GAS_WARMUP_MIN_READS;
-}
-
-bool istEns160WarmupAbgeschlossen(unsigned long jetztMs) {
-    return (jetztMs - bootMs) >= NET_SEN_ENV_ENS160_WARMUP_MS;
-}
-
-bool ens160FehltZuLange(unsigned long jetztMs) {
-    if (!istEns160WarmupAbgeschlossen(jetztMs)) return false;
-    if (!ens160Bereit) return true;
-    if (letzterEnsGueltigMs == 0UL) return true;
-    return (jetztMs - letzterEnsGueltigMs) > NET_SEN_ENV_ENS160_STALE_TIMEOUT_MS;
-}
-
-bool wertAendertU32(uint32_t alt, uint32_t neu, uint32_t invalid, uint32_t delta) {
-    if (alt == neu) return false;
-    if (alt == invalid || neu == invalid) return true;
-    const uint32_t diff = alt > neu ? (alt - neu) : (neu - alt);
-    return diff >= delta;
-}
-
-bool wertAendertU16(uint16_t alt, uint16_t neu, uint16_t invalid, uint16_t delta) {
-    if (alt == neu) return false;
-    if (alt == invalid || neu == invalid) return true;
-    const uint16_t diff = alt > neu ? (uint16_t)(alt - neu) : (uint16_t)(neu - alt);
-    return diff >= delta;
-}
-
-uint16_t mapEns160AqiZu500(uint16_t rawAqi) {
-    if (rawAqi >= 1U && rawAqi <= ENS160_AQI_MAX_BASIC) {
-        return (uint16_t)(rawAqi * 100U);
-    }
-    return 0U;
-}
-
-uint16_t encodeEns160Temp(float temperaturC) {
-    return (uint16_t)((temperaturC + 273.15f) * 64.0f);
-}
-
-uint16_t encodeEns160Humidity(float feuchtePct) {
-    return (uint16_t)(feuchtePct * 512.0f);
-}
-
-int writeEns160EnvData(uint8_t address, float temperaturC, float feuchtePct) {
-    uint8_t payload[4];
-    const uint16_t tempEncoded = encodeEns160Temp(temperaturC);
-    const uint16_t humidityEncoded = encodeEns160Humidity(feuchtePct);
-
-    payload[0] = (uint8_t)(tempEncoded & 0xFFU);
-    payload[1] = (uint8_t)((tempEncoded >> 8) & 0xFFU);
-    payload[2] = (uint8_t)(humidityEncoded & 0xFFU);
-    payload[3] = (uint8_t)((humidityEncoded >> 8) & 0xFFU);
-
-    Wire.beginTransmission(address);
-    Wire.write(ENS160_REG_TEMP_IN);
-    Wire.write(payload, sizeof(payload));
-    return (int)Wire.endTransmission();
-}
-
-void logBmeFehlerGedrosselt(unsigned long jetztMs, const char* grund) {
-    if ((jetztMs - letzterBmeFehlerLogMs) < NET_SEN_ENV_BME680_VEML_ERROR_LOG_INTERVAL_MS) return;
-    logf("WARN", "BME680 FEHLER: %s", grund);
-    letzterBmeFehlerLogMs = jetztMs;
-}
-
-void logVemlFehlerGedrosselt(unsigned long jetztMs, const char* grund) {
-    if ((jetztMs - letzterVemlFehlerLogMs) < NET_SEN_ENV_BME680_VEML_ERROR_LOG_INTERVAL_MS) return;
-    logf("WARN", "VEML7700 FEHLER: %s", grund);
-    letzterVemlFehlerLogMs = jetztMs;
-}
-
-void logEnsInfoGedrosselt(unsigned long jetztMs, const char* status, bool bmeValid) {
-    if ((jetztMs - letzterEnsInfoLogMs) < NET_SEN_ENV_BME680_VEML_ERROR_LOG_INTERVAL_MS) return;
-    logf(
-        "INFO",
-        "ENS160 status=%s kompensation=%s bme_valid=%s ens_comp_call=%s ens_comp_result=%d",
-        status,
-        ensCompensationAktiv ? "aktiv" : "aus",
-        bmeValid ? "true" : "false",
-        ensCompCall ? "ja" : "nein",
-        ensCompResult);
-    letzterEnsInfoLogMs = jetztMs;
-}
-
-void logEnsFehlerGedrosselt(unsigned long jetztMs, const char* grund, bool bmeValid) {
-    if ((jetztMs - letzterEnsFehlerLogMs) < NET_SEN_ENV_BME680_VEML_ERROR_LOG_INTERVAL_MS) return;
-    logf(
-        "WARN",
-        "ENS160 FEHLER: %s (kompensation=%s bme_valid=%s ens_comp_call=%s ens_comp_result=%d)",
-        grund,
-        ensCompensationAktiv ? "aktiv" : "aus",
-        bmeValid ? "true" : "false",
-        ensCompCall ? "ja" : "nein",
-        ensCompResult);
-    letzterEnsFehlerLogMs = jetztMs;
-}
+void logBme(unsigned long j, const char* g) { if ((j - lastBmeLog) < 15000UL) return; logf("WARN", "BME: %s", g); lastBmeLog = j; }
+void logVeml(unsigned long j, const char* g) { if ((j - lastVemlLog) < 15000UL) return; logf("WARN", "VEML: %s", g); lastVemlLog = j; }
 
 bool initialisiereBme680() {
-    const uint8_t moeglicheAdressen[] = {
-        (uint8_t)NET_SEN_ENV_BME680_PRIMARY_ADDRESS,
-        (uint8_t)NET_SEN_ENV_BME680_FALLBACK_ADDRESS};
-
-    for (uint8_t adresse : moeglicheAdressen) {
-        if (!sensorBme680.begin(adresse, &Wire)) continue;
-
+    const uint8_t addrs[] = {(uint8_t)NET_SEN_ENV_BME680_PRIMARY_ADDRESS,
+                             (uint8_t)NET_SEN_ENV_BME680_FALLBACK_ADDRESS};
+    for (uint8_t a : addrs) {
+        if (!sensorBme680.begin(a, &Wire)) continue;
         sensorBme680.setTemperatureOversampling(BME680_OS_8X);
         sensorBme680.setHumidityOversampling(BME680_OS_2X);
         sensorBme680.setPressureOversampling(BME680_OS_4X);
         sensorBme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
         sensorBme680.setGasHeater(320U, 150U);
-
-        bme680Adresse = adresse;
-        logf("INFO", "BME680 init OK auf 0x%02X", bme680Adresse);
-        return true;
+        logf("INFO", "BME680 init OK auf 0x%02X", a); return true;
     }
-
     return false;
 }
 
-bool initialisiereEns160() {
-    sensorEns160 = &sensorEns160Addr52;
-    if (sensorEns160->begin()) {
-        ens160Adresse = NET_SEN_ENV_ENS160_PRIMARY_ADDRESS;
-    } else {
-        sensorEns160 = &sensorEns160Addr53;
-        if (!sensorEns160->begin()) {
-            sensorEns160 = nullptr;
-            ens160Adresse = 0U;
-            return false;
-        }
-        ens160Adresse = NET_SEN_ENV_ENS160_FALLBACK_ADDRESS;
-    }
-
-    if (!sensorEns160->setMode(ENS160_OPMODE_STD)) {
-        sensorEns160 = nullptr;
-        ens160Adresse = 0U;
-        return false;
-    }
-
-    logf("INFO", "ENS160 init OK auf 0x%02X", ens160Adresse);
-    return true;
+bool initEns() {
+    ens = &ens52;
+    if (ens->begin()) return true;
+    ens = &ens53;
+    if (ens->begin()) return true;
+    ens = nullptr; return false;
 }
 
-bool uebernehmeWertU32(uint32_t* ziel, uint32_t neu, uint32_t invalid, uint32_t delta) {
-    if (!ziel) return false;
-    const bool changed = wertAendertU32(*ziel, neu, invalid, delta);
-    *ziel = neu;
-    return changed;
+void setEnsActive() {
+    if (!ens || !ens->setMode(ENS160_OPMODE_STD)) { ens = nullptr; return; }
+    logf("INFO", "ENS160 init OK");
 }
 
-bool uebernehmeWertU16(uint16_t* ziel, uint16_t neu, uint16_t invalid, uint16_t delta) {
-    if (!ziel) return false;
-    const bool changed = wertAendertU16(*ziel, neu, invalid, delta);
-    *ziel = neu;
-    return changed;
-}
-
-void aktualisiereEnsKompensation(bool bmeValid, float tempC, float humPct) {
-    ensCompensationAktiv = false;
-    ensCompCall = false;
-    ensCompResult = -1;
-
-    if (!ens160Bereit || !sensorEns160 || !bmeValid) return;
-
-    ensCompCall = true;
-    ensCompResult = writeEns160EnvData(ens160Adresse, tempC, humPct);
-    ensCompensationAktiv = (ensCompResult == 0);
+void updEnsComp(bool bv, float t, float h) {
+    ensCompActive = false; ensCompCalled = false; ensCompResult = -1;
+    if (!ensOk || !ens || !bv) return;
+    ensCompCalled = true;
+    ensCompResult = writeEnsEnv(ens == &ens52 ? NET_SEN_ENV_ENS160_PRIMARY_ADDRESS : NET_SEN_ENV_ENS160_FALLBACK_ADDRESS, t, h);
+    ensCompActive = (ensCompResult == 0);
 }
 }  // namespace
 
+// =============================================================================
+// CUSTOM-HOOKS
+// =============================================================================
+
 void netSenDeviceSensorInit() {
-    bootMs = millis();
-    letzterSensorPollMs = 0UL;
-    letzterBmeFehlerLogMs = 0UL;
-    letzterVemlFehlerLogMs = 0UL;
-    letzterEnsInfoLogMs = 0UL;
-    letzterEnsFehlerLogMs = 0UL;
-    letzterEnsGueltigMs = 0UL;
-    letzterSnapshotLogMs = 0UL;
-    bme680GueltigeMessungen = 0U;
-    gasWarmupInfoGeloggt = false;
-    ensWarteHinweisGeloggt = false;
-    ensCompensationAktiv = false;
-    ensCompCall = false;
-    ensCompResult = -1;
-
-    erweiterterState = {
-        NET_SEN_PRESSURE_UNGUELTIG,
-        NET_SEN_GAS_OHM_UNGUELTIG,
-        NET_SEN_AIR_METRIC_UNGUELTIG,
-        NET_SEN_AIR_METRIC_UNGUELTIG,
-        NET_SEN_AIR_METRIC_UNGUELTIG};
-    erweiterterStateGeaendert = true;
-
+    bootMs = millis(); lastPoll = 0UL;
+    lastBmeLog = 0UL; lastVemlLog = 0UL; lastEnsInfo = 0UL; lastEnsErr = 0UL;
+    lastEnsValid = 0UL; lastSnap = 0UL; bmeReads = 0U;
+    gasWarmupLogged = false; ensWaitLogged = false;
+    ensCompActive = false; ensCompCalled = false; ensCompResult = -1;
+    erwState = {NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_GAS_OHM_UNGUELTIG,
+                NET_SEN_AIR_METRIC_UNGUELTIG, NET_SEN_AIR_METRIC_UNGUELTIG,
+                NET_SEN_AIR_METRIC_UNGUELTIG};
+    erwChanged = true;
     Wire.setClock(I2C_CLOCK_HZ);
 
-    bme680Bereit = initialisiereBme680();
-    if (!bme680Bereit) {
-        logf(
-            "WARN",
-            "BME680 nicht gefunden (0x%02X/0x%02X)",
-            NET_SEN_ENV_BME680_PRIMARY_ADDRESS,
-            NET_SEN_ENV_BME680_FALLBACK_ADDRESS);
-    }
+    bmeOk = initialisiereBme680();
+    if (!bmeOk) logf("WARN", "BME680 nicht gefunden");
 
-    veml7700Bereit = sensorVeml7700.begin();
-    if (veml7700Bereit) {
-        sensorVeml7700.setGain(VEML7700_GAIN_1);
-        sensorVeml7700.setIntegrationTime(VEML7700_IT_400MS);
-        logf("INFO", "VEML7700 init OK auf 0x10 (gain=1x it=400ms)");
-    } else {
-        logf("WARN", "VEML7700 nicht gefunden (0x10)");
-    }
+    if (!sensorVeml.begin()) { vemlOk = false; logf("WARN", "VEML7700 nicht gefunden"); }
+    else { vemlOk = true; sensorVeml.setGain(VEML7700_GAIN_1); sensorVeml.setIntegrationTime(VEML7700_IT_400MS); }
 
-    ens160Bereit = initialisiereEns160();
-    if (!ens160Bereit) {
-        logf(
-            "WARN",
-            "ENS160 nicht gefunden (0x%02X/0x%02X)",
-            NET_SEN_ENV_ENS160_PRIMARY_ADDRESS,
-            NET_SEN_ENV_ENS160_FALLBACK_ADDRESS);
-    }
+    ensOk = initEns();
+    if (!ensOk) logf("WARN", "ENS160 nicht gefunden");
+    else setEnsActive();
 }
 
 void netSenDeviceExtendedStateInit() {}
 
-bool netSenDeviceExtendedStatePoll(
-    uint32_t* pressure_pa,
-    uint32_t* gas_ohm,
-    uint16_t* aqi,
-    uint16_t* tvoc_ppb,
-    uint16_t* eco2_ppm)
-{
-    if (!pressure_pa || !gas_ohm || !aqi || !tvoc_ppb || !eco2_ppm) return false;
-
-    *pressure_pa = erweiterterState.pressure_pa;
-    *gas_ohm = erweiterterState.gas_ohm;
-    *aqi = erweiterterState.aqi;
-    *tvoc_ppb = erweiterterState.tvoc_ppb;
-    *eco2_ppm = erweiterterState.eco2_ppm;
-
-    const bool changed = erweiterterStateGeaendert;
-    erweiterterStateGeaendert = false;
-    return changed;
+bool netSenDeviceExtendedStatePoll(uint32_t* pp, uint32_t* go, uint16_t* a, uint16_t* t, uint16_t* e) {
+    if (!pp || !go || !a || !t || !e) return false;
+    *pp = erwState.pp; *go = erwState.go; *a = erwState.aqi; *t = erwState.tvoc; *e = erwState.eco2;
+    bool c = erwChanged; erwChanged = false; return c;
 }
 
-bool netSenDeviceSensorPoll(
-    int16_t* temp_01c,
-    uint16_t* hum_01pct,
-    uint16_t* lux,
-    uint8_t* motion,
-    bool* fault)
-{
-    if (!temp_01c || !hum_01pct || !lux || !motion || !fault) return false;
+bool netSenDeviceSensorPoll(int16_t* t01c, uint16_t* h01p, uint16_t* lux, uint8_t* mot, bool* flt) {
+    if (!t01c || !h01p || !lux || !mot || !flt) return false;
+    unsigned long j = millis();
+    if ((j - lastPoll) < NET_SEN_ENV_BME680_VEML_SENSOR_READ_INTERVAL_MS) return false;
+    lastPoll = j;
 
-    const unsigned long jetzt = millis();
-    if ((jetzt - letzterSensorPollMs) < NET_SEN_ENV_BME680_VEML_SENSOR_READ_INTERVAL_MS) {
-        return false;
+    int16_t vT = *t01c; uint16_t vH = *h01p, vL = *lux; uint8_t vM = *mot; bool vF = *flt;
+    int16_t nT = vT; uint16_t nH = vH, nL = vL; float bmeT = NAN, bmeH = NAN;
+    bool bv = false, vv = false;
+    uint32_t nP = NET_SEN_PRESSURE_UNGUELTIG, nG = NET_SEN_GAS_OHM_UNGUELTIG;
+
+    // BME680 lesen
+    if (bmeOk && sensorBme680.performReading()) {
+        bmeT = sensorBme680.temperature; bmeH = sensorBme680.humidity;
+        float p = sensorBme680.pressure; uint32_t g = sensorBme680.gas_resistance;
+        if (isfinite(bmeT) && isfinite(bmeH) && isfinite(p) && bmeH >= 0 && bmeH <= 100 && p >= 30000 && p <= 110000) {
+            nT = (int16_t)lroundf(bmeT * 10.0f); nH = cH((long)lroundf(bmeH * 10.0f));
+            nP = (uint32_t)lroundf(p); bv = true;
+            if (bmeReads < 255) bmeReads++;
+            if (gasWarmupOk(j) && g > 0) { nG = g; if (!gasWarmupLogged) { logf("INFO", "Gas warmup done"); gasWarmupLogged = true; } }
+        } else logBme(j, "ungueltig");
+    } else logBme(j, "read fail");
+
+    // VEML7700 lesen
+    if (vemlOk && (j - bootMs) >= NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS) {
+        float l = sensorVeml.readLux();
+        if (isfinite(l) && l >= 0) { nL = c16((long)lroundf(l)); vv = true; }
+        else logVeml(j, "Lux unplausibel");
+    } else if (!vemlOk) logVeml(j, "Sensor nicht init");
+
+    // ENS160-Kompensation + lesen
+    updEnsComp(bv, bmeT, bmeH);
+    uint16_t nA = erwState.aqi, nTv = erwState.tvoc, nEc = erwState.eco2;
+    bool ensValid = false;
+    if (ensOk && ens && ens->measure(false)) {
+        uint16_t aq5 = ens->getAQI500();
+        uint16_t aq = ens->getAQI();
+        uint16_t mAq = (aq5 > 0 && aq5 <= 500) ? aq5 : mapAqi500(aq);
+        if (mAq > 0) { nA = mAq; nTv = ens->getTVOC(); nEc = ens->geteCO2();
+            lastEnsValid = j; ensValid = true; ensWaitLogged = false; }
     }
-    letzterSensorPollMs = jetzt;
+    if (!ensValid && ensStale(j)) { nA = NET_SEN_AIR_METRIC_UNGUELTIG; nTv = NET_SEN_AIR_METRIC_UNGUELTIG; nEc = NET_SEN_AIR_METRIC_UNGUELTIG; }
 
-    const int16_t vorherTemp = *temp_01c;
-    const uint16_t vorherHum = *hum_01pct;
-    const uint16_t vorherLux = *lux;
-    const uint8_t vorherMotion = *motion;
-    const bool vorherFault = *fault;
+    // Hysterese Extended State
+    bool eChg = setU32(&erwState.pp, nP, NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_ENV_BME680_VEML_PRESSURE_DELTA_PA);
+    eChg = setU32(&erwState.go, nG, NET_SEN_GAS_OHM_UNGUELTIG, NET_SEN_ENV_BME680_VEML_GAS_DELTA_OHM) || eChg;
+    erwChanged = (eChg) || erwChanged;  // keep mark
 
-    int16_t neuerTemp = vorherTemp;
-    uint16_t neuerHum = vorherHum;
-    uint16_t neuerLux = vorherLux;
-    const uint8_t neueMotion = 0U;
+    bool ef = ensStale(j);
+    bool nF = !(bv && vv) || ef;
+    *t01c = nT; *h01p = nH; *lux = nL; *mot = 0U; *flt = nF;
 
-    float bmeTempC = NAN;
-    float bmeHumPct = NAN;
-    bool bmeMessungGueltig = false;
-    bool vemlMessungGueltig = false;
-    uint32_t neuerPressure = NET_SEN_PRESSURE_UNGUELTIG;
-    uint32_t neuerGasOhm = NET_SEN_GAS_OHM_UNGUELTIG;
-
-    if (bme680Bereit) {
-        if (sensorBme680.performReading()) {
-            bmeTempC = sensorBme680.temperature;
-            bmeHumPct = sensorBme680.humidity;
-            const float pressurePa = sensorBme680.pressure;
-            const uint32_t gasOhm = (uint32_t)sensorBme680.gas_resistance;
-
-            const bool bmeGueltig =
-                isfinite(bmeTempC) &&
-                isfinite(bmeHumPct) &&
-                isfinite(pressurePa) &&
-                bmeHumPct >= 0.0f &&
-                bmeHumPct <= 100.0f &&
-                pressurePa >= 30000.0f &&
-                pressurePa <= 110000.0f;
-
-            if (bmeGueltig) {
-                neuerTemp = (int16_t)lroundf(bmeTempC * 10.0f);
-                neuerHum = clampHum01pct((long)lroundf(bmeHumPct * 10.0f));
-                neuerPressure = (uint32_t)lroundf(pressurePa);
-                bmeMessungGueltig = true;
-                if (bme680GueltigeMessungen < 255U) bme680GueltigeMessungen++;
-
-                if (istGasWarmupAbgeschlossen(jetzt) && gasOhm > 0UL) {
-                    neuerGasOhm = gasOhm;
-                    if (!gasWarmupInfoGeloggt) {
-                        logf("INFO", "BME680 Rohgas warmup abgeschlossen (gas_ohm intern belastbar)");
-                        gasWarmupInfoGeloggt = true;
-                    }
-                }
-            } else {
-                logBmeFehlerGedrosselt(jetzt, "Messwerte unplausibel");
-            }
-        } else {
-            logBmeFehlerGedrosselt(jetzt, "performReading fehlgeschlagen");
-        }
-    } else {
-        logBmeFehlerGedrosselt(jetzt, "Sensor nicht initialisiert");
+    if ((j - lastSnap) >= SENSOR_SNAPSHOT_LOG_INTERVAL_MS) {
+        logf("INFO", "snap t=%d h=%u l=%u p=%lu g=%lu a=%u tv=%u ec=%u f=%s",
+             nT, nH, nL, (unsigned long)erwState.pp, (unsigned long)erwState.go,
+             erwState.aqi, erwState.tvoc, erwState.eco2, nF ? "true" : "false");
+        lastSnap = j;
     }
-
-    if (veml7700Bereit) {
-        if ((jetzt - bootMs) >= NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS) {
-            const float luxWert = sensorVeml7700.readLux();
-            if (isfinite(luxWert) && luxWert >= 0.0f) {
-                neuerLux = clampToU16((long)lroundf(luxWert));
-                vemlMessungGueltig = true;
-            } else {
-                logVemlFehlerGedrosselt(jetzt, "Lux unplausibel");
-            }
-        }
-    } else {
-        logVemlFehlerGedrosselt(jetzt, "Sensor nicht initialisiert");
-    }
-
-    aktualisiereEnsKompensation(bmeMessungGueltig, bmeTempC, bmeHumPct);
-    if (ensCompCall && !ensCompensationAktiv) {
-        logEnsFehlerGedrosselt(jetzt, "ENV-Write fehlgeschlagen", bmeMessungGueltig);
-    }
-
-    uint16_t neuerAqi = erweiterterState.aqi;
-    uint16_t neuerTvoc = erweiterterState.tvoc_ppb;
-    uint16_t neuerEco2 = erweiterterState.eco2_ppm;
-    bool ensMessungGueltig = false;
-
-    if (ens160Bereit && sensorEns160 != nullptr) {
-        const bool neueDaten = sensorEns160->measure(false);
-        if (neueDaten) {
-            const uint16_t rawAqi500 = sensorEns160->getAQI500();
-            const uint16_t rawAqi = sensorEns160->getAQI();
-            const uint16_t mappedAqi =
-                (rawAqi500 > 0U && rawAqi500 <= 500U) ? rawAqi500 : mapEns160AqiZu500(rawAqi);
-            const uint16_t tvoc = sensorEns160->getTVOC();
-            const uint16_t eco2 = sensorEns160->geteCO2();
-
-            if (mappedAqi > 0U) {
-                neuerAqi = mappedAqi;
-                neuerTvoc = tvoc;
-                neuerEco2 = eco2;
-                ensMessungGueltig = true;
-                letzterEnsGueltigMs = jetzt;
-                ensWarteHinweisGeloggt = false;
-                logEnsInfoGedrosselt(
-                    jetzt,
-                    istEns160WarmupAbgeschlossen(jetzt) ? "brauchbar" : "warmup",
-                    bmeMessungGueltig);
-            } else {
-                logEnsInfoGedrosselt(
-                    jetzt,
-                    istEns160WarmupAbgeschlossen(jetzt) ? "ungueltige_ausgabe" : "warmup",
-                    bmeMessungGueltig);
-            }
-        } else if (!ensWarteHinweisGeloggt && !istEns160WarmupAbgeschlossen(jetzt)) {
-            logEnsInfoGedrosselt(jetzt, "warte_auf_daten", bmeMessungGueltig);
-            ensWarteHinweisGeloggt = true;
-        }
-    }
-
-    if (!ensMessungGueltig && ens160FehltZuLange(jetzt)) {
-        neuerAqi = NET_SEN_AIR_METRIC_UNGUELTIG;
-        neuerTvoc = NET_SEN_AIR_METRIC_UNGUELTIG;
-        neuerEco2 = NET_SEN_AIR_METRIC_UNGUELTIG;
-        logEnsFehlerGedrosselt(jetzt, "zu lange keine gueltigen Daten", bmeMessungGueltig);
-    }
-
-    bool extendedGeaendert = false;
-    extendedGeaendert =
-        uebernehmeWertU32(
-            &erweiterterState.pressure_pa,
-            neuerPressure,
-            NET_SEN_PRESSURE_UNGUELTIG,
-            NET_SEN_ENV_BME680_VEML_PRESSURE_DELTA_PA) || extendedGeaendert;
-    extendedGeaendert =
-        uebernehmeWertU32(
-            &erweiterterState.gas_ohm,
-            neuerGasOhm,
-            NET_SEN_GAS_OHM_UNGUELTIG,
-            NET_SEN_ENV_BME680_VEML_GAS_DELTA_OHM) || extendedGeaendert;
-    extendedGeaendert =
-        uebernehmeWertU16(
-            &erweiterterState.aqi,
-            neuerAqi,
-            NET_SEN_AIR_METRIC_UNGUELTIG,
-            NET_SEN_ENV_BME680_VEML_AQI_DELTA) || extendedGeaendert;
-    extendedGeaendert =
-        uebernehmeWertU16(
-            &erweiterterState.tvoc_ppb,
-            neuerTvoc,
-            NET_SEN_AIR_METRIC_UNGUELTIG,
-            NET_SEN_ENV_BME680_VEML_TVOC_DELTA_PPB) || extendedGeaendert;
-    extendedGeaendert =
-        uebernehmeWertU16(
-            &erweiterterState.eco2_ppm,
-            neuerEco2,
-            NET_SEN_AIR_METRIC_UNGUELTIG,
-            NET_SEN_ENV_BME680_VEML_ECO2_DELTA_PPM) || extendedGeaendert;
-
-    const bool ensFault = ens160FehltZuLange(jetzt);
-    const bool neuerFault = !(bmeMessungGueltig && vemlMessungGueltig) || ensFault;
-
-    *temp_01c = neuerTemp;
-    *hum_01pct = neuerHum;
-    *lux = neuerLux;
-    *motion = neueMotion;
-    *fault = neuerFault;
-
-    if (extendedGeaendert) {
-        erweiterterStateGeaendert = true;
-    }
-
-    if ((jetzt - letzterSnapshotLogMs) >= SENSOR_SNAPSHOT_LOG_INTERVAL_MS) {
-        logf(
-            "INFO",
-            "ENV snapshot temp_01c=%d hum_01pct=%u lux=%u pressure_pa=%lu gas_ohm=%lu aqi=%u tvoc_ppb=%u eco2_ppm=%u fault=%s",
-            neuerTemp,
-            neuerHum,
-            neuerLux,
-            (unsigned long)erweiterterState.pressure_pa,
-            (unsigned long)erweiterterState.gas_ohm,
-            erweiterterState.aqi,
-            erweiterterState.tvoc_ppb,
-            erweiterterState.eco2_ppm,
-            neuerFault ? "true" : "false");
-        letzterSnapshotLogMs = jetzt;
-    }
-
-    return absDiffI16(neuerTemp, vorherTemp) >= NET_SEN_ENV_BME680_VEML_TEMP_DELTA_01C ||
-           absDiffU16(neuerHum, vorherHum) >= NET_SEN_ENV_BME680_VEML_HUM_DELTA_01PCT ||
-           absDiffU16(neuerLux, vorherLux) >= NET_SEN_ENV_BME680_VEML_LUX_DELTA ||
-           neueMotion != vorherMotion ||
-           neuerFault != vorherFault;
+    return adI16(nT, vT) >= NET_SEN_ENV_BME680_VEML_TEMP_DELTA_01C ||
+           ad16(nH, vH) >= NET_SEN_ENV_BME680_VEML_HUM_DELTA_01PCT ||
+           ad16(nL, vL) >= NET_SEN_ENV_BME680_VEML_LUX_DELTA || vM != 0U || nF != vF;
 }
-
