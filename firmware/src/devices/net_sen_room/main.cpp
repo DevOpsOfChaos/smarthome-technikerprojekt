@@ -34,6 +34,10 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "MathUtils.h"
+using SmartHome::clampToU16;
+using SmartHome::absDiffU16;
+using SmartHome::absDiffI16;
 
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 1
 void netSenDeviceSensorInit();
@@ -68,23 +72,6 @@ bool veml7700Bereit = false;
 #endif
 
 unsigned long letzterSensorPollMs = 0UL;
-
-// clampToU16 – Wert auf uint16-Bereich begrenzen (0-65535)
-uint16_t clampToU16(long value) {
-    if (value < 0L) return 0U;
-    if (value > 65535L) return 65535U;
-    return (uint16_t)value;
-}
-
-// absDiffU16 – Absolute Differenz zweier uint16-Werte
-uint16_t absDiffU16(uint16_t a, uint16_t b) {
-    return a > b ? (uint16_t)(a - b) : (uint16_t)(b - a);
-}
-
-// absDiffI16 – Absolute Differenz zweier int16-Werte
-int16_t absDiffI16(int16_t a, int16_t b) {
-    return a > b ? (int16_t)(a - b) : (int16_t)(b - a);
-}
 }  // namespace
 
 void netSenDeviceSensorInit() {
