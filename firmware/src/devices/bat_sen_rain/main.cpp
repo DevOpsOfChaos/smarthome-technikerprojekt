@@ -31,6 +31,8 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "MathUtils.h"
+using SmartHome::absDiffU16;
 
 #define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 1
 #include "../../basetypes/bat_sen/BatSenRuntime.h"
@@ -66,11 +68,6 @@ uint16_t rain_raw = 0U;             // Letzter ADC-Rohwert (0-4095)
 bool event_regenstatus = false;     // Gemerkter Event-Status (nass/trocken)
 uint16_t event_raw = 0U;            // Gemerkter Event-Rohwert
 unsigned long letzte_probe_ms = 0UL; // Zeitstempel letzte ADC-Messung
-
-// absDiffU16 – Absolute Differenz zwischen zwei uint16-Werten
-uint16_t absDiffU16(uint16_t a, uint16_t b) {
-    return (a >= b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
-}
 
 // leseRainRaw – Liest ADC-Rohwert vom Regensensor-Pin (0-4095, 12-Bit)
 uint16_t leseRainRaw() {
