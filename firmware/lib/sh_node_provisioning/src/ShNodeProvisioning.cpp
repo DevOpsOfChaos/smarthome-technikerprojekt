@@ -22,6 +22,7 @@ constexpr const char* SENSOR_INTERVAL_HINT_DEFAULT = "Sensorintervall in Sekunde
 constexpr unsigned long SETUP_BUTTON_HOLD_MS_DEFAULT = 5000UL;
 constexpr unsigned long SETUP_INDICATOR_BLINK_MS_DEFAULT = 500UL;
 
+// htmlEscape – HTML-Sonderzeichen maskieren (& < > " ') fuer sichere Ausgabe
 String htmlEscape(const String& text) {
     String escaped;
     escaped.reserve(text.length() + 16U);
@@ -41,10 +42,12 @@ String htmlEscape(const String& text) {
     return escaped;
 }
 
+// basisBlobValid – Prueft Magic und Version eines geladenen NodeBasisSettings-Blobs
 bool basisBlobValid(const NodeBasisSettings& settings) {
     return settings.magic == NODE_BASIS_MAGIC && settings.version == NODE_BASIS_VERSION;
 }
 
+// basisSettingsEqual – Vergleich zweier NodeBasisSettings (alle Felder ausser Magic/Version)
 bool basisSettingsEqual(const NodeBasisSettings& left, const NodeBasisSettings& right) {
     return left.magic == right.magic && left.version == right.version &&
            left.flags == right.flags && memcmp(left.masterMac, right.masterMac, sizeof(left.masterMac)) == 0 &&
@@ -52,6 +55,7 @@ bool basisSettingsEqual(const NodeBasisSettings& left, const NodeBasisSettings& 
            left.sensorSendIntervalS == right.sensorSendIntervalS;
 }
 
+// fallbackText – Gibt text zurueck, falls nicht leer, sonst fallback
 const char* fallbackText(const char* text, const char* fallback) {
     return (text != nullptr && text[0] != '\0') ? text : fallback;
 }
@@ -81,6 +85,10 @@ NodeProvisioningController::NodeProvisioningController()
       setupIndicatorState_(false),
       setupIndicatorLastBlinkMs_(0UL) {}
 
+// begin – Initialisiert das Provisioning: Pointer setzen, I/O konfigurieren,
+//   Preferences oeffnen, persistierte Daten laden. Bei fehlenden/noch nicht
+//   vorhandenen Preferences werden Defaults aktiviert.
+//   Rueckgabe: true bei Erfolg, false bei NULL-Pointern oder ungueltigen Parametern.
 bool NodeProvisioningController::begin(
     const NodeProvisioningConfig& config,
     bool* masterMacValid,
@@ -154,12 +162,14 @@ bool NodeProvisioningController::begin(
     return true;
 }
 
+// applyDefaultBasisValues – Setzt Master-MAC zurueck und schreibt Default-Intervalle aus config
 void NodeProvisioningController::applyDefaultBasisValues() {
     clearStoredMasterMac();
     *statusSendIntervalS_ = config_.defaultStatusSendIntervalS;
     *sensorSendIntervalS_ = config_.defaultSensorSendIntervalS;
 }
 
+// captureBasisSnapshot – Aktuelle Basis-Einstellungen in Snapshot sichern (fuer Rollback)
 void NodeProvisioningController::captureBasisSnapshot(NodeBasisSnapshot& snapshot) const {
     snapshot.masterMacValid = *masterMacValid_;
     memcpy(snapshot.masterMac, masterMac_, 6U);
@@ -167,6 +177,7 @@ void NodeProvisioningController::captureBasisSnapshot(NodeBasisSnapshot& snapsho
     snapshot.sensorSendIntervalS = *sensorSendIntervalS_;
 }
 
+// restoreBasisSnapshot – Gesicherten Snapshot wiederherstellen (nach fehlgeschlagenem Save)
 void NodeProvisioningController::restoreBasisSnapshot(const NodeBasisSnapshot& snapshot) {
     *masterMacValid_ = snapshot.masterMacValid;
     memcpy(masterMac_, snapshot.masterMac, 6U);
@@ -174,28 +185,35 @@ void NodeProvisioningController::restoreBasisSnapshot(const NodeBasisSnapshot& s
     *sensorSendIntervalS_ = snapshot.sensorSendIntervalS;
 }
 
+// isSendIntervalValid – Prueft ob Wert innerhalb der konfigurierten Grenzen (min/max)
 bool NodeProvisioningController::isSendIntervalValid(uint32_t valueS) const {
     return valueS >= config_.minSendIntervalS && valueS <= config_.maxSendIntervalS;
 }
 
+// sanitizeStatusSendInterval – Wert auf gueltigen Bereich begrenzen, sonst Default
 uint32_t NodeProvisioningController::sanitizeStatusSendInterval(uint32_t valueS) const {
     return isSendIntervalValid(valueS) ? valueS : config_.defaultStatusSendIntervalS;
 }
 
+// sanitizeSensorSendInterval – Sensor-Intervall mit ggf. abweichenden Sensor-Grenzen sanitizen
 uint32_t NodeProvisioningController::sanitizeSensorSendInterval(uint32_t valueS) const {
     return valueS >= effectiveMinSensorSendIntervalS() && valueS <= effectiveMaxSensorSendIntervalS()
                ? valueS
                : config_.defaultSensorSendIntervalS;
 }
 
+// effectiveMinSensorSendIntervalS – Minimales Sensor-Intervall (falls 0, wird minSendIntervalS genutzt)
 uint32_t NodeProvisioningController::effectiveMinSensorSendIntervalS() const {
     return config_.minSensorSendIntervalS > 0UL ? config_.minSensorSendIntervalS : config_.minSendIntervalS;
 }
 
+// effectiveMaxSensorSendIntervalS – Maximales Sensor-Intervall (falls 0, wird maxSendIntervalS genutzt)
 uint32_t NodeProvisioningController::effectiveMaxSensorSendIntervalS() const {
     return config_.maxSensorSendIntervalS > 0UL ? config_.maxSensorSendIntervalS : config_.maxSendIntervalS;
 }
 
+// parseMacText – Text "AA:BB:CC:DD:EE:FF" in 6-Byte-MAC parsen (mit Trim/Hex-Parsing)
+//   Rueckgabe: true bei erfolgreichem Parsen
 bool NodeProvisioningController::parseMacText(const char* text, uint8_t outMac[6]) {
     if (text == nullptr || outMac == nullptr) return false;
 
@@ -245,6 +263,7 @@ bool NodeProvisioningController::parseMacText(const char* text, uint8_t outMac[6
     return true;
 }
 
+// formatMacText – 6-Byte-MAC als "AA:BB:CC:DD:EE:FF" formatieren (nur wenn gueltig)
 void NodeProvisioningController::formatMacText(
     const uint8_t* mac,
     bool isValid,
@@ -268,21 +287,25 @@ void NodeProvisioningController::formatMacText(
         mac[5]);
 }
 
+// hasStoredMasterMac – Zeigt ob eine gueltige Master-MAC gespeichert ist
 bool NodeProvisioningController::hasStoredMasterMac() const {
     return masterMacValid_ != nullptr && *masterMacValid_;
 }
 
+// buildStoredMasterMacText – Gespeicherte MAC als Text ausgeben (leer wenn ungueltig)
 String NodeProvisioningController::buildStoredMasterMacText() const {
     char buffer[MASTER_MAC_TEXT_LEN] = {0};
     formatMacText(masterMac_, hasStoredMasterMac(), buffer, sizeof(buffer));
     return String(buffer);
 }
 
+// clearStoredMasterMac – Master-MAC zuruecksetzen (ungueltig + nullen)
 void NodeProvisioningController::clearStoredMasterMac() {
     *masterMacValid_ = false;
     memset(masterMac_, 0, 6U);
 }
 
+// setStoredMasterMac – Master-MAC setzen (bei nullptr -> clear)
 void NodeProvisioningController::setStoredMasterMac(const uint8_t masterMac[6]) {
     if (masterMac == nullptr) {
         clearStoredMasterMac();
@@ -292,6 +315,7 @@ void NodeProvisioningController::setStoredMasterMac(const uint8_t masterMac[6]) 
     memcpy(masterMac_, masterMac, 6U);
 }
 
+// configureRoutes – HTTP-Routen registrieren (Root + Save + NotFound)
 void NodeProvisioningController::configureRoutes() {
     if (routesConfigured_) return;
 
@@ -301,6 +325,11 @@ void NodeProvisioningController::configureRoutes() {
     routesConfigured_ = true;
 }
 
+// enterSetupMode – Setup-AP starten: WiFi auf NULL -> AP, SSID/Passwort setzen,
+//   HTTP-Server starten. Bei Fehler: Aufraeumen und zuruecksetzen.
+//   Hinweis: Die delay(25) zwischen WIFI_MODE_NULL und WIFI_AP ist erforderlich,
+//   weil der WiFi-Stack einen stabilen Zustand braucht.
+//   Bei AP-Start-Fehler: kompletter Rueckbau + Warn-Log.
 void NodeProvisioningController::enterSetupMode() {
     if (!initialized_ || *setupMode_) return;
 
@@ -350,6 +379,7 @@ void NodeProvisioningController::enterSetupMode() {
         WiFi.softAPIP().toString().c_str());
 }
 
+// exitSetupMode – Setup-Modus beenden: AP stoppen, WiFi-Reset, I/O zuruecksetzen
 void NodeProvisioningController::exitSetupMode(const char* reason) {
     if (!initialized_) return;
 
@@ -370,6 +400,7 @@ void NodeProvisioningController::exitSetupMode(const char* reason) {
     log("INFO", "Setup-Modus beendet (%s)", reason ? reason : "ohne grund");
 }
 
+// readRequestedMasterMac – Liest Master-MAC aus HTTP-Query (zwei moegliche Arg-Namen)
 bool NodeProvisioningController::readRequestedMasterMac(String& outValue, const char*& outSourceArg) {
     if (server_.hasArg(MASTER_MAC_ARG_PRIMARY)) {
         outValue = server_.arg(MASTER_MAC_ARG_PRIMARY);
@@ -388,6 +419,8 @@ bool NodeProvisioningController::readRequestedMasterMac(String& outValue, const 
     return false;
 }
 
+// parseUnsignedLongText – Text in uint32 parsen mit Bereichspruefung und Overflow-Schutz
+//   Rueckgabe: true bei Erfolg, outValue ist dann gesetzt
 bool NodeProvisioningController::parseUnsignedLongText(
     String value,
     uint32_t minValue,
@@ -420,6 +453,7 @@ bool NodeProvisioningController::parseUnsignedLongText(
     return true;
 }
 
+// appendSharedStyles – CSS-Stylesheet fuer Setup-Weboberflaeche anhaengen (Dark-Theme)
 void NodeProvisioningController::appendSharedStyles(String& page) const {
     page += F(":root{--bg:#070b14;--bg2:#0b1220;--card:#101827;--card2:#0c1320;--text:#edf3ff;--muted:#8ea0bf;--line:#1e2c45;--accent:#35c486;--accent2:#1d8a61;--danger:#ff6b6b;--danger2:#c94949;--ok:#91f0c5;--error:#ffb1b1;}");
     page += F("*{box-sizing:border-box}html,body{margin:0;padding:0;min-height:100%;background:radial-gradient(circle at top,#15233d 0%,var(--bg) 56%,#04060d 100%);color:var(--text);font-family:\"Segoe UI\",Tahoma,sans-serif}");
@@ -431,6 +465,9 @@ void NodeProvisioningController::appendSharedStyles(String& page) const {
     page += F(".meta{display:grid;gap:4px;margin-top:10px;font-size:.78rem;color:var(--muted)}.meta code{color:var(--text)}.footer{margin-top:2px;font-size:.75rem;color:var(--muted)}");
 }
 
+// buildPage – Komplette Setup-HTML-Seite bauen (Formular mit Node-Basis + Device-Bereich)
+//   Baut aus escaped-Templates eine vollstaendige HTML-Seite mit CSS + JS-Validierung.
+//   Aufteilung: Kopf -> Status -> Node-Basis-Felder -> Device-Felder -> Footer.
 String NodeProvisioningController::buildPage(
     const String& masterMacText,
     const String& statusIntervalText,
@@ -551,6 +588,7 @@ String NodeProvisioningController::buildPage(
     return page;
 }
 
+// sendForm – buildPage + HTTP-Response senden (mit Status-Code)
 void NodeProvisioningController::sendForm(
     const String& masterMacText,
     const String& statusIntervalText,
@@ -571,6 +609,7 @@ void NodeProvisioningController::sendForm(
             sourceServer));
 }
 
+// buildResultPage – Einfache Ergebnis-HTML-Seite (Erfolg/Fehler + optionaler Zurueck-Button)
 String NodeProvisioningController::buildResultPage(
     const String& titleText,
     const String& messageText,
@@ -609,6 +648,7 @@ String NodeProvisioningController::buildResultPage(
     return page;
 }
 
+// sendResultPage – buildResultPage + HTTP-Response senden
 void NodeProvisioningController::sendResultPage(
     const String& titleText,
     const String& messageText,
@@ -621,6 +661,9 @@ void NodeProvisioningController::sendResultPage(
         buildResultPage(titleText, messageText, isError, showBackButton));
 }
 
+// handleRoot – HTTP-GET / : Setup-Formular anzeigen
+//   Bei Query-Parametern (master_mac, mac) wird die MAC vorausgefuellt.
+//   Ungueltige MAC-Query -> Fehlermeldung im Formular.
 void NodeProvisioningController::handleRoot() {
     String masterMacText = buildStoredMasterMacText();
     String infoText =
@@ -654,6 +697,12 @@ void NodeProvisioningController::handleRoot() {
         nullptr);
 }
 
+// handleSave – HTTP-POST /save : Validieren + Speichern + Neustart
+//   Pipeline: 1) MAC validieren 2) Status-Intervall validieren 3) Sensor-Intervall validieren
+//             4) Device-Felder validieren 5) Snapshot (Basis + Device) 6) Neue Werte anwenden
+//             7) Persistieren (saveCurrentState) 8) Bei Fehler: Rollback + Fehlerseite
+//             9) Bei Erfolg: restartPending setzen + Erfolgsseite
+//   Sonderfall: device_action (z.B. Reset) wird direkt an deviceHandler delegiert.
 void NodeProvisioningController::handleSave() {
     if (server_.hasArg("device_action")) {
         deviceHandler_->discardParsedDeviceSettings();
@@ -782,6 +831,7 @@ void NodeProvisioningController::handleSave() {
         false);
 }
 
+// loadBasisFromStorage – Basis-Blob aus Preferences lesen und anwenden
 bool NodeProvisioningController::loadBasisFromStorage(Preferences& prefs) {
     NodeBasisSettings settings = {};
     if (!readBasisBlob(prefs, settings)) {
@@ -792,6 +842,8 @@ bool NodeProvisioningController::loadBasisFromStorage(Preferences& prefs) {
     return true;
 }
 
+// readBasisBlob – Rohdaten der Basis aus Preferences lesen mit Groessen- und Validitaetspruefung
+//   Rueckgabe: true bei Erfolg, outSettings ist dann gefuellt
 bool NodeProvisioningController::readBasisBlob(Preferences& prefs, NodeBasisSettings& outSettings) const {
     const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
     if (prefs.getBytesLength(basisKey) != sizeof(NodeBasisSettings)) {
@@ -811,6 +863,7 @@ bool NodeProvisioningController::readBasisBlob(Preferences& prefs, NodeBasisSett
     return true;
 }
 
+// applyBasisSettings – Geladene Basis-Einstellungen auf aktive Runtime-Pointer anwenden
 void NodeProvisioningController::applyBasisSettings(const NodeBasisSettings& settings) {
     if ((settings.flags & NODE_BASIS_FLAG_MASTER_MAC) != 0U) {
         setStoredMasterMac(settings.masterMac);
@@ -822,6 +875,7 @@ void NodeProvisioningController::applyBasisSettings(const NodeBasisSettings& set
     *sensorSendIntervalS_ = sanitizeSensorSendInterval(settings.sensorSendIntervalS);
 }
 
+// buildBasisSettings – Aktuelle Runtime-Werte in NodeBasisSettings-Struct ueberfuehren
 NodeBasisSettings NodeProvisioningController::buildBasisSettings() const {
     NodeBasisSettings settings = {};
     settings.magic = NODE_BASIS_MAGIC;
@@ -837,6 +891,7 @@ NodeBasisSettings NodeProvisioningController::buildBasisSettings() const {
     return settings;
 }
 
+// writeBasisToStorage – Aktuelle oder uebergebene Basis in Preferences schreiben
 bool NodeProvisioningController::writeBasisToStorage(Preferences& prefs) const {
     return writeBasisToStorage(prefs, buildBasisSettings());
 }
@@ -848,12 +903,20 @@ bool NodeProvisioningController::writeBasisToStorage(
     return prefs.putBytes(basisKey, &settings, sizeof(settings)) == sizeof(settings);
 }
 
+// removeBasisFromStorage – Basis-Blob aus Preferences entfernen
 bool NodeProvisioningController::removeBasisFromStorage(Preferences& prefs) const {
     const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
     prefs.remove(basisKey);
     return true;
 }
 
+// saveCurrentState – Aktuelle Einstellungen persistent in NVS speichern
+//   Vorgehen: 1) Preferences im Schreibmodus oeffnen
+//             2) Basis-Blob schreiben (nur bei Aenderung)
+//             3) Device-Settings speichern (durch deviceHandler)
+//   Rollback: Wenn Device-Save fehlschlaegt, wird Basis auf Vorzustand zurueckgesetzt.
+//             Wenn vorher keine Basis existierte, wird sie komplett entfernt.
+//   Rueckgabe: true bei Erfolg, false bei NVS-Fehler
 bool NodeProvisioningController::saveCurrentState() {
     if (!initialized_) return false;
 
@@ -901,6 +964,10 @@ bool NodeProvisioningController::saveCurrentState() {
     return true;
 }
 
+// clearStoredSettings – Alle persistierten Einstellungen loeschen (Basis + Device)
+//   Vorgehen: 1) Preferences oeffnen 2) Basis entfernen 3) Device-Settings loeschen
+//   Rollback: Wenn Device-Loeschung fehlschlaegt, wird Basis wiederhergestellt.
+//   Rueckgabe: true bei Erfolg, false bei NVS-Fehler
 bool NodeProvisioningController::clearStoredSettings() {
     if (!initialized_) return false;
 
@@ -929,6 +996,10 @@ bool NodeProvisioningController::clearStoredSettings() {
     return true;
 }
 
+// update – Haupt-Loop des Provisioning-Controllers (muss regelmaessig gerufen werden)
+//   Tasks: 1) Setup-Taster auswerten 2) Web-Client bedienen (wenn AP aktiv)
+//          3) Setup-LED-Indikator aktualisieren 4) Verzoegerten Neustart ausloesen
+//
 void NodeProvisioningController::update() {
     if (!initialized_) return;
 
@@ -950,42 +1021,53 @@ void NodeProvisioningController::update() {
     }
 }
 
+// isSetupModeActive – Ist der Setup-Modus aktuell aktiv?
 bool NodeProvisioningController::isSetupModeActive() const {
     return setupMode_ != nullptr && *setupMode_;
 }
 
+// setupButtonConfigured – Ist ein Setup-Taster in der Konfiguration definiert?
 bool NodeProvisioningController::setupButtonConfigured() const {
     return config_.setupButtonPin >= 0;
 }
 
+// setupIndicatorConfigured – Ist eine Setup-LED in der Konfiguration definiert?
 bool NodeProvisioningController::setupIndicatorConfigured() const {
     return config_.setupIndicatorLedPin >= 0;
 }
 
+// statusIntervalArgName – HTML-Formular-Feldname fuer Status-Intervall (aus Config, sonst Default)
 const char* NodeProvisioningController::statusIntervalArgName() const {
     return fallbackText(config_.statusSendIntervalFieldName, STATUS_INTERVAL_ARG_DEFAULT);
 }
 
+// sensorIntervalArgName – HTML-Formular-Feldname fuer Sensor-Intervall (aus Config, sonst Default)
 const char* NodeProvisioningController::sensorIntervalArgName() const {
     return fallbackText(config_.sensorSendIntervalFieldName, SENSOR_INTERVAL_ARG_DEFAULT);
 }
 
+// statusIntervalLabel – Anzeigelabel fuer Status-Intervall (aus Config, sonst Feldname)
 const char* NodeProvisioningController::statusIntervalLabel() const {
     return fallbackText(config_.statusSendIntervalLabel, statusIntervalArgName());
 }
 
+// sensorIntervalLabel – Anzeigelabel fuer Sensor-Intervall (aus Config, sonst Feldname)
 const char* NodeProvisioningController::sensorIntervalLabel() const {
     return fallbackText(config_.sensorSendIntervalLabel, sensorIntervalArgName());
 }
 
+// statusIntervalHint – Hilfetext fuer Status-Intervall (aus Config, sonst Default-Hinweis)
 const char* NodeProvisioningController::statusIntervalHint() const {
     return fallbackText(config_.statusSendIntervalHint, STATUS_INTERVAL_HINT_DEFAULT);
 }
 
+// sensorIntervalHint – Hilfetext fuer Sensor-Intervall (aus Config, sonst Default-Hinweis)
 const char* NodeProvisioningController::sensorIntervalHint() const {
     return fallbackText(config_.sensorSendIntervalHint, SENSOR_INTERVAL_HINT_DEFAULT);
 }
 
+// initializeSetupIo – GPIOs fuer Setup-Taster und -LED initialisieren (pinMode + Pullup-Konfig)
+//   Der Taster-Pin wird als INPUT (ggf. INPUT_PULLUP) konfiguriert, die LED als OUTPUT.
 void NodeProvisioningController::initializeSetupIo() {
     if (setupButtonConfigured()) {
         pinMode(config_.setupButtonPin, config_.setupButtonActiveLow ? INPUT_PULLUP : INPUT);
@@ -997,6 +1079,7 @@ void NodeProvisioningController::initializeSetupIo() {
     }
 }
 
+// writeSetupIndicator – LED-Zustand setzen (beruecksichtigt activeHigh-Konfiguration)
 void NodeProvisioningController::writeSetupIndicator(bool active) {
     if (!setupIndicatorConfigured()) return;
 
@@ -1006,6 +1089,11 @@ void NodeProvisioningController::writeSetupIndicator(bool active) {
     setupIndicatorState_ = active;
 }
 
+// updateSetupButton – Taster-Entprellung und Langdruck-Erkennung
+//   Erkennt steigende/fallende Flanke und misst die Haltezeit.
+//   Bei ueberschreiten von setupButtonHoldMs: enterSetupMode() ausloesen.
+//   Entprellung erfolgt indirekt ueber die Haltezeit-Schwelle.
+//   Nach einmaligem Ausloesen wird setupButtonHoldConsumed gesetzt bis zum Loslassen.
 void NodeProvisioningController::updateSetupButton() {
     if (!setupButtonConfigured()) return;
 
@@ -1038,6 +1126,10 @@ void NodeProvisioningController::updateSetupButton() {
     setupButtonLastActive_ = active;
 }
 
+// updateSetupIndicator – LED-Blinken im Setup-Modus (sonst aus)
+//   Im Setup-Modus: LED im Intervall setupIndicatorBlinkMs togglen.
+//   Blink-Startzeit wird bei jedem Eintritt in den Setup-Modus zurueckgesetzt.
+//   Ausserhalb: LED ausschalten und Blink-Zaehler zuruecksetzen.
 void NodeProvisioningController::updateSetupIndicator() {
     if (!setupIndicatorConfigured()) return;
 
@@ -1059,6 +1151,8 @@ void NodeProvisioningController::updateSetupIndicator() {
     }
 }
 
+// log – Formatiertes Logging ueber Callback (nur bei gesetztem logFn_)
+//   Baut einen 240-Byte-Puffer auf und ruft den Log-Callback mit Level und Message.
 void NodeProvisioningController::log(const char* level, const char* format, ...) const {
     if (logFn_ == nullptr || format == nullptr) return;
 
