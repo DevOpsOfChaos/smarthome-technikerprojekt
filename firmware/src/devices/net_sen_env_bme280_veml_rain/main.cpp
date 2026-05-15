@@ -1,32 +1,19 @@
-// =============================================================================
-// main.cpp – NET-SEN Env BME280+VEML+Rain
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_sen_env_bme280_veml_rain/main.cpp
-// Hardware:   ESP32-C3 + BME280 + VEML7700 + digitaler Regensensor
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Pin-Belegung (siehe PinConfig.h):
-//   I2C SDA:       GPIO0
-//   I2C SCL:       GPIO1
-//   BME280:        Adresse 0x76 (Fallback 0x77)
-//   VEML7700:      Adresse 0x10
-//   Regensensor:   GPIO3, digital, active-LOW, Pullup
-//   Setup-Button:  GPIO2
-//   Setup-LED:     GPIO7
-//
-// Funktionsweise:
-//   Sensor-Poll alle 2500ms. BME280 liefert Temp/Feuchte/Druck.
-//   VEML7700 liefert Lux. Digitaler Regensensor (nass/trocken) via Event.
-//   Auto-Recovery bei Sensor-Fehlern (alle 30s).
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-SEN Env: Umweltsensor mit BME280 + VEML7700 + digitalem Regensensor
+ *
+ * @details Erweiterter net_sen-Sensor-Adapter mit Regen-Event-Support.
+ *          BME280: Temp/Feuchte/Druck (0x76, Fallback 0x77).
+ *          VEML7700: Lux (0x10, 100ms Integration, 500ms Warmup).
+ *          Regensensor: digitaler Eingang (GPIO3), active-LOW, Pullup.
+ *          Auto-Recovery bei Sensor-Fehlern (alle 30s).
+ *          Gedrosseltes Fehler-Logging.
+ *
+ * Hardware:   ESP32-C3 + BME280 + VEML7700 + digitaler Regensensor
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -102,24 +89,50 @@ ErweiterterState erweiterterState = {
     NET_SEN_AIR_METRIC_UNGUELTIG};
 bool erweiterterStateGeaendert = true;
 
+/**
+ * @brief Übernimmt einen neuen 32-Bit-Wert mit Delta-Prüfung und meldet Änderung
+ *
+ * @param z  Zeiger auf den aktuellen Wert (wird bei Änderung überschrieben)
+ * @param n  Neuer Wert
+ * @param inv Ungültigkeitswert, der keine Änderung auslösen soll
+ * @param d  Delta-Schwelle für signifikante Änderung
+ * @return true wenn sich der Wert signifikant geändert hat, false sonst
+ */
 bool uebernehmeWertU32(uint32_t* z, uint32_t n, uint32_t inv, uint32_t d) {
     if (!z) return false;
     const bool c = valueChangedSignificantU32(*z, n, inv, d);
     *z = n; return c;
 }
 
+/**
+ * @brief Gedrosseltes Fehler-Logging für BME280 (vermeidet Log-Spam bei Dauerfehlern)
+ *
+ * @param j Aktueller Zeitstempel in ms
+ * @param g Fehlerbeschreibung als C-String
+ */
 void logBmeFehler(unsigned long j, const char* g) {
     if ((j - letzterBmeFehlerLogMs) < NET_SEN_ENV_BME280_VEML_RAIN_ERROR_LOG_INTERVAL_MS) return;
     logf("WARN", "BME280 FEHLER: %s", g);
     letzterBmeFehlerLogMs = j;
 }
 
+/**
+ * @brief Gedrosseltes Fehler-Logging für VEML7700 (vermeidet Log-Spam bei Dauerfehlern)
+ *
+ * @param j Aktueller Zeitstempel in ms
+ * @param g Fehlerbeschreibung als C-String
+ */
 void logVemlFehler(unsigned long j, const char* g) {
     if ((j - letzterVemlFehlerLogMs) < NET_SEN_ENV_BME280_VEML_RAIN_ERROR_LOG_INTERVAL_MS) return;
     logf("WARN", "VEML7700 FEHLER: %s", g);
     letzterVemlFehlerLogMs = j;
 }
 
+/**
+ * @brief Initialisiert den BME280, zuerst über die primäre Adresse, bei Fehler über Fallback-Adresse
+ *
+ * @return true wenn der Sensor an einer der Adressen gefunden wurde, false sonst
+ */
 bool initialisiereBme280() {
     const uint8_t addrs[] = {
         (uint8_t)NET_SEN_ENV_BME280_PRIMARY_ADDRESS,
@@ -132,11 +145,20 @@ bool initialisiereBme280() {
     return false;
 }
 
+/**
+ * @brief Konfiguriert den VEML7700: Gain x1, Integrationszeit 100ms
+ */
 void konfiguriereVeml7700() {
     sensorVeml7700.setGain(VEML7700_GAIN_1);
     sensorVeml7700.setIntegrationTime(VEML7700_IT_100MS);
 }
 
+/**
+ * @brief Initialisiert den VEML7700, konfiguriert ihn und setzt den Bereit-Zeitstempel für die Warmup-Phase
+ *
+ * @param jetzt Aktueller Zeitstempel in ms (für Warmup-Referenz)
+ * @return true bei erfolgreicher Initialisierung, false wenn Sensor nicht antwortet
+ */
 bool initialisiereVeml7700(unsigned long jetzt) {
     if (!sensorVeml7700.begin()) return false;
     konfiguriereVeml7700();
@@ -144,6 +166,11 @@ bool initialisiereVeml7700(unsigned long jetzt) {
     return true;
 }
 
+/**
+ * @brief Versucht BME280-Recovery, wenn der Sensor ausgefallen ist und das Wiederholintervall abgelaufen ist
+ *
+ * @param jetzt Aktueller Zeitstempel in ms
+ */
 void versucheBmeRecovery(unsigned long jetzt) {
     if (bme280Bereit || !recoveryIsDue(letzterBmeRecoveryMs, jetzt, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) return;
     letzterBmeRecoveryMs = jetzt;
@@ -152,6 +179,11 @@ void versucheBmeRecovery(unsigned long jetzt) {
          bme280Bereit ? "BME280 Recovery ok" : "BME280 Recovery fehlgeschlagen");
 }
 
+/**
+ * @brief Versucht VEML7700-Recovery, wenn der Sensor ausgefallen ist und das Wiederholintervall abgelaufen ist
+ *
+ * @param jetzt Aktueller Zeitstempel in ms
+ */
 void versucheVemlRecovery(unsigned long jetzt) {
     if (veml7700Bereit || !recoveryIsDue(letzterVemlRecoveryMs, jetzt, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) return;
     letzterVemlRecoveryMs = jetzt;
@@ -160,6 +192,11 @@ void versucheVemlRecovery(unsigned long jetzt) {
          veml7700Bereit ? "VEML7700 Recovery ok" : "VEML7700 Recovery fehlgeschlagen");
 }
 
+/**
+ * @brief Liest den digitalen Regensensor über den konfigurierten GPIO-Pin aus
+ *
+ * @return true wenn der Regensensor Nässe meldet (active-LOW: LOW = nass), false bei Trockenheit
+ */
 bool leseRegenNass() {
     const int p = digitalRead(NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN);
 #if NET_SEN_ENV_BME280_VEML_RAIN_ACTIVE_LOW
@@ -174,6 +211,9 @@ bool leseRegenNass() {
 // CUSTOM-HOOKS
 // =============================================================================
 
+/**
+ * @brief System-Init: richtet I2C ein, initialisiert BME280, VEML7700 und den digitalen Regen-Pin
+ */
 void netSenDeviceSensorInit() {
     bootMs = millis();
     letzterSensorPollMs = 0UL;
@@ -209,8 +249,21 @@ void netSenDeviceSensorInit() {
          regenNass ? "nass" : "trocken");
 }
 
+/**
+ * @brief Leere Initialisierung für erweiterte Zustandswerte (Druck, Gas, AQI, TVOC, eCO2)
+ */
 void netSenDeviceExtendedStateInit() {}
 
+/**
+ * @brief Gibt die erweiterten Zustandswerte aus und setzt das Änderungsflag zurück
+ *
+ * @param pp Ausgabe: Luftdruck in Pa (oder NET_SEN_PRESSURE_UNGUELTIG)
+ * @param go Ausgabe: Gas-Widerstand in Ohm (oder NET_SEN_GAS_OHM_UNGUELTIG)
+ * @param a  Ausgabe: Luftqualitätsindex (oder NET_SEN_AIR_METRIC_UNGUELTIG)
+ * @param t  Ausgabe: TVOC in ppb (oder NET_SEN_AIR_METRIC_UNGUELTIG)
+ * @param e  Ausgabe: eCO2 in ppm (oder NET_SEN_AIR_METRIC_UNGUELTIG)
+ * @return true wenn sich die Werte seit dem letzten Poll geändert haben, false sonst
+ */
 bool netSenDeviceExtendedStatePoll(
     uint32_t* pp, uint32_t* go, uint16_t* a, uint16_t* t, uint16_t* e) {
     if (!pp || !go || !a || !t || !e) return false;
@@ -224,6 +277,15 @@ bool netSenDeviceExtendedStatePoll(
     return c;
 }
 
+/**
+ * @brief Sendet ein ausstehendes Regen-Event (nass/trocken) bei Statuswechsel des digitalen Regensensors
+ *
+ * @param et Ausgabe: Event-Typ (SH_EVENT_RAIN_DETECTED)
+ * @param tr Ausgabe: Trigger-Art (SH_TRIGGER_AUTO)
+ * @param p1 Ausgabe: Regenstatus (1 = nass, 0 = trocken)
+ * @param p2 Ausgabe: Zusatzwert (ungenutzt, immer 0)
+ * @return true wenn ein Event ausstand und jetzt gesendet wurde, false sonst
+ */
 bool netSenDevicePollEvent(uint8_t* et, uint8_t* tr, uint8_t* p1, uint16_t* p2) {
     if (!regenEventOffen) return false;
     regenEventOffen = false;
@@ -234,6 +296,17 @@ bool netSenDevicePollEvent(uint8_t* et, uint8_t* tr, uint8_t* p1, uint16_t* p2) 
     return true;
 }
 
+/**
+ * @brief Poll-Zyklus für alle Sensoren: Recovery, BME280 (Temp/Feuchte/Druck), VEML7700 (Lux mit Warmup-Phase),
+ *        digitaler Regensensor (Event-Generierung) und Extended State (Druck-Delta)
+ *
+ * @param temp_01c Ein/Ausgabe: Temperatur in 0.1°C (wird bei signifikanter Änderung aktualisiert)
+ * @param hum_01pct Ein/Ausgabe: relative Feuchte in 0.1% (wird bei signifikanter Änderung aktualisiert)
+ * @param lux       Ein/Ausgabe: Beleuchtungsstärke in Lux (wird bei signifikanter Änderung aktualisiert)
+ * @param motion    Ausgabe: Bewegung (ungenutzt, immer 0)
+ * @param fault     Ein/Ausgabe: Fehlerflag (true wenn BME280 oder VEML7700 nicht ok)
+ * @return true wenn sich mindestens ein Messwert signifikant geändert hat, false sonst
+ */
 bool netSenDeviceSensorPoll(
     int16_t* temp_01c, uint16_t* hum_01pct,
     uint16_t* lux, uint8_t* motion, bool* fault)

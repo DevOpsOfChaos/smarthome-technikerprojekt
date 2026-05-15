@@ -1,26 +1,18 @@
-// =============================================================================
-// main.cpp – NET-SEN DHT22 Reference: Temperatur/Feuchte-Sensor
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_sen_dht22_reference/main.cpp
-// Hardware:   ESP32-C3 + DHT22 an GPIO6
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Pin-Belegung:
-//   DHT22-Daten: GPIO6 (OneWire, Pullup erforderlich)
-//
-// Funktionsweise:
-//   Custom-Sensor-Hook fr DHT22. Messung alle 2500ms nach 2500ms Warmup.
-//   Werte in Zehntel (temp_01c, hum_01pct) mit Plausibilitaetspruefung.
-//   Hysterese: 1.0 Grad Temp, 5.0% Feuchte – sonst kein STATE-Update.
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-SEN DHT22 Reference: Temperatur/Feuchte-Sensor (Referenz-Implementierung)
+ *
+ * @details Custom-Sensor-Hook fuer DHT22 an GPIO6 (OneWire, Pullup).
+ *          Messung alle 2500ms nach 2500ms Warmup-Phase.
+ *          Werte in Zehntel (temp_01c, hum_01pct) mit Plausibilitaetspruefung.
+ *          Hysterese: 1.0 Grad Temp, 5.0% Feuchte – sonst kein STATE-Update.
+ *          Gedrosseltes Logging: Werte alle 15s, Fehler alle 30s.
+ *
+ * Hardware: ESP32-C3 + DHT22 an GPIO6
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 #include <DHT.h>
@@ -59,7 +51,11 @@ unsigned long letzterFehlerLogMs = 0UL;       // Gedrosseltes Fehler-Logging
 unsigned long letzterWerteLogMs = 0UL;        // Gedrosseltes Werte-Logging
 bool letzterFaultState = true;                // Vorheriger Fehlerstatus
 
-// clampToHum01pct – Begrenzt Feuchte auf 0-1000 (0-100%)
+/**
+ * @brief Begrenzt Feuchte-Wert auf den gueltigen Bereich 0-1000 (0-100%).
+ * @param value Rohwert in Zehntel-Prozent
+ * @return Begrenzter Wert zwischen HUM_01PCT_MIN und HUM_01PCT_MAX
+ */
 uint16_t clampToHum01pct(long value) {
     if (value < (long)HUM_01PCT_MIN) return HUM_01PCT_MIN;
     if (value > (long)HUM_01PCT_MAX) return HUM_01PCT_MAX;
@@ -71,7 +67,12 @@ uint16_t clampToHum01pct(long value) {
 // CUSTOM-SENSOR-HOOKS
 // =============================================================================
 
-// netSenDeviceSensorInit – Initialisiert DHT22 und Timer
+/**
+ * @brief Initialisiert den DHT22-Sensor und setzt Timer zurueck.
+ *
+ * Erfasst bootMs fuer die Warmup-Phase (NET_SEN_DHT22_REF_WARMUP_MS).
+ * Wird einmalig von NetSenRuntime beim Boot aufgerufen.
+ */
 void netSenDeviceSensorInit() {
     bootMs = millis();
     letzterSensorPollMs = 0UL;
@@ -86,13 +87,21 @@ void netSenDeviceSensorInit() {
          NET_SEN_DHT22_REF_READ_INTERVAL_MS);
 }
 
-// netSenDeviceSensorPoll – DHT22-Messung mit Plausibilitaet und Hysterese
-//   Parameter: temp_01c – Ausgabe: Temperatur in Zehntel-Grad
-//              hum_01pct – Ausgabe: Feuchte in Zehntel-Prozent
-//              lux       – Ausgabe: immer 0 (kein Lux-Sensor)
-//              motion    – Ausgabe: immer 0 (kein PIR)
-//              fault     – Ausgabe: true bei fehlerhafter Messung
-//   Rückgabe: true = Werte haben sich signifikant geaendert
+/**
+ * @brief DHT22-Messung mit Plausibilitaetspruefung und Hysterese.
+ *
+ * Misst Temperatur und Feuchte vom DHT22 (nach Warmup-Phase).
+ * Werte werden auf Bereich (TEMP_MIN..MAX, HUM_MIN..MAX) und NaN geprueft.
+ * Gedrosseltes Logging: Werte nur alle VALUE_LOG_INTERVAL_MS,
+ * Fehler nur alle ERROR_LOG_INTERVAL_MS.
+ *
+ * @param[in,out] temp_01c  Temperatur in Zehntel-Grad Celsius
+ * @param[in,out] hum_01pct Feuchte in Zehntel-Prozent
+ * @param[out]    lux       immer 0 (kein Lux-Sensor)
+ * @param[out]    motion    immer 0 (kein PIR-Sensor)
+ * @param[out]    fault     true bei fehlerhafter/ungueltiger Messung
+ * @return true wenn sich mindestens ein Wert signifikant geaendert hat
+ */
 bool netSenDeviceSensorPoll(
     int16_t* temp_01c, uint16_t* hum_01pct,
     uint16_t* lux, uint8_t* motion, bool* fault)

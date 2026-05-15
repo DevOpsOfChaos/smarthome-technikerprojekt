@@ -1,32 +1,20 @@
-// =============================================================================
-// main.cpp – NET-SEN Room (Legacy): Temperatur, Feuchte, Lux
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_sen_room/main.cpp
-// Hardware:   ESP32-C3 + BME280 + VEML7700
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Pin-Belegung:
-//   I2C SDA:  GPIO0
-//   I2C SCL:  GPIO1
-//   BME280:   Adresse 0x76 (Temperatur + Feuchte)
-//   VEML7700: Adresse 0x10 (Lux)
-//
-// Funktionsweise:
-//   Custom-Sensor-Hook mit #if-optionalem BME280 und VEML7700.
-//   Messung alle 2500ms. Werte in Zehntel (temp_01c, hum_01pct).
-//   Keine Bewegungssensorik, kein Druck, kein Gas.
-//
-// Status: LEGACY – nicht Teil der aktiven net_sen-Linie.
-// Offizielle Linie: net_sen_dht22_reference, net_sen_env_bme680_veml
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-SEN Room (Legacy): Temperatur, Feuchte, Lux via BME280/VEML7700
+ *
+ * @details Custom-Sensor-Hook mit #if-optionalem BME280 (0x76) und VEML7700 (0x10).
+ *          Messung alle 2500ms. Werte in Zehntel (temp_01c, hum_01pct).
+ *          Keine Bewegungssensorik, kein Druck, kein Gas.
+ *
+ * Hardware:   ESP32-C3 + BME280 + VEML7700
+ * Pin:        I2C SDA=GPIO0, I2C SCL=GPIO1
+ *
+ * @warning LEGACY – nicht Teil der aktiven net_sen-Linie.
+ *          Offizielle Linie: net_sen_dht22_reference, net_sen_env_bme680_veml
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -74,6 +62,12 @@ bool veml7700Bereit = false;
 unsigned long letzterSensorPollMs = 0UL;
 }  // namespace
 
+/**
+ * @brief Initialisiert BME280 und/oder VEML7700 Sensoren via I2C.
+ *
+ * Setzt bme280Bereit und veml7700Bereit je nach Erfolg der Sensorerkennung.
+ * Wird einmalig von NetSenRuntime beim Boot aufgerufen.
+ */
 void netSenDeviceSensorInit() {
 #if NET_SEN_ROOM_USE_BME280
     bme280Bereit = sensorBme280.begin((uint8_t)NET_SEN_ROOM_BME280_ADDRESS, &Wire);
@@ -91,6 +85,20 @@ void netSenDeviceSensorInit() {
     letzterSensorPollMs = 0UL;
 }
 
+/**
+ * @brief Periodische Sensormessung mit Hysterese-Pruefung.
+ *
+ * Liest Temperatur+Feuchte vom BME280 und Lux vom VEML7700 (jeweils #if-geschuetzt).
+ * Messwerte werden in Zehntel-Einheiten umgerechnet und auf Bereich geprueft.
+ * Rueckgabe nur true bei signifikanter Aenderung (Delta-Pruefung).
+ *
+ * @param[in,out] temp_01c  Temperatur in Zehntel-Grad Celsius
+ * @param[in,out] hum_01pct Feuchte in Zehntel-Prozent
+ * @param[out]    lux       Beleuchtungsstaerke in Lux
+ * @param[out]    motion    immer 0 (kein PIR-Sensor)
+ * @param[out]    fault     true wenn ein Sensor nicht bereit oder Messung fehlerhaft
+ * @return true wenn sich mindestens ein Wert signifikant geaendert hat
+ */
 bool netSenDeviceSensorPoll(
     int16_t* temp_01c, uint16_t* hum_01pct,
     uint16_t* lux, uint8_t* motion, bool* fault)

@@ -1,32 +1,18 @@
-// =============================================================================
-// main.cpp – NET-SEN Env BME680+VEML+ENS160 (Umweltsensor)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_sen_env_bme680_veml/main.cpp
-// Hardware:   ESP32-C3 + BME680 + VEML7700 + ENS160
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Pin-Belegung:
-//   I2C SDA:  GPIO0
-//   I2C SCL:  GPIO1
-//   BME680:   0x76 (Temp/Feuchte/Druck/Rohgas)
-//   VEML7700: 0x10 (Lux)
-//   ENS160:   0x52 (AQI/TVOC/eCO2, mit BME680-Kompensation)
-//
-// Funktionsweise:
-//   Sensor-Poll alle 2500ms. BME680 mit Heizprofil (320 Grad, 150ms).
-//   ENS160-Kompensation via BME680-Temperatur/Feuchte.
-//   gas_ohm erst nach 180s Warmup + 5 Messungen belastbar.
-//   ENS160 stale-detection: 120s ohne gueltige Daten.
-//   Snapshot-Log alle 30s.
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-SEN Env: Umweltsensor mit BME680 + VEML7700 + ENS160
+ *
+ * @details Erweiterter net_sen-Sensor-Adapter. BME680 liefert Temp/Feuchte/Druck/Rohgas,
+ *          VEML7700 liefert Lux, ENS160 liefert AQI/TVOC/eCO2 mit BME680-Kompensation.
+ *          BME680-Heizprofil: 320°C, 150ms. Gas erst nach 180s Warmup + 5 Messungen belastbar.
+ *          ENS160 stale-detection: 120s ohne gueltige Daten → Werte auf UNGUELTIG.
+ *          Gedrosseltes Fehler-Logging: BME/VEML-Fehler nur alle 15s.
+ *
+ * Hardware:   ESP32-C3 + BME680 (0x76/0x77) + VEML7700 (0x10) + ENS160 (0x52/0x53)
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -93,27 +79,74 @@ ErwState erwState = {NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_GAS_OHM_UNGUELTIG,
                      NET_SEN_AIR_METRIC_UNGUELTIG};
 bool erwChanged = true;
 
-// -- Hilfsfunktionen --
-// gasWarmupOk – BME680-Gassensor ausreichend warmgelaufen?
+/**
+ * @brief Prüft, ob der BME680-Gassensor ausreichend warmgelaufen ist.
+ *
+ * @param j Aktueller Zeitstempel in ms (millis()).
+ * @return true wenn Warmup-Zeit und Mindest-Anzahl Messungen erreicht sind.
+ */
 bool gasWarmupOk(unsigned long j) {
     return gasWarmupComplete(bootMs, j, NET_SEN_ENV_BME680_GAS_WARMUP_MS, bmeReads, NET_SEN_ENV_BME680_GAS_WARMUP_MIN_READS);
 }
-// ensWarmupOk – ENS160-Warmup-Phase abgeschlossen?
+
+/**
+ * @brief Prüft, ob die ENS160-Warmup-Phase abgeschlossen ist.
+ *
+ * @param j Aktueller Zeitstempel in ms (millis()).
+ * @return true wenn die ENS160-Warmup-Zeit seit Boot überschritten wurde.
+ */
 bool ensWarmupOk(unsigned long j) {
     return (j - bootMs) >= NET_SEN_ENV_ENS160_WARMUP_MS;
 }
-// ensStale – ENS160-Messwerte veraltet?
+
+/**
+ * @brief Prüft, ob die ENS160-Messwerte veraltet (stale) sind.
+ *
+ * @details Nur relevant nach Warmup. Verwendet sensorValueStale() mit
+ *          konfigurierbarem Timeout für die Erkennung veralteter Daten.
+ *
+ * @param j Aktueller Zeitstempel in ms (millis()).
+ * @return true wenn ENS160-Daten als veraltet gelten.
+ */
 bool ensStale(unsigned long j) {
     if (!ensWarmupOk(j)) return false;
     return sensorValueStale(ensOk && (ens != nullptr), lastEnsValid, j, NET_SEN_ENV_ENS160_STALE_TIMEOUT_MS);
 }
-// mapAqi500 – ENS160-AQI (1-5) auf Skala 0-500 abbilden (0 = ungueltig)
+
+/**
+ * @brief Mappt ENS160-AQI (1-5) auf die Skala 0-500.
+ *
+ * @details Werte ausserhalb 1-5 werden als ungueltig (0) behandelt.
+ *
+ * @param r Roher AQI-Wert (1-5).
+ * @return Gemappter Wert (0, 100, 200, 300, 400 oder 500).
+ */
 uint16_t mapAqi500(uint16_t r) { return (r >= 1U && r <= ENS160_AQI_MAX_BASIC) ? (uint16_t)(r * 100U) : 0U; }
-// encTemp – Temperatur in Kelvin * 64 als uint16 kodieren
+
+/**
+ * @brief Kodiert Temperatur in Grad Celsius als uint16 (Kelvin * 64).
+ *
+ * @param c Temperatur in °C.
+ * @return Kodierter uint16-Wert.
+ */
 uint16_t encTemp(float c) { return (uint16_t)((c + 273.15f) * 64.0f); }
-// encHum – Relative Feuchte * 512 als uint16 kodieren
+
+/**
+ * @brief Kodiert relative Luftfeuchte als uint16 (Prozent * 512).
+ *
+ * @param h Relative Feuchte in % (0-100).
+ * @return Kodierter uint16-Wert.
+ */
 uint16_t encHum(float h) { return (uint16_t)(h * 512.0f); }
 
+/**
+ * @brief Schreibt Temperatur- und Feuchte-Kompensationsdaten an den ENS160.
+ *
+ * @param addr I2C-Adresse des ENS160.
+ * @param t    Temperatur in °C.
+ * @param h    Relative Feuchte in %.
+ * @return Wire.endTransmission()-Ergebniscode (0 = Erfolg).
+ */
 int writeEnsEnv(uint8_t addr, float t, float h) {
     uint8_t buf[4]; uint16_t te = encTemp(t), he = encHum(h);
     buf[0] = te & 0xFF; buf[1] = (te >> 8) & 0xFF;
@@ -122,9 +155,30 @@ int writeEnsEnv(uint8_t addr, float t, float h) {
     Wire.write(buf, 4); return Wire.endTransmission();
 }
 
+/**
+ * @brief Gedrosseltes Fehler-Logging für den BME680 (max. alle 15s).
+ *
+ * @param j Aktueller Zeitstempel in ms.
+ * @param g Log-Nachricht.
+ */
 void logBme(unsigned long j, const char* g) { if ((j - lastBmeLog) < 15000UL) return; logf("WARN", "BME: %s", g); lastBmeLog = j; }
+
+/**
+ * @brief Gedrosseltes Fehler-Logging für den VEML7700 (max. alle 15s).
+ *
+ * @param j Aktueller Zeitstempel in ms.
+ * @param g Log-Nachricht.
+ */
 void logVeml(unsigned long j, const char* g) { if ((j - lastVemlLog) < 15000UL) return; logf("WARN", "VEML: %s", g); lastVemlLog = j; }
 
+/**
+ * @brief Initialisiert den BME680 mit Fallback-Adresse.
+ *
+ * @details Probiert zuerst PRIMARY_ADDRESS, dann FALLBACK_ADDRESS.
+ *          Konfiguriert Oversampling, IIR-Filter und Gas-Heizprofil (320°C, 150ms).
+ *
+ * @return true bei erfolgreicher Initialisierung.
+ */
 bool initialisiereBme680() {
     const uint8_t addrs[] = {(uint8_t)NET_SEN_ENV_BME680_PRIMARY_ADDRESS,
                              (uint8_t)NET_SEN_ENV_BME680_FALLBACK_ADDRESS};
@@ -140,6 +194,14 @@ bool initialisiereBme680() {
     return false;
 }
 
+/**
+ * @brief Initialisiert den ENS160 mit Fallback-Adresse.
+ *
+ * @details Probiert zuerst ens52 (PRIMARY_ADDRESS), dann ens53 (FALLBACK_ADDRESS).
+ *          Setzt den ens-Pointer auf das erfolgreiche Objekt.
+ *
+ * @return true wenn einer der ENS160-Chips antwortet.
+ */
 bool initEns() {
     ens = &ens52;
     if (ens->begin()) return true;
@@ -148,11 +210,24 @@ bool initEns() {
     ens = nullptr; return false;
 }
 
+/**
+ * @brief Versetzt den ENS160 in den Standard-Betriebsmodus (STD).
+ *
+ * @details Bei Fehlschlag wird der ens-Pointer auf nullptr gesetzt,
+ *          um Folgeleseversuche zu verhindern.
+ */
 void setEnsActive() {
     if (!ens || !ens->setMode(ENS160_OPMODE_STD)) { ens = nullptr; return; }
     logf("INFO", "ENS160 init OK");
 }
 
+/**
+ * @brief Aktualisiert die ENS160-Umgebungskompensation (Temp + Feuchte).
+ *
+ * @param bv true wenn gueltige BME680-Werte vorliegen.
+ * @param t  Temperatur in °C.
+ * @param h  Relative Feuchte in %.
+ */
 void updEnsComp(bool bv, float t, float h) {
     ensCompActive = false; ensCompCalled = false; ensCompResult = -1;
     if (!ensOk || !ens || !bv) return;
@@ -166,6 +241,12 @@ void updEnsComp(bool bv, float t, float h) {
 // CUSTOM-HOOKS
 // =============================================================================
 
+/**
+ * @brief Initialisiert alle Umweltsensoren (BME680, VEML7700, ENS160).
+ *
+ * @details Setzt Boot-Zeitstempel, Zustandsvariablen und I2C-Clock.
+ *          Initialisiert die drei Sensoren nacheinander mit Fallback-Logik.
+ */
 void netSenDeviceSensorInit() {
     bootMs = millis(); lastPoll = 0UL;
     lastBmeLog = 0UL; lastVemlLog = 0UL; lastEnsInfo = 0UL; lastEnsErr = 0UL;
@@ -189,14 +270,44 @@ void netSenDeviceSensorInit() {
     else setEnsActive();
 }
 
+/**
+ * @brief Initialisiert erweiterte Zustandsdaten (derzeit leer).
+ *
+ * @details Reserviert für zukünftige Erweiterungen des Extended-State-Systems.
+ */
 void netSenDeviceExtendedStateInit() {}
 
+/**
+ * @brief Liefert erweiterte Sensordaten (Druck, Gas, AQI, TVOC, eCO2) zurueck.
+ *
+ * @param[out] pp Zeiger auf Luftdruck in Pa.
+ * @param[out] go Zeiger auf Gaswiderstand in Ohm.
+ * @param[out] a  Zeiger auf AQI (0-500).
+ * @param[out] t  Zeiger auf TVOC in ppb.
+ * @param[out] e  Zeiger auf eCO2 in ppm.
+ * @return true wenn sich Werte seit letztem Poll geaendert haben.
+ */
 bool netSenDeviceExtendedStatePoll(uint32_t* pp, uint32_t* go, uint16_t* a, uint16_t* t, uint16_t* e) {
     if (!pp || !go || !a || !t || !e) return false;
     *pp = erwState.pp; *go = erwState.go; *a = erwState.aqi; *t = erwState.tvoc; *e = erwState.eco2;
     bool c = erwChanged; erwChanged = false; return c;
 }
 
+/**
+ * @brief Pollt alle Umweltsensoren und liefert Basiswerte zurueck.
+ *
+ * @details Zentrale Poll-Funktion. Liest BME680 (T/H/P/Gas), VEML7700 (Lux)
+ *          und ENS160 (AQI/TVOC/eCO2). Fuehrt ENS160-Umgebungskompensation
+ *          mit BME680-Daten durch. Erkennt stale ENS160-Daten. Berechnet
+ *          Hysterese fuer Extended-State-Ausgaben und schreibt Snapshot-Logs.
+ *
+ * @param[out] t01c Temperatur in 0.1 °C.
+ * @param[out] h01p Relative Feuchte in 0.1 %.
+ * @param[out] lux  Beleuchtungsstaerke in Lux.
+ * @param[out] mot  Motion-Flag (derzeit immer 0).
+ * @param[out] flt  Fehler-Flag (true = Sensorwerte unzuverlaessig).
+ * @return true wenn sich Basiswerte signifikant geaendert haben.
+ */
 bool netSenDeviceSensorPoll(int16_t* t01c, uint16_t* h01p, uint16_t* lux, uint8_t* mot, bool* flt) {
     if (!t01c || !h01p || !lux || !mot || !flt) return false;
     unsigned long j = millis();
