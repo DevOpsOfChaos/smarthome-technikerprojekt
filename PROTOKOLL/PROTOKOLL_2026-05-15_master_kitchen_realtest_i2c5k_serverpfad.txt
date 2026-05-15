@@ -1,0 +1,71 @@
+Protokoll: Master + NET-ERL Kitchen Realtest, I2C-Stabilisierung, Serverpfad
+Datum: 2026-05-15
+
+Ausgangslage
+- Master-Firmware wurde auf dem ESP32-C3 an COM3 geprueft.
+- NET-ERL Kitchen wurde als zusaetzliches Geraet an COM8 erkannt.
+- Ziel war: aktuelle Firmware flashen, Funktion pruefen, Serverpfad abgleichen.
+
+Firmware- und Flash-Nachweis
+- master_firmware Build erfolgreich.
+- Master auf COM3 geflasht und seriell geprueft.
+- Master meldete WLAN, MQTT und ESP-NOW bereit.
+- net_erl_kitchen Build erfolgreich.
+- Kitchen auf COM8 geflasht und verifiziert.
+
+Festgestellte Abweichungen und Korrekturen
+- Kitchen-PinConfig hatte I2C gegen den Projektstandard vertauscht.
+- Korrigiert auf Standard:
+  - SDA = GPIO0
+  - SCL = GPIO1
+- Die reale Verdrahtung wurde entsprechend auf diesen Standard gebracht.
+- Wegen wiederholter I2C-Probleme mit dem Kitchen-Modul wurde die I2C-Taktung von 10 kHz auf 5 kHz reduziert.
+
+Kitchen-Test nach Korrektur
+- Kitchen meldete sich als NET-ERL-002 / NET-ERL Kitchen.
+- Master empfing HELLO, HEARTBEAT, STATE_REPORT und Events.
+- MQTT-Verfuegbarkeit: online.
+- Relaispfad getestet:
+  - set_relay true: ACK status ok, State relay_1 true.
+  - set_relay false: ACK status ok, State relay_1 false.
+  - Relais am Testende aus.
+- Sensorik nach 5-kHz-Aenderung:
+  - Temperatur ca. 20,1 Grad C.
+  - Luftfeuchte ca. 44 Prozent.
+  - Helligkeit ca. 19 lx.
+  - Luftdruck ca. 98456 Pa.
+  - BME680-Gaswert nach Warm-up vorhanden.
+  - fault=false.
+- ENS160-Werte koennen erst nach laengerem Warm-up belastbar sein.
+
+Serverpfad
+- Node-RED/Serverpfad gegen Firmware-Topics abgeglichen.
+- Eingehende Topics passen:
+  - smarthome/device/NET-ERL-002/meta
+  - smarthome/device/NET-ERL-002/availability
+  - smarthome/device/NET-ERL-002/state
+  - smarthome/device/NET-ERL-002/event
+  - smarthome/device/NET-ERL-002/ack
+- Command-Pfad passt:
+  - /api/phase1/net-erl/relay-1
+  - erzeugt smarthome/device/NET-ERL-002/command
+  - Payload enthaelt command=set_relay und relay_1 true/false.
+- Server-Contract-Smoke-Test erfolgreich.
+- SQLite-Datensatz fuer NET-ERL-002 vorhanden und plausibel:
+  - online=1
+  - fault=0
+  - relay_1=0
+  - Temperatur, Feuchte, Lux, Druck und Gaswert vorhanden.
+
+Radar / LD2410
+- Firmware liest den LD2410 OUT digital auf GPIO7.
+- HIGH bedeutet Praesenz erkannt.
+- Im Log stand motion=true dauerhaft an.
+- Bewertung: plausibel, weil sich waehrend des Tests eine Person im Radarbereich befand.
+- Kein Firmwarefehler abgeleitet.
+
+Ergebnis
+- Master funktionsfaehig.
+- Kitchen-Firmware mit I2C-Standard und 5-kHz-Takt funktionsfaehig.
+- Funk-, MQTT-, Relais-, Sensor- und Serverpfad fuer Kitchen bestaetigt.
+- Resthinweis: ENS160 erst nach laengerer Laufzeit abschliessend bewerten.

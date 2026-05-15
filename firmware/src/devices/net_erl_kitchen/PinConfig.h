@@ -10,8 +10,8 @@
 // === EINSATZZWECK ===
 //
 // Pin-Belegung:
-//   I2C SDA:      GPIO1  – BME680 (0x76), VEML7700 (0x10), ENS160 (0x52)
-//   I2C SCL:      GPIO0
+//   I2C SDA:      GPIO0  – BME680 (0x76), VEML7700 (0x10), ENS160 (0x52)
+//   I2C SCL:      GPIO1
 //   Button:       GPIO6  – active-LOW, 40ms Debounce, 5s Hold = Setup
 //   LD2410 OUT:   GPIO7  – HIGH = Praesenz erkannt
 //   NeoPixel:     GPIO8  – 17 LEDs, GRB, 800kHz
@@ -29,8 +29,8 @@
 
 #pragma once
 
-#define PIN_SENSOR_SDA 1
-#define PIN_SENSOR_SCL 0
+#define PIN_SENSOR_SDA 0
+#define PIN_SENSOR_SCL 1
 #define PIN_BUTTON_1 6
 #define PIN_LD2410_OUT 7
 #define PIN_LED_RING 8
