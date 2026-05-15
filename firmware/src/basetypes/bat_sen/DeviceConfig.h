@@ -90,7 +90,7 @@
 
 // RX-Fenster: Wie lange nach Wake auf eingehende Nachrichten gewartet wird (ms)
 #ifndef BAT_SEN_DEFAULT_RX_WINDOW_MS
-#define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U
+#define BAT_SEN_DEFAULT_RX_WINDOW_MS 800U
 #endif
 
 // Wake-Intervall-Grenzen
@@ -104,7 +104,7 @@
 
 // RX-Fenster-Grenzen
 #ifndef BAT_SEN_MIN_RX_WINDOW_MS
-#define BAT_SEN_MIN_RX_WINDOW_MS 1000U
+#define BAT_SEN_MIN_RX_WINDOW_MS 500U
 #endif
 
 #ifndef BAT_SEN_MAX_RX_WINDOW_MS

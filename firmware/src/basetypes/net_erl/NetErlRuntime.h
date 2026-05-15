@@ -453,6 +453,29 @@ bool sendPacket(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const
     return sendPacketOpt(z, mt, pl, plen, lb, 0, nullptr);
 }
 
+// sendPacketWithRetry – Sendet mit bis zu 2 Wiederholungen bei Fehler
+#ifndef NET_ERL_ESPNOW_RETRY_COUNT
+#define NET_ERL_ESPNOW_RETRY_COUNT 2
+#endif
+#ifndef NET_ERL_ESPNOW_RETRY_DELAY_MS
+#define NET_ERL_ESPNOW_RETRY_DELAY_MS 50UL
+#endif
+
+bool sendPacketWithRetry(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const char* lb) {
+    if (runtime.naechste_seq == 0) runtime.naechste_seq = 255;
+    else runtime.naechste_seq--;
+
+    for (int attempt = 0; attempt <= NET_ERL_ESPNOW_RETRY_COUNT; attempt++) {
+        if (sendPacket(z, mt, pl, plen, lb)) return true;
+        if (attempt < NET_ERL_ESPNOW_RETRY_COUNT) {
+            logMsg("WARN", "%s retry %d/%d", lb ? lb : "?", attempt + 1, NET_ERL_ESPNOW_RETRY_COUNT);
+            delay(NET_ERL_ESPNOW_RETRY_DELAY_MS);
+        }
+    }
+    logMsg("ERROR", "%s failed after %d attempts", lb ? lb : "?", NET_ERL_ESPNOW_RETRY_COUNT + 1);
+    return false;
+}
+
 bool sendAck(const uint8_t* z, uint8_t s, uint8_t mt, uint8_t st) {
     SmartHome::AckPayload p = {}; p.ack_seq = s; p.ack_msg_type = mt; p.status = st;
     return sendPacket(z, SH_MSG_ACK, &p, sizeof(p), "ACK");
@@ -475,7 +498,7 @@ bool sendHello() {
     cpy(p.sensor_mask, sizeof(p.sensor_mask), NET_ERL_SENSOR_MASK);
     cpy(p.input_mask, sizeof(p.input_mask), NET_ERL_INPUT_MASK);
     runtime.letztes_hello_ms = millis();
-    return sendPacket(helloDst(), SH_MSG_HELLO, &p, sizeof(p), "HELLO");
+    return sendPacketWithRetry(helloDst(), SH_MSG_HELLO, &p, sizeof(p), "HELLO");
 }
 
 bool sendHeartbeat() {
@@ -483,7 +506,7 @@ bool sendHeartbeat() {
     SmartHome::HeartbeatPayload p = {};
     cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
     p.uptime_s = millis() / 1000UL;
-    if (!sendPacket(runtime.master_mac, SH_MSG_HEARTBEAT, &p, sizeof(p), "HEARTBEAT")) return false;
+    if (!sendPacketWithRetry(runtime.master_mac, SH_MSG_HEARTBEAT, &p, sizeof(p), "HEARTBEAT")) return false;
     runtime.letzter_heartbeat_ms = millis(); return true;
 }
 
@@ -495,7 +518,7 @@ bool sendState() {
     if (ps == 0UL || ps > SH_MAX_PAYLOAD_BYTES) return false;
     uint8_t buf[SH_MAX_PAYLOAD_BYTES] = {};
     netErlDeviceFillStatePayload(buf, &ps);      // Zweiter Aufruf: Daten schreiben
-    if (!sendPacket(runtime.master_mac, SH_MSG_STATE, buf, ps, "STATE")) return false;
+    if (!sendPacketWithRetry(runtime.master_mac, SH_MSG_STATE, buf, ps, "STATE")) return false;
     runtime.state_report_offen = false; runtime.letzter_state_ms = millis(); return true;
 }
 
@@ -505,7 +528,7 @@ bool sendMotionEvent(bool s) {
     cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
     p.event_type = SH_EVENT_MOTION_DETECTED; p.trigger = SH_TRIGGER_AUTO;
     p.param1 = s ? 1U : 0U; p.param2 = 0U;
-    return sendPacket(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), s ? "EVT_M_ON" : "EVT_M_OFF");
+    return sendPacketWithRetry(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), s ? "EVT_M_ON" : "EVT_M_OFF");
 }
 
 bool sendRelayEvent(uint8_t tr) {
@@ -514,7 +537,7 @@ bool sendRelayEvent(uint8_t tr) {
     cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
     p.event_type = SH_EVENT_RELAY_CHANGED; p.trigger = tr;
     p.param1 = runtime.relay_1 ? 1U : 0U; p.param2 = 0U;
-    return sendPacket(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), "EVT_RELAY");
+    return sendPacketWithRetry(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), "EVT_RELAY");
 }
 
 // =============================================================================
@@ -640,9 +663,21 @@ void onEspNowSent(const wifi_tx_info_t*, esp_now_send_status_t s) {
 
 void initFunk() {
     if (runtime.funk_bereit || runtime.setup_mode) return;
+    static uint8_t espNowInitFails = 0;
+    constexpr uint8_t MAX_ESPNOW_INIT_FAILURES = 5;
+
     WiFi.mode(WIFI_STA); WiFi.disconnect(); WiFi.setSleep(false);
     esp_wifi_set_channel(WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
-    if (esp_now_init() != ESP_OK) { logMsg("WARN", "ESP-NOW init fail"); return; }
+    if (esp_now_init() != ESP_OK) {
+        espNowInitFails++;
+        logMsg("WARN", "ESP-NOW init fail (%u/%u)", espNowInitFails, MAX_ESPNOW_INIT_FAILURES);
+        if (espNowInitFails >= MAX_ESPNOW_INIT_FAILURES) {
+            logMsg("ERROR", "ESP-NOW init nach %u Versuchen fehlgeschlagen, restart", MAX_ESPNOW_INIT_FAILURES);
+            ESP.restart();
+        }
+        return;
+    }
+    espNowInitFails = 0;  // Reset on success
     esp_now_register_send_cb(onEspNowSent);
     esp_now_register_recv_cb(onEspNowRcv);
     runtime.funk_bereit = true; ensurePeer(BROADCAST_MAC);

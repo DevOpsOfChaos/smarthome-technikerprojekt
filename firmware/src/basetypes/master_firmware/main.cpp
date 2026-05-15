@@ -958,7 +958,7 @@ int registriereOderFindeNode(const uint8_t* senderMac, const SmartHome::HelloPay
     const int freeIndex = findeFreienNodeIndex();
     if (freeIndex < 0) {
         logf("WARN", "HELLO abgelehnt: Registry voll (device_id=%s)", payload.device_id);
-        return -1;
+        return STATUS_CODE_REGISTRY_FULL;
     }
 
     initialisiereNodeSlot(nodeStates[freeIndex]);
@@ -973,7 +973,9 @@ int registriereOderFindeNode(const uint8_t* senderMac, const SmartHome::HelloPay
 void verarbeiteHello(const uint8_t* senderMac, const SmartHome::HelloPayload& payload) {
     const int nodeIndex = registriereOderFindeNode(senderMac, payload);
     if (nodeIndex < 0) {
-        sendeHelloAck(senderMac, SH_ACK_REJECTED);
+        const uint8_t ackStatus = (nodeIndex == STATUS_CODE_REGISTRY_FULL)
+            ? SH_ACK_REJECTED_FULL : SH_ACK_REJECTED;
+        sendeHelloAck(senderMac, ackStatus);
         return;
     }
 

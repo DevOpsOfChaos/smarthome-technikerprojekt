@@ -63,6 +63,7 @@
 #define SH_ACK_OK              0x00U
 #define SH_ACK_ERROR           0x01U
 #define SH_ACK_REJECTED        0x02U
+#define SH_ACK_REJECTED_FULL   0x03U  // Registry voll, keine Slots frei
 
 #define SH_CMD_RELAY           0x01U
 #define SH_CMD_COVER           0x02U

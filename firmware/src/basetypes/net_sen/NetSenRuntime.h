@@ -77,6 +77,11 @@ constexpr uint32_t TASK_WDT_TIMEOUT_S = 8UL;
 // I2C-Bus-Timeout fuer Wire.begin() (50ms)
 constexpr uint16_t I2C_TIMEOUT_MS = 50U;
 
+// Sensor-Polling-Timeout (2s) – Schutz gegen blockierende Sensor-Bibliotheken
+#ifndef NET_SEN_SENSOR_POLL_TIMEOUT_MS
+#define NET_SEN_SENSOR_POLL_TIMEOUT_MS 2000UL
+#endif
+
 // Puffergroesse fuer Setup-AP-SSID (DEVICE_ID muss hineinpassen)
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
 static_assert(
@@ -155,6 +160,7 @@ struct NodeState {
     uint8_t naechste_seq;               // Naechste ESP-NOW-Sequenz
     char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE]; // Setup-AP-SSID
     SensorState sensor;                  // Aktuelle Sensorwerte
+    unsigned long sensorPollStartMs;  // Zeitstempel Sensor-Polling-Start (Timeout-Schutz)
 };
 
 // Globale Instanz des Geraetezustands
@@ -460,6 +466,30 @@ bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, si
     return true;
 }
 
+// sendePaketMitRetry – Sendet mit bis zu 2 Wiederholungen bei Fehler
+#ifndef NODE_ESPNOW_RETRY_COUNT
+#define NODE_ESPNOW_RETRY_COUNT 2
+#endif
+#ifndef NODE_ESPNOW_RETRY_DELAY_MS
+#define NODE_ESPNOW_RETRY_DELAY_MS 50UL
+#endif
+
+bool sendePaketMitRetry(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
+    // Decrement sequence number so first attempt uses the correct next seq
+    if (nodeStatus.naechste_seq == 0) nodeStatus.naechste_seq = 255;
+    else nodeStatus.naechste_seq--;
+
+    for (int attempt = 0; attempt <= NODE_ESPNOW_RETRY_COUNT; attempt++) {
+        if (sendePaket(zielMac, msgType, payload, payloadLen, label)) return true;
+        if (attempt < NODE_ESPNOW_RETRY_COUNT) {
+            logf("WARN", "%s Retry %d/%d", label, attempt + 1, NODE_ESPNOW_RETRY_COUNT);
+            delay(NODE_ESPNOW_RETRY_DELAY_MS);
+        }
+    }
+    logf("ERROR", "%s nach %d Versuchen fehlgeschlagen", label, NODE_ESPNOW_RETRY_COUNT + 1);
+    return false;
+}
+
 // sendeAck – Sendet eine ACK-Bestaetigung
 bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
     SmartHome::AckPayload payload = {};
@@ -498,7 +528,7 @@ bool sendeHello() {
     copyText(payload.input_mask, sizeof(payload.input_mask), inputMask);
 
     nodeStatus.letztes_hello_ms = millis();
-    return sendePaket(holeHelloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
+    return sendePaketMitRetry(holeHelloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
 }
 
 // sendeHeartbeat – Sendet HEARTBEAT an den Master
@@ -509,7 +539,7 @@ bool sendeHeartbeat() {
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
     payload.uptime_s = millis() / 1000UL;
 
-    if (!sendePaket(nodeStatus.master_mac, SH_MSG_HEARTBEAT, &payload, sizeof(payload), "HEARTBEAT")) {
+    if (!sendePaketMitRetry(nodeStatus.master_mac, SH_MSG_HEARTBEAT, &payload, sizeof(payload), "HEARTBEAT")) {
         return false;
     }
 
@@ -541,7 +571,7 @@ bool sendeState() {
         payload.fault = nodeStatus.sensor.fault ? 1U : 0U;
         payload.report_interval_s = reportIntervalS;
 
-        if (!sendePaket(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE_EXT_GAS")) {
+        if (!sendePaketMitRetry(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE_EXT_GAS")) {
             return false;
         }
     } else {
@@ -554,7 +584,7 @@ bool sendeState() {
         payload.fault = nodeStatus.sensor.fault ? 1U : 0U;
         payload.report_interval_s = reportIntervalS;
 
-        if (!sendePaket(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
+        if (!sendePaketMitRetry(nodeStatus.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
             return false;
         }
     }
@@ -575,7 +605,7 @@ bool sendeDeviceEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16
     payload.param1 = param1;
     payload.param2 = param2;
 
-    return sendePaket(nodeStatus.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
+    return sendePaketMitRetry(nodeStatus.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
 }
 
 // sendeAusstehendesDeviceEvent – Ruft den Event-Hook auf und sendet bei Event
@@ -720,6 +750,8 @@ void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
 // initialisiereFunk – ESP-NOW initialisieren (WLAN, Callbacks, Peers)
 void initialisiereFunk() {
     if (nodeStatus.funk_bereit || nodeStatus.setup_mode) return;
+    static uint8_t espNowInitFails = 0;
+    constexpr uint8_t MAX_ESPNOW_INIT_FAILURES = 5;
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -731,9 +763,15 @@ void initialisiereFunk() {
     }
 
     if (esp_now_init() != ESP_OK) {
-        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen");
+        espNowInitFails++;
+        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen (%u/%u)", espNowInitFails, MAX_ESPNOW_INIT_FAILURES);
+        if (espNowInitFails >= MAX_ESPNOW_INIT_FAILURES) {
+            logf("ERROR", "ESP-NOW init nach %u Versuchen fehlgeschlagen, restart", MAX_ESPNOW_INIT_FAILURES);
+            ESP.restart();
+        }
         return;
     }
+    espNowInitFails = 0;  // Reset on success
 
     esp_now_register_send_cb(onEspNowSend);
     esp_now_register_recv_cb(onEspNowReceive);
@@ -761,7 +799,12 @@ void initialisiereSensorik() {
 
 // pollSensorik – Ruft alle Sensor-Hooks auf und aktualisiert nodeStatus.sensor
 //   Setzt state_report_offen = true wenn sich Werte geaendert haben.
+//   Timeout-Schutz: Wenn das Polling zu lange blockiert, wird die Sensorik
+//   neu initialisiert und ein Fault-Flag gesetzt.
 void pollSensorik() {
+    const unsigned long startMs = millis();
+    nodeStatus.sensorPollStartMs = startMs;
+
     SensorState neuerState = nodeStatus.sensor;
     bool geaendert = netSenDeviceSensorPoll(
         &neuerState.temp_01c,
@@ -780,6 +823,16 @@ void pollSensorik() {
     nodeStatus.sensor = neuerState;
     if (geaendert) {
         nodeStatus.state_report_offen = true;
+    }
+
+    // Timeout-Pruefung
+    const unsigned long elapsedMs = millis() - startMs;
+    if (elapsedMs > NET_SEN_SENSOR_POLL_TIMEOUT_MS) {
+        logf("WARN", "Sensor-Polling-Timeout: %lu ms > %lu ms, initiiere Recovery",
+             elapsedMs, NET_SEN_SENSOR_POLL_TIMEOUT_MS);
+        nodeStatus.sensor.fault = true;
+        nodeStatus.state_report_offen = true;
+        initialisiereSensorik();  // I2C-Bus zuruecksetzen
     }
 }
 
@@ -886,7 +939,7 @@ void loop() {
 
     const unsigned long jetzt = millis();
 
-    // Sensoren abfragen
+    // Sensoren abfragen (mit Timeout-Schutz in pollSensorik)
     pollSensorik();
 
     // Ausstehende Device-Events senden (wenn Master bekannt)

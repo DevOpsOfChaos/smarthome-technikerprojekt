@@ -602,6 +602,29 @@ bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, si
     return sendePaketMitOptionen(zielMac, msgType, payload, payloadLen, label, 0U, nullptr);
 }
 
+// sendePaketMitRetry – Sendet mit bis zu 2 Wiederholungen bei Fehler
+#ifndef NET_ZRL_ESPNOW_RETRY_COUNT
+#define NET_ZRL_ESPNOW_RETRY_COUNT 2
+#endif
+#ifndef NET_ZRL_ESPNOW_RETRY_DELAY_MS
+#define NET_ZRL_ESPNOW_RETRY_DELAY_MS 50UL
+#endif
+
+bool sendePaketMitRetry(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
+    if (runtime.naechsteSeq == 0) runtime.naechsteSeq = 255;
+    else runtime.naechsteSeq--;
+
+    for (int attempt = 0; attempt <= NET_ZRL_ESPNOW_RETRY_COUNT; attempt++) {
+        if (sendePaket(zielMac, msgType, payload, payloadLen, label)) return true;
+        if (attempt < NET_ZRL_ESPNOW_RETRY_COUNT) {
+            logf("WARN", "%s Retry %d/%d", label, attempt + 1, NET_ZRL_ESPNOW_RETRY_COUNT);
+            delay(NET_ZRL_ESPNOW_RETRY_DELAY_MS);
+        }
+    }
+    logf("ERROR", "%s nach %d Versuchen fehlgeschlagen", label, NET_ZRL_ESPNOW_RETRY_COUNT + 1);
+    return false;
+}
+
 bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
     SmartHome::AckPayload payload = {};
     payload.ack_seq = ackSeq;
@@ -1159,7 +1182,7 @@ bool sendeHello() {
     copyText(payload.input_mask, sizeof(payload.input_mask), inputMask);
 
     runtime.letztesHelloMs = millis();
-    return sendePaket(holeHelloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
+    return sendePaketMitRetry(holeHelloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
 }
 
 bool sendeHeartbeat() {
@@ -1169,7 +1192,7 @@ bool sendeHeartbeat() {
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
     payload.uptime_s = millis() / 1000UL;
 
-    if (!sendePaket(runtime.masterMac, SH_MSG_HEARTBEAT, &payload, sizeof(payload), "HEARTBEAT")) {
+    if (!sendePaketMitRetry(runtime.masterMac, SH_MSG_HEARTBEAT, &payload, sizeof(payload), "HEARTBEAT")) {
         return false;
     }
 
@@ -1191,7 +1214,7 @@ bool sendeState() {
     payload.fault = 0U;
     payload.report_interval_s = (uint16_t)sanitizeStatusSendInterval(runtime.statusSendIntervalS);
 
-    if (!sendePaket(runtime.masterMac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
+    if (!sendePaketMitRetry(runtime.masterMac, SH_MSG_STATE, &payload, sizeof(payload), "STATE")) {
         return false;
     }
 
@@ -1209,7 +1232,7 @@ bool sendeCoverEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16_
     payload.trigger = trigger;
     payload.param1 = param1;
     payload.param2 = param2;
-    return sendePaket(runtime.masterMac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
+    return sendePaketMitRetry(runtime.masterMac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT");
 }
 
 // =============================================================================
@@ -2400,6 +2423,8 @@ void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
 
 void initialisiereFunk() {
     if (runtime.funkBereit || runtime.setupMode) return;
+    static uint8_t espNowInitFails = 0;
+    constexpr uint8_t MAX_ESPNOW_INIT_FAILURES = 5;
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -2411,9 +2436,15 @@ void initialisiereFunk() {
     }
 
     if (esp_now_init() != ESP_OK) {
-        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen");
+        espNowInitFails++;
+        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen (%u/%u)", espNowInitFails, MAX_ESPNOW_INIT_FAILURES);
+        if (espNowInitFails >= MAX_ESPNOW_INIT_FAILURES) {
+            logf("ERROR", "ESP-NOW init nach %u Versuchen fehlgeschlagen, restart", MAX_ESPNOW_INIT_FAILURES);
+            ESP.restart();
+        }
         return;
     }
+    espNowInitFails = 0;  // Reset on success
 
     esp_now_register_send_cb(onEspNowSend);
     esp_now_register_recv_cb(onEspNowReceive);
