@@ -247,6 +247,24 @@ void netErlDevicePollSensors(unsigned long nowMs) {
             runtime.state_report_offen = true;
         }
     }
+
+    // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Änderung
+    // Spart ESP-NOW/MQTT-Bandbreite bei gleichbleibenden Messwerten
+    {
+        static int16_t  last_temp = INT16_MIN;
+        static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU;
+        static uint32_t last_press = 0xFFFFFFFFUL;
+        static uint16_t last_aqi = 0xFFFFU;
+        
+        bool changed = false;
+        if (temp_01c != last_temp) { last_temp = temp_01c; changed = true; }
+        if (absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
+        if (absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
+        if (absDiffU32(pressure_pa, last_press) >= 10UL) { last_press = pressure_pa; changed = true; }
+        if (last_aqi != aqi) { last_aqi = aqi; changed = true; }
+        
+        if (changed) runtime.state_report_offen = true;
+    }
 }
 
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {

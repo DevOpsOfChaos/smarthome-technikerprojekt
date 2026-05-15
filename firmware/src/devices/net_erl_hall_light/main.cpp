@@ -168,6 +168,19 @@ void netErlDevicePollSensors(unsigned long nowMs) {
             runtime.state_report_offen = true;
         }
     }
+
+    // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Änderung
+    {
+        static int16_t  last_temp = INT16_MIN;
+        static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU;
+        
+        bool changed = false;
+        if (temp_01c != last_temp) { last_temp = temp_01c; changed = true; }
+        if (absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
+        if (absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
+        
+        if (changed) runtime.state_report_offen = true;
+    }
 }
 
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {
