@@ -1,10 +1,27 @@
+# =============================================================================
+# SmartHome Server – Docker Compose (Phase 1)
+# =============================================================================
+# Startet drei Dienste in einem privaten Netzwerk:
+#   1. mosquitto  – MQTT-Broker (Gerätekommunikation)
+#   2. nodered    – Node-RED (MQTT-Ingest + Dashboard + HTTP-API + SQLite)
+#
+# Node-RED startet mit einem dynamisch generierten Settings-File, das
+# alle Lib-Module in den functionGlobalContext einbindet.
+# =============================================================================
+
 services:
+  # ---------------------------------------------------------------------------
+  # Mosquitto MQTT-Broker
+  # ---------------------------------------------------------------------------
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
       - "${MQTT_PORT:-1883}:1883"
 
+  # ---------------------------------------------------------------------------
+  # Node-RED – Anwendungsserver
+  # ---------------------------------------------------------------------------
   nodered:
     image: nodered/node-red:3.1
     restart: unless-stopped
@@ -18,16 +35,23 @@ services:
       MQTT_PORT: "1883"
       SQLITE_DB_PATH: "${SQLITE_DB_PATH:-/data/sqlite/smarthome_phase1.db}"
     volumes:
-      - ./nodered:/data
-      - ./sqlite:/data/sqlite
+      - ./nodered:/data         # Node-RED-Daten (Flows, Settings, Libs)
+      - ./sqlite:/data/sqlite   # SQLite-Datenbank + Schema
     entrypoint:
       - /bin/sh
       - -lc
     command:
       - |
+        # --------------------------------------------------------------------
+        # Schritt 1: npm-Abhängigkeiten installieren (nur bei Bedarf)
+        # --------------------------------------------------------------------
         if [ ! -d /data/node_modules/node-red-node-sqlite ] || [ ! -d /data/node_modules/@flowfuse/node-red-dashboard ]; then
           cd /data && npm install --no-audit --no-fund --unsafe-perm
         fi
+
+        # --------------------------------------------------------------------
+        # Schritt 2: Datenbank-Schema anlegen + Migrationen ausführen
+        # --------------------------------------------------------------------
         node <<'NODE'
         const fs = require('fs');
         const path = require('path');
@@ -35,6 +59,8 @@ services:
         const dbPath = process.env.SQLITE_DB_PATH || '/data/sqlite/smarthome_phase1.db';
         const schemaSql = fs.readFileSync('/data/sqlite/00_schema_phase1.sql', 'utf8');
         const dir = '/data/flows/active';
+
+        // Hilfsfunktion: Ein einzelnes SQL-Statement ausführen (Promise)
         function runSql(db, sql) {
           return new Promise((resolve, reject) => {
             db.run(sql, (error) => {
@@ -46,6 +72,8 @@ services:
             });
           });
         }
+
+        // Hilfsfunktion: Mehrere Zeilen abfragen (Promise)
         function queryAll(db, sql) {
           return new Promise((resolve, reject) => {
             db.all(sql, (error, rows) => {
@@ -57,6 +85,8 @@ services:
             });
           });
         }
+
+        // Fügt eine Spalte hinzu, falls sie noch nicht existiert (idempotent)
         async function ensureColumn(db, tableName, columnName, columnDefinition) {
           const columns = await queryAll(db, "PRAGMA table_info(" + tableName + ")");
           const hasColumn = columns.some((column) => column && column.name === columnName);
@@ -64,6 +94,8 @@ services:
             await runSql(db, "ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
           }
         }
+
+        // Führt alle Phase-1-Migrationen aus (nach dem Basis-Schema)
         async function ensurePhase1Migrations(db) {
           await ensureColumn(db, "devices", "dashboard_display_name", "TEXT");
           await ensureColumn(db, "device_state_latest", "cover_direction", "TEXT");
@@ -71,6 +103,8 @@ services:
           await ensureColumn(db, "device_state_latest", "button_flags", "INTEGER");
           await ensureColumn(db, "device_state_latest", "last_ack_source", "TEXT");
         }
+
+        // Schema-Gesamtablauf: CREATE TABLE + Migrationen
         function ensureSchema() {
           return new Promise((resolve, reject) => {
             const db = new sqlite3.Database(dbPath, (openErr) => {
@@ -105,11 +139,21 @@ services:
           });
         }
 
+        // --------------------------------------------------------------------
+        // Hauptablauf beim Start
+        // --------------------------------------------------------------------
         (async () => {
+          // Datenbank initialisieren
           await ensureSchema();
+
+          // Alle Flow-Dateien aus /data/flows/active/ zusammenführen
           const files = fs.readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
           const merged = files.flatMap((name) => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')));
           fs.writeFileSync('/data/flows.json', JSON.stringify(merged, null, 2));
+
+          // Dynamisches Settings-File erzeugen, das alle Lib-Module einbindet.
+          // Basis ist /data/settings.js – ergänzt um Module, die ggf. in der
+          // Basis-Konfiguration noch nicht enthalten sind (Redundanz ist harmlos).
           const lines = [
             "const base = require('/data/settings.js');",
             'module.exports = {',
@@ -134,4 +178,8 @@ services:
           process.exit(1);
         });
         NODE
+
+        # --------------------------------------------------------------------
+        # Schritt 3: Node-RED mit generiertem Settings-File starten
+        # --------------------------------------------------------------------
         exec node $$NODE_OPTIONS /usr/src/node-red/node_modules/node-red/red.js --userDir /data --settings /tmp/settings.generated.js --flowFile /data/flows.json

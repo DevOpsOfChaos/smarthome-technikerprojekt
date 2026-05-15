@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "60 Dashboard Overview",
     "disabled": false,
-    "info": "Kleine Dashboard-Uebersicht auf Basis der aktuellen Servertabellen."
+    "info": "Dashboard-Übersichtsseite mit Gerätekarten, Lampen-Toggle und Rolladen-Direktbedienung. SQL-Abfragen werden von /data/lib/dashboard_v1.js erzeugt, das Vue-Template rendert die Karten dynamisch mit Auto-Refresh alle 5 Sekunden."
   },
   {
     "id": "ui_template_dashboard_overview_v1",

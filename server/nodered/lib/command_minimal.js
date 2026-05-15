@@ -1,21 +1,49 @@
+/**
+ * =============================================================================
+ * @modul     command_minimal
+ * @beschreibung  Erzeugt validierte Steuerbefehle (MQTT-Commands) für die
+ *                offiziellen Command-Endpunkte des Servers.
+ *
+ * @endpunkte
+ *   - POST /api/phase1/net-erl/relay-1   → Relais schalten (net_erl-Geräte)
+ *   - POST /api/phase1/cover/command     → Rolladen steuern (net_zrl-Geräte)
+ *
+ * @funktionen
+ *   - buildNetErlRelay1Command  → Validierten relay_1-Schaltbefehl erzeugen
+ *   - buildCoverCommand         → Validierten Rolladen-Befehl (open/close/stop/set_position)
+ *   - buildRequestId            → Eindeutige Request-ID pro Befehl
+ *
+ * @nutzung   40_command_minimal.json (Flow), 41_cover_automation_detail.json (Tick)
+ * @export    buildNetErlRelay1Command, buildCoverCommand
+ * =============================================================================
+ */
+
 "use strict";
 
 const crypto = require("crypto");
-const { nowIso } = require("./time_helpers");
+const { nowIso, isPlainObject } = require("./time_helpers");
+const { isCoverDevice, inferBaseTypeFromDeviceId } = require("./capability_helpers");
 
-// Muster zur Geräteklassifizierung anhand ID oder device_class.
-const NET_ERL_DEVICE_ID_PATTERN    = /^net_erl/i;
+// ===========================================================================
+// MUSTER FÜR GERÄTEKLASSEN
+// ===========================================================================
+
 const NET_ERL_DEVICE_CLASS_PATTERN = /^net[-_]?erl$/i;
-const NET_ZRL_DEVICE_ID_PATTERN    = /^net[-_]?zrl/i;
-const NET_ZRL_DEVICE_CLASS_PATTERN = /^net[-_]?zrl$/i;
 
-// Erlaubte Rolladen-Befehle.
+// ===========================================================================
+// ERLAUBTE BEFEHLE
+// ===========================================================================
+
 const COVER_COMMANDS = new Set(["open", "close", "stop", "set_position"]);
 
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+// ===========================================================================
+// PRIVATE HELFER
+// ===========================================================================
 
+/**
+ * Normalisiert beliebige Eingabe zu einem einfachen Objekt.
+ * JSON-Strings werden geparst, Arrays und Nicht-Objekte geben {} zurück.
+ */
 function normalizeInput(input) {
   if (isPlainObject(input)) {
     return input;
@@ -25,7 +53,7 @@ function normalizeInput(input) {
     try {
       const parsed = JSON.parse(input);
       return isPlainObject(parsed) ? parsed : {};
-    } catch (error) {
+    } catch (_error) {
       return {};
     }
   }
@@ -33,14 +61,18 @@ function normalizeInput(input) {
   return {};
 }
 
+/**
+ * Normalisiert eine Device-ID zu einem getrimmten String.
+ */
 function normalizeDeviceId(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/*
- * Zweck: Normalisiert einen Relay-Wert auf boolean.
- * Akzeptiert boolean, "true"/"false", "1"/"0", "on"/"off".
- * Rückgabe: { ok: true, value: boolean } oder { ok: false, value: null }.
+/**
+ * Normalisiert einen Relay-Wert auf boolean.
+ * Akzeptiert booleans, "true"/"false", "1"/"0", "on"/"off".
+ *
+ * @returns {{ ok: boolean, value: boolean|null }}
  */
 function normalizeRelayValue(value) {
   if (typeof value === "boolean") {
@@ -60,7 +92,11 @@ function normalizeRelayValue(value) {
   return { ok: false, value: null };
 }
 
-// Bereinigt eine Device-ID für die Verwendung in request_id-Strings.
+/**
+ * Bereinigt eine Device-ID für die Verwendung in request_id-Strings.
+ * Entfernt Sonderzeichen und normalisiert auf Kleinbuchstaben.
+ * Leeres Ergebnis → Fallback "device".
+ */
 function sanitizeDeviceId(deviceId) {
   return deviceId
     .trim()
@@ -69,38 +105,19 @@ function sanitizeDeviceId(deviceId) {
     .replace(/^-+|-+$/g, "") || "device";
 }
 
-/*
- * Zweck: Erzeugt eine eindeutige Request-ID für einen Steuerbefehl.
- * Format: cmd-<device>-<action>-<zeitstempel>-<zufallssuffix>
- * Rückgabe: String, der pro Befehl eindeutig ist.
+/**
+ * Normalisiert einen Kommandotext zu Kleinbuchstaben, getrimmt.
  */
-function buildRequestId(deviceId, action, timestamp = nowIso()) {
-  const compactTimestamp = String(timestamp).replace(/[^0-9]/g, "");
-  const suffix = crypto.randomBytes(3).toString("hex");
-  return `cmd-${sanitizeDeviceId(deviceId)}-${sanitizeDeviceId(action)}-${compactTimestamp}-${suffix}`;
-}
-
-/*
- * Zweck: Prüft, ob ein Gerät ein net_erl-Aktor ist (Relais-Schaltgerät).
- * Vorrang: device_class aus Metadaten, Fallback: Device-ID-Präfix.
- */
-function isNetErlDevice(runtime, deviceId) {
-  const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
-  const deviceClass = device && device.meta && typeof device.meta.device_class === "string"
-    ? device.meta.device_class
-    : "";
-
-  if (deviceClass) {
-    return NET_ERL_DEVICE_CLASS_PATTERN.test(deviceClass);
-  }
-
-  return NET_ERL_DEVICE_ID_PATTERN.test(deviceId);
-}
-
 function normalizeCommand(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+/**
+ * Normalisiert einen Wert auf eine ganze Zahl.
+ * Akzeptiert numbers und numerische Strings.
+ *
+ * @returns {{ ok: boolean, value: number|null }}
+ */
 function normalizeInteger(value) {
   if (typeof value === "number" && Number.isInteger(value)) {
     return { ok: true, value };
@@ -116,41 +133,30 @@ function normalizeInteger(value) {
   return { ok: false, value: null };
 }
 
-/*
- * Zweck: Prüft, ob ein Gerät ein net_zrl-Rolladen-Controller ist.
+// ===========================================================================
+// REQUEST-ID-ERZEUGUNG
+// ===========================================================================
+
+/**
+ * Erzeugt eine eindeutige Request-ID für einen Steuerbefehl.
  *
- * Reihenfolge der Prüfung:
- * 1. control_mode === "cover" aus Metadaten
- * 2. device_class Muster
- * 3. "cover" in Fähigkeitsliste
- * 4. Fallback auf Device-ID-Präfix
+ * Format: cmd-<device>-<action>-<kompakterZeitstempel>-<zufallssuffix>
+ * Beispiel: cmd-net-erl-01-relay1-on-20260515143000000-a1b2c3
+ *
+ * @param {string} deviceId  - Gerätekennung
+ * @param {string} action    - Aktionsbezeichnung
+ * @param {string} timestamp - ISO-Zeitstempel (Standard: jetzt)
+ * @returns {string} Eindeutige Request-ID
  */
-function isCoverDevice(runtime, deviceId) {
-  const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
-  const deviceClass = device && device.meta && typeof device.meta.device_class === "string"
-    ? device.meta.device_class
-    : "";
-  const controlMode = device && device.meta && typeof device.meta.control_mode === "string"
-    ? device.meta.control_mode
-    : "";
-  const caps = device && device.meta && Array.isArray(device.meta.caps)
-    ? device.meta.caps.map((cap) => String(cap).toLowerCase())
-    : [];
-
-  if (controlMode.toLowerCase() === "cover") {
-    return true;
-  }
-
-  if (deviceClass) {
-    return NET_ZRL_DEVICE_CLASS_PATTERN.test(deviceClass);
-  }
-
-  if (caps.includes("cover")) {
-    return true;
-  }
-
-  return NET_ZRL_DEVICE_ID_PATTERN.test(deviceId);
+function buildRequestId(deviceId, action, timestamp = nowIso()) {
+  const compactTimestamp = String(timestamp).replace(/[^0-9]/g, "");
+  const suffix = crypto.randomBytes(3).toString("hex");
+  return `cmd-${sanitizeDeviceId(deviceId)}-${sanitizeDeviceId(action)}-${compactTimestamp}-${suffix}`;
 }
+
+// ===========================================================================
+// FEHLERHILFSFUNKTION
+// ===========================================================================
 
 function buildError(statusCode, error, message) {
   return {
@@ -161,16 +167,44 @@ function buildError(statusCode, error, message) {
   };
 }
 
-/*
- * Zweck: Erzeugt einen validierten Relay-1-Schaltbefehl für net_erl-Geräte.
+// ===========================================================================
+// BEFEHLSERZEUGUNG – NET_ERL (RELAIS)
+// ===========================================================================
+
+/**
+ * Prüft, ob ein Gerät ein net_erl-Aktor ist (Relais-Schaltgerät).
+ * Prüft device_class aus den Metadaten (primär) oder Device-ID-Präfix (Fallback).
  *
- * Eingaben:
- * - runtime: aktueller Laufzeitzustand (für Geräteklassen-Prüfung)
- * - input: Payload mit device_id und relay_1 (true/false)
- * - timestamp: Befehlszeitpunkt (Standard: jetzt)
+ * @param {object} runtime  - Laufzeitzustand
+ * @param {string} deviceId - Gerätekennung
+ * @returns {boolean}
+ */
+function isNetErlDevice(runtime, deviceId) {
+  const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
+  const deviceClass = device && device.meta && typeof device.meta.device_class === "string"
+    ? device.meta.device_class
+    : "";
+
+  if (deviceClass) {
+    return NET_ERL_DEVICE_CLASS_PATTERN.test(deviceClass);
+  }
+
+  const baseType = inferBaseTypeFromDeviceId(deviceId);
+  return baseType === "net_erl";
+}
+
+/**
+ * Erzeugt einen validierten Relay-1-Schaltbefehl für net_erl-Geräte.
  *
- * Rückgabe: { ok, command: { topic, payload }, response } bei Erfolg,
- *           { ok: false, statusCode, error, message } bei Fehler.
+ * Validiert:
+ *   1. device_id muss vorhanden sein
+ *   2. Gerät muss ein net_erl-Aktor sein
+ *   3. relay_1 muss true oder false sein
+ *
+ * @param {object} runtime   - Laufzeitzustand
+ * @param {object} input     - Payload mit device_id und relay_1 (true/false)
+ * @param {string} timestamp - Befehlszeitpunkt
+ * @returns {{ ok: true, command, response } | { ok: false, statusCode, error, message }}
  */
 function buildNetErlRelay1Command(runtime, input, timestamp = nowIso()) {
   const payload = normalizeInput(input);
@@ -217,20 +251,24 @@ function buildNetErlRelay1Command(runtime, input, timestamp = nowIso()) {
   };
 }
 
-/*
- * Zweck: Erzeugt einen validierten Rolladen-Steuerbefehl für net_zrl-Geräte.
+// ===========================================================================
+// BEFEHLSERZEUGUNG – NET_ZRL (ROLLADEN)
+// ===========================================================================
+
+/**
+ * Erzeugt einen validierten Rolladen-Steuerbefehl für net_zrl-Geräte.
  *
- * Eingaben:
- * - runtime: aktueller Laufzeitzustand (für Geräteklassen- und Kalibrierstatus-Prüfung)
- * - input: Payload mit device_id, command und ggf. position (0–100)
- * - timestamp: Befehlszeitpunkt (Standard: jetzt)
+ * Validiert:
+ *   1. device_id muss vorhanden sein
+ *   2. Gerät muss ein Rolladen-Controller sein (isCoverDevice aus capability_helpers)
+ *   3. Befehl muss open, close, stop oder set_position sein
+ *   4. Bei set_position: position muss 0–100 sein
+ *   5. Ohne Kalibrierung: nur Endlagen 0/100 erlaubt
  *
- * Besonderheit:
- * - set_position ohne Kalibrierung erlaubt nur Endlagen (0 oder 100).
- *   Zwischenwerte wären technisch geraten und werden abgelehnt.
- *
- * Rückgabe: { ok, command: { topic, payload }, response } bei Erfolg,
- *           { ok: false, statusCode, error, message } bei Fehler.
+ * @param {object} runtime   - Laufzeitzustand
+ * @param {object} input     - Payload mit device_id, command, ggf. position
+ * @param {string} timestamp - Befehlszeitpunkt
+ * @returns {{ ok: true, command, response } | { ok: false, statusCode, error, message }}
  */
 function buildCoverCommand(runtime, input, timestamp = nowIso()) {
   const payload = normalizeInput(input);
@@ -262,6 +300,7 @@ function buildCoverCommand(runtime, input, timestamp = nowIso()) {
       return buildError(400, "position_required", "position must be an integer from 0 to 100");
     }
 
+    // Kalibrierungsstatus prüfen: ohne Kalibrierung nur Endlagen.
     const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
     const coverCalibratedHint = payload.cover_calibrated ?? payload.is_calibrated;
     const coverCalibrated = device && device.state
@@ -270,7 +309,6 @@ function buildCoverCommand(runtime, input, timestamp = nowIso()) {
     const coverIsCalibrated = coverCalibrated === true || coverCalibrated === 1;
     const coverIsExplicitlyUncalibrated = coverCalibrated === false || coverCalibrated === 0;
 
-    // Ohne Kalibrierung bleiben nur die Endlagen belastbar. Zwischenwerte würden hier geraten.
     if (coverIsExplicitlyUncalibrated && !coverIsCalibrated && ![0, 100].includes(normalizedPosition.value)) {
       return buildError(409, "not_calibrated", "set_position without calibration only allows 0 or 100");
     }

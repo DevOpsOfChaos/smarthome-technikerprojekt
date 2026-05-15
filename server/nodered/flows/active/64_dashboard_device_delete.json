@@ -4,7 +4,7 @@
     "type": "comment",
     "z": "tab_dashboard_v1_ui",
     "name": "Geraet gezielt loeschen",
-    "info": "Kleiner Bereinigungspfad fuer einzelne Testgeraete. Keine Massenloeschung.",
+    "info": "Kleiner Bereinigungspfad für einzelne Testgeräte. Löscht alle Daten zu einer Device-ID aus devices, device_state_latest und räumt retained MQTT-Topics auf. Keine Massenlöschung – bewusst nur Einzelgeräte.",
     "x": 180,
     "y": 360,
     "wires": []

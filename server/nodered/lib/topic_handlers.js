@@ -1,3 +1,26 @@
+/**
+ * =============================================================================
+ * @modul     topic_handlers
+ * @beschreibung  Verarbeitet eingehende MQTT-Nachrichten und schreibt sie in
+ *                den Laufzeitzustand (Runtime-State). Bindeglied zwischen
+ *                MQTT-Ingest und der Persistenzschicht.
+ *
+ * @handler-pro-topic
+ *   - handleMeta           → Gerätemetadaten (Klasse, Fähigkeiten, Firmware)
+ *   - handleAvailability   → Verfügbarkeit (online/offline/late)
+ *   - handleState          → Sensordaten und Aktorstatus
+ *   - handleEvent          → Geräteereignisse (Tastendruck, Regenalarm)
+ *   - handleAck            → Befehlsbestätigungen
+ *   - handleMasterStatus   → Gateway-Status (WiFi, MQTT, ESP-NOW)
+ *
+ * @einstiegspunkt   handleRoutedMessage – zentraler Dispatcher für alle Topics
+ *
+ * @nutzung    20_device_store.json, 90_master_diag.json (Flow-Funktionen)
+ * @export     handleMeta, handleAvailability, handleState, handleEvent, handleAck,
+ *             handleMasterStatus, handleRoutedMessage, normalizeRuntime
+ * =============================================================================
+ */
+
 "use strict";
 
 const {
@@ -14,18 +37,28 @@ const {
 const sqliteWrites = require("./sqlite_writes");
 const { coerceTimestamp, nowIso } = require("./time_helpers");
 
-/*
- * Zweck: Stellt sicher, dass der globale Laufzeitzustand initialisiert ist.
- * Rückgabe: Geprüftes/initialisiertes Runtime-Objekt.
+// ===========================================================================
+// EINGANGS-NORMALISIERUNG
+// ===========================================================================
+
+/**
+ * Stellt sicher, dass der globale Laufzeitzustand initialisiert ist.
+ * Wird vor jedem Handler-Aufruf ausgeführt.
+ *
+ * @param {object} runtime - Aktueller (ggf. leerer) Laufzeitzustand
+ * @returns {object} Geprüfter/initialisierter Runtime-State
  */
 function normalizeRuntime(runtime) {
   return ensureRuntime(runtime, nowIso());
 }
 
-/*
- * Zweck: Normalisiert den eingehenden Payload auf ein einfaches Objekt.
+/**
+ * Normalisiert den eingehenden Payload auf ein einfaches Objekt.
  * Verarbeitet rohe JSON-Strings, fertige Objekte und leere Payloads.
- * Rückgabe: Einfaches Objekt, niemals null oder Array.
+ * Niemals null oder Array – immer mindestens {}.
+ *
+ * @param {*} payload - Roher Nachrichteninhalt
+ * @returns {object} Einfaches Objekt
  */
 function normalizePayload(payload) {
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
@@ -36,7 +69,7 @@ function normalizePayload(payload) {
     try {
       const parsed = JSON.parse(payload);
       return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch (error) {
+    } catch (_error) {
       return {};
     }
   }
@@ -44,15 +77,11 @@ function normalizePayload(payload) {
   return {};
 }
 
-/*
- * Zweck: Normalisiert den Nachrichtenumschlag vor der Handlerverarbeitung.
+/**
+ * Normalisiert den Nachrichtenumschlag vor der Handlerverarbeitung.
  *
- * Eingaben:
- * - envelope.entity_id: Geräte- oder Master-ID (kann auch im Payload stehen)
- * - envelope.payload: Rohpayload der MQTT-Nachricht
- * - envelope.received_at: Empfangszeitpunkt
- *
- * Rückgabe: Bereinigte Nachricht mit gesicherter entity_id und received_at.
+ * @param {object} envelope - { entity_id, payload, received_at }
+ * @returns {object} Bereinigte Nachricht mit entity_id und received_at
  */
 function normalizeEnvelope(envelope = {}) {
   const payload = normalizePayload(envelope.payload);
@@ -63,10 +92,17 @@ function normalizeEnvelope(envelope = {}) {
   };
 }
 
-/*
- * Zweck: Verarbeitet eine eingehende Meta-Nachricht eines Geräts.
+// ===========================================================================
+// DEVICE-HANDLER
+// ===========================================================================
+
+/**
+ * Verarbeitet eine eingehende Meta-Nachricht eines Geräts.
  * Schreibt Gerätemetadaten (Klasse, Fähigkeiten, Firmware) in das Geräteobjekt.
- * Rückgabe: { runtime, device } nach der Aktualisierung.
+ *
+ * @param {object} runtime  - Aktueller Laufzeitzustand
+ * @param {object} envelope - Nachrichtenumschlag
+ * @returns {{ runtime: object, device: object }}
  */
 function handleMeta(runtime, envelope) {
   const nextRuntime = normalizeRuntime(runtime);
@@ -76,10 +112,13 @@ function handleMeta(runtime, envelope) {
   return { runtime: nextRuntime, device };
 }
 
-/*
- * Zweck: Verarbeitet eine Verfügbarkeitsmeldung (online/offline).
+/**
+ * Verarbeitet eine Verfügbarkeitsmeldung (online/offline/late).
  * Aktualisiert availability, online-Flag und last_seen_at im Geräteobjekt.
- * Rückgabe: { runtime, device } nach der Aktualisierung.
+ *
+ * @param {object} runtime  - Aktueller Laufzeitzustand
+ * @param {object} envelope - Nachrichtenumschlag
+ * @returns {{ runtime: object, device: object }}
  */
 function handleAvailability(runtime, envelope) {
   const nextRuntime = normalizeRuntime(runtime);
@@ -89,10 +128,13 @@ function handleAvailability(runtime, envelope) {
   return { runtime: nextRuntime, device };
 }
 
-/*
- * Zweck: Verarbeitet eine Zustandsmeldung eines Geräts (Sensordaten, Aktorstatus).
+/**
+ * Verarbeitet eine Zustandsmeldung (Sensordaten, Aktorstatus).
  * Normalisiert alle bekannten Zustandsfelder und schreibt sie in device.state.
- * Rückgabe: { runtime, device } nach der Aktualisierung.
+ *
+ * @param {object} runtime  - Aktueller Laufzeitzustand
+ * @param {object} envelope - Nachrichtenumschlag
+ * @returns {{ runtime: object, device: object }}
  */
 function handleState(runtime, envelope) {
   const nextRuntime = normalizeRuntime(runtime);
@@ -102,10 +144,13 @@ function handleState(runtime, envelope) {
   return { runtime: nextRuntime, device };
 }
 
-/*
- * Zweck: Verarbeitet ein Geräteereignis (z. B. Tastendruck, Regenalarm).
- * Schreibt das Ereignis in device.last_event und leitet daraus ggf. Zustandsfelder ab.
- * Rückgabe: { runtime, device } nach der Aktualisierung.
+/**
+ * Verarbeitet ein Geräteereignis (Tastendruck, Regenalarm).
+ * Schreibt das Ereignis in device.last_event und leitet ggf. Zustandsfelder ab.
+ *
+ * @param {object} runtime  - Aktueller Laufzeitzustand
+ * @param {object} envelope - Nachrichtenumschlag
+ * @returns {{ runtime: object, device: object }}
  */
 function handleEvent(runtime, envelope) {
   const nextRuntime = normalizeRuntime(runtime);
@@ -115,10 +160,13 @@ function handleEvent(runtime, envelope) {
   return { runtime: nextRuntime, device };
 }
 
-/*
- * Zweck: Verarbeitet eine Bestätigung (Ack) auf einen Steuerbefehl.
+/**
+ * Verarbeitet eine Befehlsbestätigung (Ack) vom Gerät.
  * Schreibt Kanal, Status und Sequenznummer in device.last_ack.
- * Rückgabe: { runtime, device } nach der Aktualisierung.
+ *
+ * @param {object} runtime  - Aktueller Laufzeitzustand
+ * @param {object} envelope - Nachrichtenumschlag
+ * @returns {{ runtime: object, device: object }}
  */
 function handleAck(runtime, envelope) {
   const nextRuntime = normalizeRuntime(runtime);
@@ -128,10 +176,17 @@ function handleAck(runtime, envelope) {
   return { runtime: nextRuntime, device };
 }
 
-/*
- * Zweck: Verarbeitet eine Statusmeldung eines Master-Geräts (Gateway).
+// ===========================================================================
+// MASTER-HANDLER
+// ===========================================================================
+
+/**
+ * Verarbeitet eine Statusmeldung eines Master-Geräts (Gateway).
  * Aktualisiert online, WiFi, MQTT, ESP-NOW und Firmware im Master-Objekt.
- * Rückgabe: { runtime, master } nach der Aktualisierung.
+ *
+ * @param {object} runtime  - Aktueller Laufzeitzustand
+ * @param {object} envelope - Nachrichtenumschlag
+ * @returns {{ runtime: object, master: object }}
  */
 function handleMasterStatus(runtime, envelope) {
   const nextRuntime = normalizeRuntime(runtime);
@@ -141,19 +196,24 @@ function handleMasterStatus(runtime, envelope) {
   return { runtime: nextRuntime, master };
 }
 
-/*
- * Zweck: Zentraler Eintrittspunkt für alle eingehenden MQTT-Nachrichten.
+// ===========================================================================
+// ZENTRALER DISPATCHER
+// ===========================================================================
+
+/**
+ * Zentraler Eintrittspunkt für alle eingehenden MQTT-Nachrichten.
  *
- * Eingaben:
- * - runtime: aktueller Laufzeitzustand (global)
- * - routed: Routing-Objekt aus topic_router (scope, topic_type, entity_id, received_at)
- * - payload: normalisierter Nachrichteninhalt
+ * Ablauf:
+ *   1. Routing-Deskriptor auswerten (scope, topic_type)
+ *   2. Passenden Handler aus der Handler-Map auswählen
+ *   3. Handler ausführen → Geräte-/Master-Objekt aktualisieren
+ *   4. SQLite-Batch für die Persistenzschicht vorbereiten
+ *   5. Ergebnis mit aktualisiertem Runtime-State und Batch zurückgeben
  *
- * Rückgabe: Ergebnisobjekt mit { runtime, payload, sqlite_batch }
- *           oder null bei unbekanntem Scope oder Topic-Typ.
- *
- * Seiteneffekt: Aktualisiert das Gerät oder den Master im Runtime-State.
- *               Bereitet den SQLite-Batch für die Persistenzschicht vor.
+ * @param {object} runtime - Aktueller Laufzeitzustand (global.get("smarthome_runtime"))
+ * @param {object} routed  - Routing-Objekt aus topic_router (scope, topic_type, entity_id, received_at)
+ * @param {object} payload - Normalisierter Nachrichteninhalt
+ * @returns {object|null} Ergebnis { runtime, payload, sqlite_batch } oder null
  */
 function handleRoutedMessage(runtime, routed, payload) {
   const descriptor = routed && typeof routed === "object" ? routed : {};
@@ -163,6 +223,7 @@ function handleRoutedMessage(runtime, routed, payload) {
     received_at: descriptor.received_at
   };
 
+  // ---- Device-Scope ----
   if (descriptor.scope === "device") {
     const deviceHandlers = {
       meta:         handleMeta,
@@ -194,6 +255,7 @@ function handleRoutedMessage(runtime, routed, payload) {
     };
   }
 
+  // ---- Master-Scope ----
   if (descriptor.scope === "master") {
     const masterHandlers = {
       status: handleMasterStatus

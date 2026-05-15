@@ -1,12 +1,42 @@
+/**
+ * =============================================================================
+ * @modul     dashboard_v1
+ * @beschreibung  Dashboard-Hilfsmodul: Bereitet SQLite-Rohdaten für die
+ *                Übersichts- und Detailseite der Weboberfläche auf.
+ *
+ * @prinzip   Alle Funktionen sind zustandslos – Eingabe ist immer eine oder
+ *            mehrere SQLite-Rows, Ausgabe ein fertiges Payload-Objekt.
+ *
+ * @seiten
+ *   - Übersicht   (/)            → Gerätekarten mit Highlights, Toggle, Status
+ *   - Gerätedetail (/geraet)     → Vollständige Geräteansicht inkl. Rohdaten
+ *
+ * @funktionen
+ *   - buildOverviewQuery      → SQL-Abfrage für Übersicht
+ *   - buildOverviewPayload    → SQLite-Rows in Übersichts-Payload wandeln
+ *   - buildDeviceDetailQuery  → SQL-Abfrage für Einzelgerät
+ *   - buildDeviceDetailPayload → SQLite-Row in Detail-Payload wandeln
+ *   - buildDeviceDeleteQuery  → DELETE-Transaktion für Gerätelöschung
+ *
+ * @nutzung   Flow-Tabs 60 (Übersicht), 63 (Detail), 64 (Löschen)
+ * @export    buildOverviewQuery, buildOverviewPayload,
+ *            buildDeviceDetailQuery, buildDeviceDetailPayload,
+ *            buildDeviceDeleteQuery
+ * =============================================================================
+ */
+
 "use strict";
 
-// Dashboard-Hilfsmodul: Bereitet SQLite-Rohdaten für die Übersichts- und Detailseite auf.
-// Alle Funktionen sind zustandslos – Eingabe ist immer eine oder mehrere SQLite-Rows,
-// Ausgabe immer ein fertiges Payload-Objekt für den jeweiligen Dashboard-Widget-Node.
+// ===========================================================================
+// JSON-HILFSFUNKTIONEN
+// ===========================================================================
 
-/*
- * Zweck: Parst einen JSON-Wert sicher. Gibt das Objekt direkt zurück, wenn es bereits
- *        geparst ist, null bei leerem oder ungültigem Wert.
+/**
+ * Parst einen JSON-Wert sicher.
+ * Gibt das Objekt direkt zurück, wenn es bereits geparst ist.
+ *
+ * @param {*} value - JSON-String, Objekt oder leer
+ * @returns {object|Array|null}
  */
 function parseJson(value) {
     if (value === null || value === undefined || value === "") {
@@ -17,7 +47,7 @@ function parseJson(value) {
     }
     try {
         return JSON.parse(value);
-    } catch (error) {
+    } catch (_error) {
         return null;
     }
 }
@@ -30,10 +60,16 @@ function sqlStringLiteral(value) {
     return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-/*
- * Zweck: Erzeugt eine atomare DELETE-Transaktion zum vollständigen Entfernen eines Geräts.
+// ===========================================================================
+// GERÄTELÖSCHUNG
+// ===========================================================================
+
+/**
+ * Erzeugt eine atomare DELETE-Transaktion zum vollständigen Entfernen eines Geräts.
  * Löscht device_state_latest und devices in einem Batch.
- * Rückgabe: SQL-String (BEGIN IMMEDIATE … COMMIT) oder null bei ungültiger device_id.
+ *
+ * @param {string} deviceId - Gerätekennung
+ * @returns {string|null} SQL-String (BEGIN IMMEDIATE … COMMIT) oder null
  */
 function buildDeviceDeleteQuery(deviceId) {
     const normalizedId = normalizeString(deviceId);
@@ -49,10 +85,16 @@ function buildDeviceDeleteQuery(deviceId) {
     ].join(" ");
 }
 
-/*
- * Zweck: Normalisiert einen Gerätetyp-String auf einen kanonischen Basistyp.
- * Eingabe: device_class, base_type oder device_id (Fallback-Reihenfolge).
- * Rückgabe: z. B. "net_erl", "net_zrl", "bat_sen", "master" oder der normalisierte Eingabe-String.
+// ===========================================================================
+// BASISTYP-NORMALISIERUNG
+// ===========================================================================
+
+/**
+ * Normalisiert einen Gerätetyp-String auf einen kanonischen Basistyp.
+ * Prüft device_class/base_type/device_id (in Fallback-Reihenfolge).
+ *
+ * @param {string} value - Gerätetyp-String
+ * @returns {string} z. B. "net_erl", "net_zrl", "bat_sen", "master"
  */
 function normalizeBaseType(value) {
     const text = normalizeString(value).toLowerCase().replace(/-/g, "_");
@@ -67,16 +109,27 @@ function normalizeBaseType(value) {
     return text;
 }
 
-// Prüft, ob ein Gerät ein Batteriegerät ist (bat_sen-Präfix in ID, Klasse oder Basistyp).
+// ===========================================================================
+// GERÄTETYP-ERKENNUNG
+// ===========================================================================
+
+/**
+ * Prüft, ob ein Gerät ein Batteriegerät ist (bat_sen-Präfix in ID, Klasse oder Basistyp).
+ */
 function isBatteryDevice(device) {
     return normalizeBaseType(device.base_type || device.device_class || device.device_id) === "bat_sen";
 }
 
-/*
- * Zweck: Prüft, ob ein net_zrl-Gerät als Rolladen-Controller konfiguriert ist.
- * Rolladen-Erkennung: control_mode enthält "cover"/"shutter"/"blind",
- * oder Zustandsfelder wie cover_position/cover_direction/cover_moving sind vorhanden.
- * Ohne net_zrl-Basistyp ist kein Cover möglich.
+/**
+ * Prüft, ob ein Gerät ein Rolladen-Controller ist.
+ *
+ * Dashboard-spezifische Prüfung: Zusätzlich zur control_mode/device_class/caps-Prüfung
+ * muss der Basistyp "net_zrl" sein – andere Gerätetypen können keine Rolladen sein.
+ *
+ * @param {object} device - Geräteobjekt (mit base_type, device_class, device_id)
+ * @param {object} state  - Zustandsobjekt
+ * @param {object} meta   - Metadaten-Objekt
+ * @returns {boolean}
  */
 function isCoverDevice(device, state, meta) {
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
@@ -92,8 +145,10 @@ function isCoverDevice(device, state, meta) {
         || Object.prototype.hasOwnProperty.call(state, "cover_moving");
 }
 
-// Prüft, ob ein Gerät ein Relais-Aktor ist (relay_1/2 im State oder net_erl/net_zrl-Typ).
-// Rolladen-Controller werden ausgeschlossen, obwohl sie auch Relais enthalten.
+/**
+ * Prüft, ob ein Gerät ein Relais-Aktor ist.
+ * Rolladen-Controller werden ausgeschlossen (auch wenn sie technisch Relais enthalten).
+ */
 function isRelayDevice(device, state, meta) {
     if (isCoverDevice(device, state, meta)) {
         return false;
@@ -103,7 +158,9 @@ function isRelayDevice(device, state, meta) {
         || ["net_erl", "net_zrl"].includes(normalizeBaseType(device.base_type || device.device_class || device.device_id));
 }
 
-// Prüft, ob ein Gerät ein net_erl-Aktor ist (für den direkten Lampen-Toggle in der Übersicht).
+/**
+ * Prüft, ob ein Gerät ein net_erl-Aktor ist (für den direkten Lampen-Toggle in der Übersicht).
+ */
 function isNetErlDevice(device) {
     return normalizeBaseType(device.base_type || device.device_class || device.device_id) === "net_erl";
 }
@@ -113,9 +170,15 @@ function hasCapability(meta, capability) {
     return caps.includes(capability);
 }
 
-/*
- * Zweck: Gibt Label und CSS-Klassenname für einen Verfügbarkeitsstatus zurück.
- * Rückgabe: { label, className } – className entspricht den sh-chip-*-Klassen im Dashboard-CSS.
+// ===========================================================================
+// VERFÜGBARKEIT
+// ===========================================================================
+
+/**
+ * Gibt Label und CSS-Klassenname für einen Verfügbarkeitsstatus zurück.
+ *
+ * @param {object} availability - { availability: "online"|"offline"|… }
+ * @returns {{ label: string, className: string }}
  */
 function availabilityInfo(availability) {
     const state = normalizeString(availability && availability.availability).toLowerCase();
@@ -139,14 +202,16 @@ function normalizeFiniteNumber(value) {
     return Number.isFinite(numeric) ? numeric : null;
 }
 
-/*
- * Zweck: Berechnet gerätespezifische Schwellwerte für "spät" und "offline".
+/**
+ * Berechnet gerätespezifische Schwellwerte für "spät" und "offline".
  *
  * Batteriegeräte melden deutlich seltener als Netzgeräte. Ihre Schwellwerte
  * basieren auf report_interval_s mit großzügigen Mindestpuffern.
  * Netzgeräte (net_sen: 5 min, andere: 1 min Standardintervall) gelten schneller als offline.
  *
- * Rückgabe: { lateAfterSeconds, offlineAfterSeconds }
+ * @param {object} device - Geräteobjekt
+ * @param {object} config - Konfigurationsobjekt
+ * @returns {{ lateAfterSeconds: number, offlineAfterSeconds: number }}
  */
 function resolveFreshnessThresholds(device, config) {
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
@@ -170,14 +235,15 @@ function resolveFreshnessThresholds(device, config) {
     };
 }
 
-/*
- * Zweck: Leitet den anzuzeigenden Verfügbarkeitsstatus aus dem letzten Kontaktzeitpunkt ab.
+/**
+ * Leitet den anzuzeigenden Verfügbarkeitsstatus aus dem letzten Kontaktzeitpunkt ab.
  *
  * Geht über den gespeicherten availability-String hinaus: Wenn last_seen_at bekannt ist,
  * wird das tatsächliche Gerätealter gegen die gerätespezifischen Schwellwerte geprüft.
  * Offline-Status aus dem Gerät wird immer direkt übernommen (kein Freshness-Override).
  *
- * Rückgabe: { availability, online, last_seen_at }
+ * @param {object} device - Geräteobjekt
+ * @returns {{ availability: string, online: boolean, last_seen_at: string|null }}
  */
 function deriveAvailabilityForDisplay(device) {
     const rawAvailability = device.availability || {};
@@ -212,7 +278,9 @@ function deriveAvailabilityForDisplay(device) {
     return { availability: "online", online: true, last_seen_at: rawAvailability.last_seen_at || null };
 }
 
-// Sortierpriorität für die Geräteliste: online → spät/schlafend → unbekannt → offline.
+/**
+ * Sortierpriorität für die Geräteliste: online → spät/schlafend → unbekannt → offline.
+ */
 function availabilitySortPriority(device) {
     const label = normalizeString(device.availability_label).toLowerCase();
     if (label === "online") return 0;
@@ -221,10 +289,18 @@ function availabilitySortPriority(device) {
     return 2;
 }
 
-/*
- * Zweck: Formatiert einen Zahlenwert mit optionalem Divisor und Einheit für die Anzeige.
+// ===========================================================================
+// FORMATIERUNG
+// ===========================================================================
+
+/**
+ * Formatiert einen Zahlenwert mit optionalem Divisor und Einheit für die Anzeige.
  * Beispiel: formatNumber(235, 10, "°C") → "23.5 °C"
- * Rückgabe: Formatierten String oder "-" bei nicht-finitem Wert.
+ *
+ * @param {number} rawValue - Rohwert
+ * @param {number} divisor  - Teiler (null/0 = kein Teilen)
+ * @param {string} suffix   - Einheit (z. B. "°C", "hPa")
+ * @returns {string} Formatierter String oder "-" bei ungültigem Wert
  */
 function formatNumber(rawValue, divisor, suffix) {
     if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
@@ -235,11 +311,13 @@ function formatNumber(rawValue, divisor, suffix) {
     return suffix ? text + " " + suffix : text;
 }
 
-/*
- * Zweck: Normalisiert eine Rolladen-Position für die Anzeige.
- * Ohne Kalibrierung sind nur die Endlagen 0 und 100 belastbar –
+/**
+ * Normalisiert eine Rolladen-Position für die Anzeige.
+ *
+ * Ohne Kalibrierung sind nur die Endlagen 0 und 100 belastbar.
  * Zwischenwerte werden auf null gesetzt (unbekannt).
- * Rückgabe: Zahl 0–100 oder null.
+ *
+ * @returns {number|null} Zahl 0–100 oder null
  */
 function normalizeCoverPosition(value, isCalibrated) {
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
@@ -251,7 +329,10 @@ function normalizeCoverPosition(value, isCalibrated) {
     return value;
 }
 
-// Erzeugt den Kalibrierungshinweis-Text für die UI (leer wenn kalibriert und Position bekannt).
+/**
+ * Erzeugt den Kalibrierungshinweis-Text für die UI.
+ * Leer wenn kalibriert und Position bekannt.
+ */
 function coverCalibrationHint(positionCalibrated, positionValue) {
     if (!positionCalibrated) {
         return "Nicht kalibriert";
@@ -262,10 +343,13 @@ function coverCalibrationHint(positionCalibrated, positionValue) {
     return "";
 }
 
-/*
- * Zweck: Wandelt einen Rohzustandswert in einen lesbaren Anzeigestring um.
+/**
+ * Wandelt einen Rohzustandswert in einen lesbaren Anzeigestring um.
  * Kennt gerätespezifische Einheiten (°C, hPa, lx, mV, %) und boolesche Labels.
- * Rückgabe: Formatierten String oder "-" bei fehlendem Wert.
+ *
+ * @param {string} key   - Zustandsfeld-Schlüssel
+ * @param {*}      value - Rohwert
+ * @returns {string} Formatierter String oder "-"
  */
 function formatStateValue(key, value) {
     if (value === null || value === undefined) return "-";
@@ -291,7 +375,9 @@ function formatStateValue(key, value) {
     return JSON.stringify(value);
 }
 
-// Übersetzt interne Zustandsfeld-Schlüssel in deutsche Anzeigenamen für die Detailseite.
+/**
+ * Übersetzt interne Zustandsfeld-Schlüssel in deutsche Anzeigenamen.
+ */
 function labelForStateKey(key) {
     const labels = {
         battery_mv: "Batterie",
@@ -333,10 +419,16 @@ function assignIfPresent(target, key, value) {
     }
 }
 
-/*
- * Zweck: Rekonstruiert das meta-Objekt aus einer SQLite-Row (JOIN devices + device_state_latest).
+// ===========================================================================
+// OBJEKT-REKONSTRUKTION AUS SQLITE-ROWS
+// ===========================================================================
+
+/**
+ * Rekonstruiert das meta-Objekt aus einer SQLite-Row (JOIN devices + device_state_latest).
  * caps wird aus JSON-Text zurück in ein Array geparst.
- * Rückgabe: meta-Objekt mit allen bekannten Geräte-Metafeldern.
+ *
+ * @param {object} row - SQLite-Zeile
+ * @returns {object} meta-Objekt
  */
 function buildMetaFromRow(row) {
     const meta = {};
@@ -358,7 +450,9 @@ function buildMetaFromRow(row) {
     return meta;
 }
 
-// Rekonstruiert das availability-Objekt aus einer SQLite-Row.
+/**
+ * Rekonstruiert das availability-Objekt aus einer SQLite-Row.
+ */
 function buildAvailabilityFromRow(row) {
     return {
         availability: normalizeString(row.availability).toLowerCase() || "unknown",
@@ -367,14 +461,14 @@ function buildAvailabilityFromRow(row) {
     };
 }
 
-/*
- * Zweck: Rekonstruiert das state-Objekt aus einer SQLite-Row.
+/**
+ * Rekonstruiert das state-Objekt aus einer SQLite-Row.
  *
  * Besonderheiten:
- * - Boolesche Felder (relay, motion, rain usw.) werden explizit konvertiert.
- * - window_open wird als contact_open gespiegelt (Alias für die UI).
- * - cover_moving wird aus cover_state abgeleitet ("opening"/"closing"/"moving" → true).
- * - cover_position ohne Kalibrierung: Zwischenwerte werden entfernt (nur 0/100 bleiben).
+ *   - Boolesche Felder (relay, motion, rain) werden explizit konvertiert.
+ *   - window_open wird als contact_open gespiegelt (Alias für die UI).
+ *   - cover_moving wird aus cover_state abgeleitet ("opening"/"closing"/"moving" → true).
+ *   - cover_position ohne Kalibrierung: Zwischenwerte werden entfernt (nur 0/100 bleiben).
  */
 function buildStateFromRow(row) {
     const state = {};
@@ -438,7 +532,9 @@ function buildStateFromRow(row) {
     return state;
 }
 
-// Rekonstruiert das config-Objekt (Schwellwerte, Zeitpläne) aus einer SQLite-Row.
+/**
+ * Rekonstruiert das config-Objekt (Schwellwerte, Zeitpläne) aus einer SQLite-Row.
+ */
 function buildConfigFromRow(row) {
     const config = {};
     [
@@ -456,7 +552,10 @@ function buildConfigFromRow(row) {
     return config;
 }
 
-// Rekonstruiert das last_event-Objekt aus einer SQLite-Row. Gibt null zurück, wenn kein Zeitstempel vorhanden.
+/**
+ * Rekonstruiert das last_event-Objekt aus einer SQLite-Row.
+ * Gibt null zurück, wenn kein Zeitstempel vorhanden.
+ */
 function buildLastEventFromRow(row) {
     if (!row.last_event_at) {
         return null;
@@ -471,7 +570,10 @@ function buildLastEventFromRow(row) {
     };
 }
 
-// Rekonstruiert das last_ack-Objekt aus einer SQLite-Row. Gibt null zurück, wenn weder Zeitstempel noch Request-ID vorhanden.
+/**
+ * Rekonstruiert das last_ack-Objekt aus einer SQLite-Row.
+ * Gibt null zurück, wenn weder Zeitstempel noch Request-ID vorhanden.
+ */
 function buildLastAckFromRow(row) {
     if (!row.last_ack_at && !row.last_ack_request_id) {
         return null;
@@ -488,7 +590,9 @@ function buildLastAckFromRow(row) {
     };
 }
 
-// Formatiert einen ISO-Zeitstempel als lesbares deutsches Datum/Uhrzeit-Format.
+/**
+ * Formatiert einen ISO-Zeitstempel als lesbares deutsches Datum/Uhrzeit-Format.
+ */
 function formatTimestamp(value) {
     const text = normalizeString(value);
     if (!text) return "-";
@@ -505,7 +609,10 @@ function formatTimestamp(value) {
     }).format(date);
 }
 
-// Gibt einen relativen Zeitabstand zurück ("vor 3 min", "vor 2 h"). Bei älteren Zeitstempeln: absolutes Datum.
+/**
+ * Gibt einen relativen Zeitabstand zurück ("vor 3 min", "vor 2 h").
+ * Bei älteren Zeitstempeln: absolutes Datum.
+ */
 function relativeTimestamp(value) {
     const text = normalizeString(value);
     if (!text) return "-";
@@ -518,10 +625,18 @@ function relativeTimestamp(value) {
     return formatTimestamp(text);
 }
 
-/*
- * Zweck: Entfernt Zustandsfelder aus dem State, die für dieses Gerät inhaltlich irreführend wären.
- * Beispiel: net_sen ohne motion-Capability – das Feld käme aus Sensor-Rauschen, nicht aus echter Bewegung.
- * Seiteneffekt: Mutiert das state-Objekt direkt. Gibt Liste der entfernten Felder zurück (für Diagnostics).
+// ===========================================================================
+// ANZEIGE-BEREINIGUNG
+// ===========================================================================
+
+/**
+ * Entfernt Zustandsfelder aus dem State, die für dieses Gerät inhaltlich
+ * irreführend wären.
+ *
+ * Beispiel: net_sen ohne motion-Capability – das Feld käme aus Sensor-Rauschen,
+ * nicht aus echter Bewegungserkennung.
+ *
+ * Seiteneffekt: Mutiert das state-Objekt direkt. Gibt Liste der entfernten Felder zurück.
  */
 function suppressDisplayOnlyStateNoise(device, state, meta) {
     const suppressedKeys = [];
@@ -533,14 +648,14 @@ function suppressDisplayOnlyStateNoise(device, state, meta) {
     return suppressedKeys;
 }
 
-/*
- * Zweck: Wählt die wichtigsten Zustandsfelder für die Highlight-Kacheln in der Geräteübersicht.
+/**
+ * Wählt die wichtigsten Zustandsfelder für die Highlight-Kacheln in der Geräteübersicht.
  *
- * Priorisierung: Cover-Richtung > Relay-Status > Sensoren (Temp, Feuchte, Lux…) > Batterie.
+ * Priorisierung: Cover-Richtung → Relay-Status → Sensoren (Temp, Feuchte, Lux…) → Batterie.
  * relay_1 wird bei net_erl unterdrückt, da der große Lampen-Button es bereits zeigt.
  * rain wird bei net_sen immer ergänzt, auch ohne Wert (zeigt dann "unbekannt").
  *
- * Rückgabe: Array von { key, label, value_text, wide } für das Highlight-Grid.
+ * @returns {Array<{ key, label, value_text, wide }>}
  */
 function pickHighlights(device, state, meta) {
     const keys = [];
@@ -557,7 +672,7 @@ function pickHighlights(device, state, meta) {
     keys.push("contact_open", "window_open");
     const highlightKeys = keys
         .filter((key, index) => keys.indexOf(key) === index)
-        // Der große Lampen-Button zeigt relay_1 bei net_erl schon eindeutig an. Ein zweiter Ein/Aus-Hinweis bläht die Karte nur auf.
+        // Der große Lampen-Button zeigt relay_1 bei net_erl schon eindeutig an.
         .filter((key) => !(isNetErlDevice(device) && key === "relay_1"))
         .filter((key) => Object.prototype.hasOwnProperty.call(state, key));
     if (baseType === "net_sen" && !highlightKeys.includes("rain")) {
@@ -574,19 +689,24 @@ function pickHighlights(device, state, meta) {
     });
 }
 
-/*
- * Zweck: Baut das controls-Objekt für ein Gerät auf – enthält alle Steuer- und Anzeigeinformationen für die UI.
+// ===========================================================================
+// STEUERBLOCK (CONTROLS)
+// ===========================================================================
+
+/**
+ * Baut das controls-Objekt für ein Gerät auf – enthält alle Steuer- und
+ * Anzeigeinformationen für die UI.
  *
  * Für Rolladen-Controller (cover):
- * - Kalibrierungsstatus entscheidet, ob Zwischenpositionen freigegeben sind.
- * - Endlagen (0/100 %) bleiben immer bedienbar.
- * - shutter_style wird für die CSS-Animation der Rolladen-Grafik berechnet.
+ *   - Kalibrierungsstatus entscheidet, ob Zwischenpositionen freigegeben sind.
+ *   - Endlagen (0/100 %) bleiben immer bedienbar.
+ *   - shutter_style wird für die CSS-Animation der Rolladen-Grafik berechnet.
  *
  * Für Relais-Geräte (relay):
- * - allow_overview_toggle gibt den direkten Lampen-Toggle in der Übersichtskarte frei
- *   (nur für net_erl mit bekanntem relay_1-Status).
+ *   - allow_overview_toggle gibt den direkten Lampen-Toggle in der Übersichtskarte frei
+ *     (nur für net_erl mit bekanntem relay_1-Status).
  *
- * Rückgabe: controls-Objekt oder null für Geräte ohne steuerbare Funktion.
+ * @returns {object|null} controls-Objekt oder null
  */
 function buildControls(device, state, meta) {
     if (isCoverDevice(device, state, meta)) {
@@ -607,9 +727,7 @@ function buildControls(device, state, meta) {
             position_calibrated: positionCalibrated,
             allow_intermediate_positions: allowIntermediatePositions,
             calibration_hint_text: calibrationHintText,
-            // Endlagen bleiben auch ohne Kalibrierung bedienbar. Nur Zwischenwerte hängen an verlässlicher Positionskalibrierung.
             allow_end_positions: true,
-            // Die Übersicht bekommt bewusst nur die kompakte Direktbedienung; der volle Positionszugriff bleibt in der Detailseite.
             allow_overview_controls: true,
             motion_class: moving ? (direction === "down" ? "is-moving-down" : "is-moving-up") : "",
             shutter_style: positionValue === null ? "" : "height:" + String(positionValue) + "%;"
@@ -636,10 +754,9 @@ function buildControls(device, state, meta) {
     return null;
 }
 
-/*
- * Zweck: Bestimmt Gerätetyp-Label, Icon und CSS-Oberflächenklasse für die Karte.
+/**
+ * Bestimmt Gerätetyp-Label, Icon und CSS-Oberflächenklasse für die Karte.
  * Reihenfolge: Master → Cover → Relay → Batterie → Sensor (Fallback).
- * Rückgabe: { kind_label, icon, surface_class }
  */
 function classifyDevice(device, state, meta) {
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
@@ -658,18 +775,24 @@ function classifyDevice(device, state, meta) {
     return { kind_label: "Sensor", icon: "mdi-thermometer", surface_class: "is-sensor-card" };
 }
 
-/*
- * Zweck: Zentraler Row-zu-Geräteobjekt-Übersetzer für das Dashboard.
+// ===========================================================================
+// HAUPTERZEUGER: describeDevice
+// ===========================================================================
+
+/**
+ * Zentraler Row-zu-Geräteobjekt-Übersetzer für das Dashboard.
  *
  * Eingabe: Eine SQLite-Row aus dem JOIN devices + device_state_latest.
  * Ausgabe: Vollständiges, UI-fertiges Geräteobjekt mit:
- * - meta, availability, state, config, last_event, last_ack (aus Row-Feldern rekonstruiert)
- * - display_name (Anzeigename aus dashboard_display_name oder device_name oder device_id)
- * - availability_label/-class (für Chip-Färbung)
- * - controls (Steuerblock für Relais/Cover)
- * - highlight_values (Highlight-Kacheln)
- * - battery_value, detail_url, status_time_* (Footer-Anzeige)
- * - simulation-Flag (für SIM-Chip)
+ *   - meta, availability, state, config, last_event, last_ack (rekonstruiert)
+ *   - display_name (Anzeigename oder device_name oder device_id)
+ *   - availability_label/-class (für Chip-Färbung)
+ *   - controls (Steuerblock für Relais/Cover)
+ *   - highlight_values (Highlight-Kacheln)
+ *   - simulation-Flag (für SIM-Chip; prüft device_id-Präfix und sim_case)
+ *
+ * @param {object} row - SQLite-Zeile
+ * @returns {object} UI-fertiges Geräteobjekt
  */
 function describeDevice(row) {
     const meta = buildMetaFromRow(row);
@@ -713,8 +836,12 @@ function describeDevice(row) {
         last_meta_at: row.device_updated_at,
         last_event_at: row.last_event_at,
         last_ack_at: row.last_ack_at,
+        // Simulation-Erkennung:
+        //   1. Device-ID beginnt mit "sim_"
+        //   2. sim_case-Flag in den Metadaten gesetzt
+        // Hinweis: meta.source ist nicht in der SQLite-Datenbank gespeichert
+        // und wird daher hier nicht als Kriterium verwendet.
         simulation: row.device_id.startsWith("sim_")
-            || normalizeString(meta.source).toLowerCase() === "simulation"
             || Boolean(meta.sim_case)
     };
     const classification = classifyDevice(device, state, meta);
@@ -744,15 +871,19 @@ function describeDevice(row) {
     });
 }
 
-/*
- * Zweck: Erzeugt die SQL-Abfrage für die Geräteübersicht.
+// ===========================================================================
+// SQL-ABFRAGEN
+// ===========================================================================
+
+/**
+ * Erzeugt die SQL-Abfrage für die Geräteübersicht.
  *
  * JOIN: devices (Metadaten) LEFT JOIN device_state_latest (aktueller Snapshot).
  * LEFT JOIN damit auch Geräte ohne Zustand angezeigt werden.
- * Sortierung: online → spät/schlafend → unbekannt → offline, dann alphabetisch nach Name.
- * master_count wird als Subquery mitgeliefert (für die Zusammenfassung im Toolbar).
+ * Sortierung: online → spät/schlafend → unbekannt → offline, dann alphabetisch.
+ * master_count wird als Subquery mitgeliefert (für die Zusammenfassung).
  *
- * Rückgabe: SQL-String für den sqlite-Node.
+ * @returns {string} SQL-String
  */
 function buildOverviewQuery() {
     return [
@@ -838,12 +969,14 @@ function buildOverviewQuery() {
     ].join(" ");
 }
 
-/*
- * Zweck: Wandelt die SQLite-Rows der Übersichtsabfrage in das Dashboard-Payload um.
+/**
+ * Wandelt die SQLite-Rows der Übersichtsabfrage in das Dashboard-Payload um.
  *
  * Master-Geräte werden herausgefiltert (haben eigene Diagnosesicht).
- * Sortierung: nach availability_sort_priority, dann alphabetisch nach display_name.
- * Rückgabe: { page, summary: { device_count, master_count, active_count, offline_count }, devices }
+ * Sortierung: nach availability_sort_priority, dann alphabetisch.
+ *
+ * @param {object[]} rows - SQLite-Zeilen
+ * @returns {{ page, summary, devices }}
  */
 function buildOverviewPayload(rows) {
     const devices = (rows || []).map(describeDevice)
@@ -870,11 +1003,12 @@ function buildOverviewPayload(rows) {
     };
 }
 
-/*
- * Zweck: Erzeugt die SQL-Abfrage für die Gerätedetailseite eines einzelnen Geräts.
+/**
+ * Erzeugt die SQL-Abfrage für die Gerätedetailseite eines einzelnen Geräts.
+ * Identisch mit der Übersichtsabfrage, aber gefiltert auf eine device_id.
  *
- * Identisch mit der Übersichtsabfrage, aber gefiltert auf eine device_id und ohne master_count.
- * Rückgabe: SQL-String oder null bei leerer device_id.
+ * @param {string} deviceId - Gerätekennung
+ * @returns {string|null} SQL-String oder null bei leerer device_id
  */
 function buildDeviceDetailQuery(deviceId) {
     const normalizedId = normalizeString(deviceId);
@@ -956,15 +1090,16 @@ function buildDeviceDetailQuery(deviceId) {
     ].join(" ");
 }
 
-/*
- * Zweck: Wandelt die SQLite-Row der Detailabfrage in das vollständige Detail-Payload um.
+/**
+ * Wandelt die SQLite-Row der Detailabfrage in das vollständige Detail-Payload um.
  *
  * Enthält zusätzlich zu describeDevice:
- * - technical_rows: Technische Metadaten als flache Key-Value-Liste (für den Technik-Panel).
- * - state_rows: Alle bekannten Zustandsfelder als beschriftete Liste (für den Status-Panel).
- * - raw_sections: Rohe JSON-Blöcke aller Teilobjekte (für den aufklappbaren Diagnose-Panel).
+ *   - technical_rows: Technische Metadaten als Key-Value-Liste
+ *   - state_rows: Alle Zustandsfelder als beschriftete Liste
+ *   - raw_sections: Rohe JSON-Blöcke aller Teilobjekte (Diagnose-Panel)
  *
- * Bei leerem rows-Array: Payload mit device: null (kein Gerät ausgewählt/vorhanden).
+ * @param {object[]} rows - SQLite-Zeilen (sollte genau eine sein)
+ * @returns {{ kind, device, technical_rows, state_rows, raw_sections }}
  */
 function buildDeviceDetailPayload(rows) {
     const row = Array.isArray(rows) && rows.length ? rows[0] : null;

@@ -1,19 +1,43 @@
+/**
+ * =============================================================================
+ * @modul     cover_automation
+ * @beschreibung  Rolladen-Zeitautomatik: speichert pro Gerät bis zu zwei
+ *                Tagesfahrten (Uhrzeit + Zielposition) und führt sie aus.
+ *
+ * @funktionen
+ *   - renderDetailPage      → HTML-Detailseite mit Konfigurationsformular rendern
+ *   - saveDeviceConfig      → Automatik-Konfiguration für ein Gerät speichern
+ *   - buildDueMessages      → Fällige Fahrten prüfen und MQTT-Befehle erzeugen
+ *   - getDeviceConfig       → Konfiguration eines einzelnen Geräts lesen
+ *
+ * @persistenz  Die Konfiguration wird als JSON-Datei auf dem Dateisystem
+ *              gespeichert (Pfad via COVER_AUTOMATION_PATH env).
+ * @scheduler   Ein Cron-Tick (jede Minute) prüft auf fällige Fahrten und
+ *              leitet sie über den normalen Cover-Command-Pfad weiter.
+ *
+ * @nutzung   41_cover_automation_detail.json (Flow)
+ * @export    renderDetailPage, saveDeviceConfig, buildDueMessages, getDeviceConfig
+ * =============================================================================
+ */
+
 "use strict";
 
-// Rolladen-Zeitautomatik: speichert pro Gerät bis zu zwei Tagesfahrten
-// (Uhrzeit + Zielposition) in einer JSON-Datei auf dem Dateisystem.
-// Der Automatik-Scheduler prüft jede Minute, ob eine Fahrt fällig ist,
-// und leitet sie über den normalen Cover-Command-Pfad (command_minimal) weiter.
-
 const fs = require("fs");
+const { isPlainObject } = require("./time_helpers");
+const { isCoverDevice } = require("./capability_helpers");
 
-// Pfad zur Konfigurationsdatei; kann über Umgebungsvariable überschrieben werden.
+// ===========================================================================
+// KONFIGURATION
+// ===========================================================================
+
 const STORAGE_PATH = process.env.COVER_AUTOMATION_PATH || "/data/cover_automation.json";
-// Zeitzone für die Auswertung der Fahrtuhrzeit (relevant für Ortszeit-Vergleich).
 const TIME_ZONE = process.env.TZ || "Europe/Berlin";
-// Erlaubte Zielpositionen in Prozent – bewusst hart begrenzt.
 const ALLOWED_POSITIONS = [0, 25, 50, 75, 100];
 const SLOT_KEYS = ["slot_1", "slot_2"];
+
+// ===========================================================================
+// HTML-ESCAPING
+// ===========================================================================
 
 function htmlEscape(value) {
   return String(value ?? "")
@@ -24,9 +48,9 @@ function htmlEscape(value) {
     .replace(/'/g, "&#39;");
 }
 
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+// ===========================================================================
+// PRIVATE HELFER
+// ===========================================================================
 
 function normalizeInput(input) {
   if (isPlainObject(input)) {
@@ -37,7 +61,7 @@ function normalizeInput(input) {
     try {
       const parsed = JSON.parse(input);
       return isPlainObject(parsed) ? parsed : {};
-    } catch (error) {
+    } catch (_error) {
       return {};
     }
   }
@@ -75,6 +99,10 @@ function createEmptyStore() {
   return { devices: {} };
 }
 
+/**
+ * Normalisiert einen einzelnen Fahrtslot.
+ * Ein ungültiger Eingabewert führt zu einem leeren, aber vollständigen Slot-Objekt.
+ */
 function normalizeSlot(input, fallbackPosition) {
   const slot = isPlainObject(input) ? input : {};
   return {
@@ -84,6 +112,10 @@ function normalizeSlot(input, fallbackPosition) {
   };
 }
 
+/**
+ * Normalisiert die vollständige Automatik-Konfiguration eines Geräts.
+ * Garantiert, dass alle Felder mit definierten Werten vorhanden sind.
+ */
 function normalizeConfig(input) {
   const config = isPlainObject(input) ? input : {};
   return {
@@ -94,10 +126,15 @@ function normalizeConfig(input) {
   };
 }
 
-/*
- * Zweck: Liest die Automatik-Konfigurationsdatei vom Dateisystem.
- * Ungültige oder fehlende Datei führt zum leeren Store (kein Fehler).
- * Rückgabe: Normalisiertes Store-Objekt { devices: { ... } }.
+// ===========================================================================
+// DATEISYSTEM-PERSISTENZ
+// ===========================================================================
+
+/**
+ * Liest die Automatik-Konfigurationsdatei vom Dateisystem.
+ * Ungültige oder fehlende Dateien führen zum leeren Store (kein Fehler).
+ *
+ * @returns {{ devices: object }} Normalisierter Store
  */
 function loadStore() {
   try {
@@ -120,7 +157,7 @@ function loadStore() {
     });
 
     return { devices };
-  } catch (error) {
+  } catch (_error) {
     return createEmptyStore();
   }
 }
@@ -129,20 +166,28 @@ function saveStore(store) {
   fs.writeFileSync(STORAGE_PATH, JSON.stringify(store, null, 2));
 }
 
+/**
+ * Liest die Automatik-Konfiguration für ein einzelnes Gerät.
+ *
+ * @param {string} deviceId - Gerätekennung
+ * @returns {object} Normalisierte Konfiguration
+ */
 function getDeviceConfig(deviceId) {
   const normalizedId = normalizeDeviceId(deviceId);
   const store = loadStore();
   return normalizeConfig(store.devices[normalizedId] || {});
 }
 
-/*
- * Zweck: Speichert die Automatik-Konfiguration für ein einzelnes Gerät.
+/**
+ * Speichert die Automatik-Konfiguration für ein einzelnes Gerät.
  *
- * Eingaben: deviceId, Payload mit enabled, slot_1_time/position, slot_2_time/position.
- * Seiteneffekt: Schreibt den aktualisierten Store in die Konfigurationsdatei.
- * Besonderheit: last_run_local_date wird nur zurückgesetzt, wenn Zeit oder Position geändert wurden,
- *               damit ein unveränderter Slot nicht erneut ausgelöst wird.
- * Rückgabe: { ok: true, config } bei Erfolg, { ok: false, error, message } bei Fehler.
+ * Besonderheit: last_run_local_date wird nur zurückgesetzt, wenn Zeit oder Position
+ * geändert wurden – ein unveränderter Slot soll nicht erneut ausgelöst werden.
+ *
+ * @param {string} deviceId  - Gerätekennung
+ * @param {object} input     - Payload mit enabled, slot_1_time/position, slot_2_time/position
+ * @param {string} updatedAt - ISO-Zeitstempel der Änderung
+ * @returns {{ ok: true, config } | { ok: false, error, message }}
  */
 function saveDeviceConfig(deviceId, input, updatedAt) {
   const normalizedId = normalizeDeviceId(deviceId);
@@ -181,10 +226,16 @@ function saveDeviceConfig(deviceId, input, updatedAt) {
   return { ok: true, config };
 }
 
-/*
- * Zweck: Zerlegt einen ISO-Zeitstempel in lokales Datum und Uhrzeit (HH:MM).
- * Eingabe: timestamp als ISO-String oder Date-kompatibler Wert.
- * Rückgabe: { date: "YYYY-MM-DD", time: "HH:MM" } in der konfigurierten Zeitzone.
+// ===========================================================================
+// ZEIT-HILFSFUNKTIONEN
+// ===========================================================================
+
+/**
+ * Zerlegt einen ISO-Zeitstempel in lokales Datum und Uhrzeit (HH:MM).
+ * Verwendet Intl.DateTimeFormat für korrekte Zeitzonenberechnung.
+ *
+ * @param {string} timestamp - ISO-String oder Date-kompatibler Wert
+ * @returns {{ date: string, time: string }} z. B. { date: "2026-05-15", time: "14:30" }
  */
 function formatLocalParts(timestamp) {
   const formatter = new Intl.DateTimeFormat("sv-SE", {
@@ -207,23 +258,9 @@ function formatLocalParts(timestamp) {
   };
 }
 
-/*
- * Zweck: Prüft, ob ein Gerät im Laufzeitzustand als Rolladen-Controller bekannt ist.
- * Prüft control_mode, device_class und Fähigkeitsliste.
- * Rückgabe: true, wenn das Gerät ein Cover-Gerät ist, sonst false.
- */
-function isCoverDevice(runtime, deviceId) {
-  const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
-  if (!device || !isPlainObject(device)) {
-    return false;
-  }
-
-  const meta = isPlainObject(device.meta) ? device.meta : {};
-  const caps = Array.isArray(meta.caps) ? meta.caps.map((cap) => String(cap).toLowerCase()) : [];
-  return String(meta.control_mode || "").toLowerCase() === "cover"
-    || /^net[-_]?zrl$/i.test(String(meta.device_class || ""))
-    || caps.includes("cover");
-}
+// ===========================================================================
+// DETAILSEITE – HTML-RENDERING
+// ===========================================================================
 
 function buildOptionMarkup(selectedValue) {
   return ALLOWED_POSITIONS.map((value) => {
@@ -248,9 +285,23 @@ function describeDevice(device, deviceId) {
   };
 }
 
+/**
+ * Rendert die vollständige HTML-Detailseite mit Konfigurationsformular.
+ *
+ * Die Seite zeigt:
+ *   - Gerätestatus (online, Cover-State, Position, Kalibrierung)
+ *   - Zwei Zeitslots für tägliche Fahrten (Uhrzeit + Zielposition)
+ *   - Aktivierungsschalter für die Zeitautomatik
+ *
+ * @param {object} runtime  - Laufzeitzustand
+ * @param {string} deviceId - Gerätekennung
+ * @param {string} notice   - Optionale Hinweismeldung ("Zeitautomatik gespeichert.")
+ * @returns {{ statusCode: number, html: string }}
+ */
 function renderDetailPage(runtime, deviceId, notice = "") {
   const normalizedId = normalizeDeviceId(deviceId);
   const device = runtime && runtime.devices ? runtime.devices[normalizedId] : null;
+
   if (!isCoverDevice(runtime, normalizedId)) {
     return {
       statusCode: 404,
@@ -510,19 +561,25 @@ function renderDetailPage(runtime, deviceId, notice = "") {
   };
 }
 
-/*
- * Zweck: Prüft alle konfigurierten Geräte auf fällige Fahrten und erzeugt MQTT-Befehle.
+// ===========================================================================
+// SCHEDULER – FÄLLIGE FAHRTEN PRÜFEN
+// ===========================================================================
+
+/**
+ * Prüft alle konfigurierten Geräte auf fällige Fahrten und erzeugt MQTT-Befehle.
  *
- * Eingaben:
- * - runtime: aktueller Laufzeitzustand (für Geräteklassen-Prüfung)
- * - commandMinimal: Modul zur Befehlserzeugung (buildCoverCommand)
- * - timestamp: aktueller Zeitstempel (ISO-String)
+ * Ablauf pro Gerät:
+ *   1. Nur Rolladen-Controller prüfen (isCoverDevice)
+ *   2. Nur aktive Konfigurationen prüfen (enabled === true)
+ *   3. Für jeden Slot: Uhrzeit mit aktueller Ortszeit vergleichen
+ *   4. Schutz gegen Mehrfachauslösung: last_run_local_date === heute → überspringen
+ *   5. Bei Treffer: set_position-Befehl über commandMinimal erzeugen
+ *   6. last_run_local_date auf heute setzen und Store speichern
  *
- * Rückgabe: { messages: [...MQTT-Nachrichten], errors: [...Fehler bei einzelnen Slots] }
- * Seiteneffekt: Markiert ausgelöste Slots mit last_run_local_date und speichert den Store.
- *
- * Besonderheit: Ein Slot wird nur ausgelöst, wenn Uhrzeit übereinstimmt und
- *               er heute noch nicht gelaufen ist (Schutz gegen Mehrfachauslösung).
+ * @param {object} runtime        - Laufzeitzustand
+ * @param {object} commandMinimal - Modul zur Befehlserzeugung
+ * @param {string} timestamp      - Aktueller ISO-Zeitstempel
+ * @returns {{ messages: object[], errors: object[] }}
  */
 function buildDueMessages(runtime, commandMinimal, timestamp) {
   const store = loadStore();

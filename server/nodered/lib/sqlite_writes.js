@@ -1,9 +1,43 @@
+/**
+ * =============================================================================
+ * @modul     sqlite_writes
+ * @beschreibung  Erzeugt SQLite-Statements (INSERT/UPSERT) für die Persistenz
+ *                der Geräte- und Master-Daten in der Server-Datenbank.
+ *
+ * @funktionen
+ *   - sqlLiteral        → JavaScript-Wert in SQL-Literal umwandeln
+ *   - buildInsert       → Einfaches INSERT-Statement
+ *   - buildUpsert       → INSERT … ON CONFLICT … DO UPDATE SET (Upsert)
+ *   - wrapBatch         → Mehrere Statements in Transaktion verpacken
+ *   - buildDeviceBatch  → Batch für ein Gerät (devices + device_state_latest)
+ *   - buildMasterBatch  → Batch für ein Master-Gerät (master_status)
+ *   - buildSqliteBatch  → Zentraler Einstieg (routed Objekt → SQLite-Batch)
+ *
+ * @nutzung    topic_handlers.js, 30_sqlite_persist.json (Flow)
+ * @besonderheit  Verwendet atomare Transaktionen (BEGIN IMMEDIATE … COMMIT).
+ * @export     buildSqliteBatch, sqlLiteral
+ * =============================================================================
+ */
+
 "use strict";
 
-/*
- * Zweck: Wandelt einen JavaScript-Wert in ein SQL-Literal um.
- * Unterstützte Typen: null/undefined → NULL, boolean → 0/1,
- * Zahl → Zahlenliteral, Objekt/Array → JSON-String-Literal, String → escaped String.
+// ===========================================================================
+// SQL-LITERAL-UMWANDLUNG
+// ===========================================================================
+
+/**
+ * Wandelt einen JavaScript-Wert in ein SQL-Literal um.
+ *
+ * Unterstützte Typen:
+ *   null/undefined → NULL
+ *   boolean        → 0 / 1
+ *   endliche Zahl  → Zahlenliteral
+ *   nicht-endlich  → NULL
+ *   Objekt/Array   → JSON-String-Literal
+ *   String         → escaped String
+ *
+ * @param {*} value - JavaScript-Wert
+ * @returns {string} SQL-Literal (nie in einfachen Anführungszeichen für NULL/Zahlen)
  */
 function sqlLiteral(value) {
   if (value === undefined || value === null) {
@@ -25,14 +59,23 @@ function sqlLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+/**
+ * Wandelt einen Wert in String oder null um.
+ */
 function textOrNull(value) {
   return value === undefined || value === null ? null : String(value);
 }
 
-/*
- * Zweck: Erzeugt ein einfaches INSERT-Statement für eine Tabelle.
- * Eingabe: Tabellenname und Werte-Objekt (Spaltenname → Wert).
- * Rückgabe: SQL-String ohne abschließendes Semikolon.
+// ===========================================================================
+// STATEMENT-BAU
+// ===========================================================================
+
+/**
+ * Erzeugt ein einfaches INSERT-Statement für eine Tabelle.
+ *
+ * @param {string} tableName - Tabellenname
+ * @param {object} values    - Werte-Objekt (Spaltenname → Wert)
+ * @returns {string} SQL-String (ohne abschließendes Semikolon)
  */
 function buildInsert(tableName, values) {
   const entries = Object.entries(values);
@@ -41,10 +84,14 @@ function buildInsert(tableName, values) {
   return `INSERT INTO ${tableName} (${columns}) VALUES (${rowValues})`;
 }
 
-/*
- * Zweck: Erzeugt ein INSERT … ON CONFLICT … DO UPDATE SET (Upsert) Statement.
- * Eingabe: Tabellenname, Werte-Objekt, Konflikt-Spalte, Update-Spalten.
- * Rückgabe: SQL-String ohne abschließendes Semikolon.
+/**
+ * Erzeugt ein INSERT … ON CONFLICT … DO UPDATE SET (Upsert) Statement.
+ *
+ * @param {string} tableName      - Tabellenname
+ * @param {object} values         - Werte-Objekt
+ * @param {string} conflictColumn - Konflikt-Spalte (z. B. "device_id")
+ * @param {string[]} updateColumns - Spalten, die bei Konflikt aktualisiert werden
+ * @returns {string} SQL-String
  */
 function buildUpsert(tableName, values, conflictColumn, updateColumns) {
   const updates = updateColumns
@@ -54,10 +101,12 @@ function buildUpsert(tableName, values, conflictColumn, updateColumns) {
   return `${buildInsert(tableName, values)} ON CONFLICT(${conflictColumn}) DO UPDATE SET ${updates}`;
 }
 
-/*
- * Zweck: Verpackt mehrere SQL-Statements in eine atomare Transaktion.
- * Leere Statements werden gefiltert. Gibt null zurück, wenn nichts zu tun ist.
- * Rückgabe: BEGIN IMMEDIATE … COMMIT als einzelner String (für den sqlite-Node).
+/**
+ * Verpackt mehrere SQL-Statements in eine atomare Transaktion.
+ * Leere Statements werden herausgefiltert.
+ *
+ * @param {string[]} statements - SQL-Statements
+ * @returns {string|null} BEGIN IMMEDIATE … COMMIT als String, oder null wenn nichts zu tun
  */
 function wrapBatch(statements) {
   const filtered = statements.filter(Boolean);
@@ -70,9 +119,14 @@ function wrapBatch(statements) {
     .join("\n");
 }
 
-/*
- * Zweck: Erzeugt das Upsert-Statement für die `devices`-Tabelle.
- * created_at und first_seen_at werden beim Update nicht überschrieben.
+// ===========================================================================
+// GERÄTE-UPSERTS
+// ===========================================================================
+
+/**
+ * Erzeugt das Upsert-Statement für die `devices`-Tabelle.
+ * created_at und first_seen_at werden beim Update nicht überschrieben
+ * (fehlen daher in den updateColumns).
  */
 function buildDeviceUpsert(device) {
   const values = {
@@ -115,15 +169,19 @@ function buildDeviceUpsert(device) {
   );
 }
 
-/*
- * Zweck: Erzeugt das Upsert-Statement für die `device_state_latest`-Tabelle.
- * Schreibt den vollständigen aktuellen Snapshot eines Geräts.
+/**
+ * Erzeugt das Upsert-Statement für die `device_state_latest`-Tabelle.
+ * Schreibt den vollständigen aktuellen Snapshot eines Geräts inklusive
+ * Zustand, Konfiguration, letztem Event und letztem Ack.
+ *
  * Alle Spalten außer device_id werden bei jedem Upsert aktualisiert.
  */
 function buildDeviceStateLatestUpsert(device) {
   const event = device.last_event || {};
   const ack = device.last_ack || {};
-  // Beide Kalibrierungsfelder synchron halten (Firmware-Kompatibilität)
+
+  // Dual-Field-Synchronisation: cover_calibrated und is_calibrated müssen
+  // in der Datenbank identisch sein (Firmware-Kompatibilität).
   const coverCalibrated = device.state.cover_calibrated ?? device.state.is_calibrated;
 
   const values = {
@@ -186,8 +244,12 @@ function buildDeviceStateLatestUpsert(device) {
   return buildUpsert("device_state_latest", values, "device_id", updateColumns);
 }
 
-/*
- * Zweck: Erzeugt das Upsert-Statement für die `master_status`-Tabelle.
+// ===========================================================================
+// MASTER-UPSERT
+// ===========================================================================
+
+/**
+ * Erzeugt das Upsert-Statement für die `master_status`-Tabelle.
  * Schreibt den aktuellen Snapshot eines Master-Geräts (kein Verlauf).
  */
 function buildMasterStatusUpsert(master) {
@@ -210,10 +272,16 @@ function buildMasterStatusUpsert(master) {
   );
 }
 
-/*
- * Zweck: Stellt den SQLite-Batch für ein Gerät zusammen.
- * Schreibt immer: devices-Upsert + device_state_latest-Upsert (Snapshot).
- * Rückgabe: Transaktions-String (BEGIN IMMEDIATE … COMMIT) oder null.
+// ===========================================================================
+// BATCH-ERZEUGUNG
+// ===========================================================================
+
+/**
+ * Stellt den SQLite-Batch für ein Gerät zusammen.
+ * Schreibt immer: devices-Upsert + device_state_latest-Upsert in einer Transaktion.
+ *
+ * @param {object} device - Geräteobjekt aus dem Runtime-State
+ * @returns {string|null} Transaktions-String oder null
  */
 function buildDeviceBatch(device) {
   return wrapBatch([
@@ -222,10 +290,13 @@ function buildDeviceBatch(device) {
   ]);
 }
 
-/*
- * Zweck: Stellt den SQLite-Batch für ein Master-Gerät zusammen.
- * Schreibt bei topic_type "status": master_status-Upsert (Snapshot).
- * Rückgabe: Transaktions-String oder null.
+/**
+ * Stellt den SQLite-Batch für ein Master-Gerät zusammen.
+ * Schreibt bei topic_type "status": master_status-Upsert.
+ *
+ * @param {string} topicType - Topic-Typ (nur "status" wird verarbeitet)
+ * @param {object} master    - Master-Objekt
+ * @returns {string|null} Transaktions-String oder null
  */
 function buildMasterBatch(topicType, master) {
   if (topicType === "status" && master.status && master.status.master_id) {
@@ -235,14 +306,16 @@ function buildMasterBatch(topicType, master) {
   return null;
 }
 
-/*
- * Zweck: Zentraler Einstiegspunkt für die SQLite-Batch-Erzeugung.
+/**
+ * Zentraler Einstiegspunkt für die SQLite-Batch-Erzeugung.
  *
- * Eingaben:
- * - routed: Routing-Objekt aus topic_router (scope, topic_type)
- * - payload: verarbeitetes Gerät oder Master aus topic_handlers
+ * Wird von topic_handlers.handleRoutedMessage aufgerufen und
+ * entscheidet anhand des Routing-Deskriptors, welcher Batch-Typ
+ * (device oder master) erzeugt werden muss.
  *
- * Rückgabe: Transaktions-String für den sqlite-Node oder null.
+ * @param {object} routed  - Routing-Objekt (scope, topic_type)
+ * @param {object} payload - Verarbeitetes Gerät oder Master aus topic_handlers
+ * @returns {string|null} Transaktions-String oder null
  */
 function buildSqliteBatch(routed, payload) {
   if (!routed || typeof routed !== "object" || !payload || typeof payload !== "object") {

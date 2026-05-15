@@ -1,7 +1,31 @@
+/**
+ * =============================================================================
+ * @modul     capability_helpers
+ * @beschreibung  Gerätefähigkeiten (Capabilities) normalisieren, ableiten und prüfen.
+ *                Zentrale Definition für alle Gerätetypen – keine andere Datei
+ *                soll eigene Capability- oder Gerätetyp-Prüfungen duplizieren.
+ *
+ * @funktionen
+ *   - inferBaseTypeFromDeviceId  → Basistyp aus Device-ID ableiten (Fallback)
+ *   - normalizeCapabilities      → Roh-Caps in sortierte, kanonische Liste umwandeln
+ *   - deriveCapabilities         → Vollständige Capability-Liste eines Geräts berechnen
+ *   - hasCapability              → Einzelne Fähigkeit prüfen
+ *   - isCoverDevice              → Prüft, ob Gerät ein Rolladen-Controller ist (shared)
+ *
+ * @nutzung   device_store.js, dashboard_v1.js, command_minimal.js, cover_automation.js
+ * @export    inferBaseTypeFromDeviceId, normalizeCapabilities, deriveCapabilities,
+ *            hasCapability, isCoverDevice, ALWAYS_PRESENT_CAPABILITIES
+ * =============================================================================
+ */
+
 "use strict";
 
-// Aliase für alternative Schreibweisen von Fähigkeitsnamen.
+// ===========================================================================
+// ALIASE FÜR ALTERNATIVE SCHREIBWEISEN
+// ===========================================================================
 // Eingehende Werte werden auf den kanonischen Namen normalisiert.
+// Beispiel: "relay" → "switchable", "temperature" → "temp"
+
 const CAPABILITY_ALIASES = new Map([
   ["switch",          "switchable"],
   ["relay",           "switchable"],
@@ -12,11 +36,22 @@ const CAPABILITY_ALIASES = new Map([
   ["rain_sensor",     "rain"]
 ]);
 
-// Fähigkeiten, die jedes Gerät unabhängig von seiner Klasse besitzt.
+// ===========================================================================
+// IMMER VORHANDENE FÄHIGKEITEN
+// ===========================================================================
+// Diese Fähigkeiten hat jedes Gerät, unabhängig von seiner Klasse.
+// online_state:   Der Server trackt online/offline für jedes Gerät.
+// fault_state:    Jedes Gerät kann einen Fehlerzustand melden (fault-Flag).
+// ack_tracking:   Jedes Gerät kann Befehlsbestätigungen (Acks) senden.
+
 const ALWAYS_PRESENT_CAPABILITIES = ["online_state", "fault_state", "ack_tracking"];
 
-// Bitmaske zur Dekodierung numerischer Capability-Felder aus Gerätemetadaten.
+// ===========================================================================
+// BITMASKE FÜR NUMERISCHE CAPABILITY-FELDER
+// ===========================================================================
+// Gerätefirmware kann Fähigkeiten als Bitmaske im meta.caps-Feld senden.
 // Jedes Bit entspricht einer bestimmten Fähigkeit.
+
 const CAPABILITY_BITS = [
   [0x0001, "switchable"],
   [0x0002, "relay2"],
@@ -36,14 +71,24 @@ const CAPABILITY_BITS = [
   [0x8000, "pressure"]
 ];
 
-/*
- * Zweck: Leitet den Basistyp eines Geräts aus seiner Device-ID ab.
+// ===========================================================================
+// MUSTER FÜR GERÄTEKLASSEN-ERKENNUNG
+// ===========================================================================
+// Kanonische Patterns für die Klassifizierung von Geräten anhand ID oder Klasse.
+
+const NET_ERL_DEVICE_CLASS_PATTERN = /^net[-_]?erl$/i;
+const NET_ZRL_DEVICE_CLASS_PATTERN = /^net[-_]?zrl$/i;
+
+// ===========================================================================
+// BASISTYP-ABLEITUNG
+// ===========================================================================
+
+/**
+ * Leitet den Basistyp eines Geräts aus seiner Device-ID ab.
+ * Wird nur als Fallback genutzt, wenn device_class aus den Metadaten fehlt.
  *
- * Eingabe: deviceId als String (z. B. "net_erl_01", "master_gw1")
- * Rückgabe: Normalisierter Basistyp als String (z. B. "net_erl", "master"),
- *           oder der normalisierte Eingabestring bei unbekanntem Präfix.
- *
- * Hinweis: Wird nur als Fallback genutzt, wenn device_class aus Metadaten fehlt.
+ * @param {string} deviceId - Gerätekennung (z. B. "net_erl_01", "master_gw1")
+ * @returns {string} Normalisierter Basistyp (z. B. "net_erl", "master")
  */
 function inferBaseTypeFromDeviceId(deviceId) {
   const normalized = String(deviceId || "").trim().toLowerCase();
@@ -60,20 +105,27 @@ function inferBaseTypeFromDeviceId(deviceId) {
   return normalized;
 }
 
-/*
- * Zweck: Normalisiert einen Capability-Rohwert auf eine sortierte Liste kanonischer Namen.
+// ===========================================================================
+// CAPABILITY-NORMALISIERUNG
+// ===========================================================================
+
+/**
+ * Normalisiert einen Capability-Rohwert auf eine sortierte Liste kanonischer Namen.
  *
- * Eingabe: rawCaps kann sein:
- * - Ganzzahl (Bitmaske, z. B. 0x0005)
- * - String mit Bitmaske als Dezimalzahl
- * - komma-/semikolon-/leerzeichengetrennter String (z. B. "temp,hum,motion")
- * - Array von Strings
+ * Akzeptiert folgende Eingabeformate:
+ *   - Ganzzahl (Bitmaske, z. B. 0x0005)
+ *   - String mit Bitmaske als Dezimalzahl (z. B. "5")
+ *   - Komma-/Semikolon-/Leerzeichen-getrennter String (z. B. "temp,hum,motion")
+ *   - Array von Strings
  *
- * Rückgabe: Sortiertes Array mit kanonischen Fähigkeitsnamen (Aliase bereits aufgelöst).
+ * Aliase werden automatisch aufgelöst (z. B. "relay" → "switchable").
+ *
+ * @param {number|string|string[]} rawCaps - Rohe Fähigkeitsangabe
+ * @returns {string[]} Sortierte Liste kanonischer Fähigkeitsnamen
  */
 function normalizeCapabilities(rawCaps) {
   if (typeof rawCaps === "number" && Number.isInteger(rawCaps)) {
-    // Bitmaske auflösen: gesetzte Bits auf Capability-Namen abbilden
+    // Bitmaske: gesetzte Bits auf Capability-Namen abbilden.
     return CAPABILITY_BITS
       .filter(([bit]) => (rawCaps & bit) !== 0)
       .map(([, capability]) => capability)
@@ -82,6 +134,7 @@ function normalizeCapabilities(rawCaps) {
 
   const rawText = typeof rawCaps === "string" ? rawCaps.trim() : "";
   if (/^\d+$/.test(rawText)) {
+    // String enthält reine Dezimalzahl → als Bitmaske interpretieren.
     return normalizeCapabilities(Number(rawText));
   }
 
@@ -97,25 +150,25 @@ function normalizeCapabilities(rawCaps) {
     if (!entry) {
       continue;
     }
-    // Alias auflösen, falls vorhanden, sonst Wert direkt übernehmen
+    // Alias auflösen, falls vorhanden; sonst Wert direkt übernehmen.
     normalized.add(CAPABILITY_ALIASES.get(entry) || entry);
   }
 
   return Array.from(normalized).sort();
 }
 
-/*
- * Zweck: Leitet die vollständige Fähigkeitsliste eines Geräts ab.
+/**
+ * Leitet die vollständige Fähigkeitsliste eines Geräts ab.
  *
- * Eingabe: meta-Objekt mit optionalen Feldern device_class und caps.
+ * Die Liste setzt sich zusammen aus:
+ *   1. Expliziten Caps aus der Bitmaske/String-Liste (normalisiert)
+ *   2. Klassenbasierten Ergänzungen:
+ *      - net_zrl (Rolladen-Controller) → erhält automatisch "cover"
+ *      - bat_sen (Batteriegerät)        → erhält automatisch "battery"
+ *   3. Immer vorhandenen Basis-Caps (online_state, fault_state, ack_tracking)
  *
- * Rückgabe: Sortiertes Array mit allen Fähigkeiten des Geräts,
- *           inklusive klassenbasierter Ergänzungen und immer vorhandener Basis-Caps.
- *
- * Besonderheit:
- * - net_zrl (Rolladen-Controller) erhält automatisch "cover"
- * - bat_sen (Batteriegerät) erhält automatisch "battery"
- * - Alle Geräte erhalten online_state, fault_state, ack_tracking
+ * @param {object} meta - Meta-Objekt mit device_class und caps
+ * @returns {string[]} Sortierte Liste aller Fähigkeiten
  */
 function deriveCapabilities(meta = {}) {
   const caps = new Set(normalizeCapabilities(meta.caps));
@@ -136,15 +189,69 @@ function deriveCapabilities(meta = {}) {
   return Array.from(caps).sort();
 }
 
-/*
- * Zweck: Prüft, ob ein Gerät eine bestimmte Fähigkeit besitzt.
+/**
+ * Prüft, ob ein Gerät eine bestimmte Fähigkeit besitzt.
+ * Der Fähigkeitsname wird vor dem Vergleich alias-normalisiert.
  *
- * Eingabe: meta-Objekt und ein Fähigkeitsname (Alias wird aufgelöst).
- * Rückgabe: true, wenn die Fähigkeit vorhanden ist, sonst false.
+ * @param {object} meta       - Meta-Objekt mit device_class und caps
+ * @param {string} capability - Zu prüfender Fähigkeitsname
+ * @returns {boolean}
  */
 function hasCapability(meta, capability) {
   const expected = String(capability || "").trim().toLowerCase();
   return deriveCapabilities(meta).includes(CAPABILITY_ALIASES.get(expected) || expected);
+}
+
+// ===========================================================================
+// GERÄTETYP-PRÜFUNGEN (gemeinsam genutzt)
+// ===========================================================================
+
+/**
+ * Prüft, ob ein Gerät ein Rolladen-Controller (net_zrl / Cover) ist.
+ *
+ * Prüfreihenfolge:
+ *   1. control_mode === "cover" / "shutter" / "blind" in den Metadaten
+ *   2. device_class entspricht net_zrl-Muster
+ *   3. "cover" ist in der Fähigkeitsliste (caps) enthalten
+ *   4. Fallback: Device-ID-Präfix prüfen
+ *
+ * Zentralisierte Funktion – command_minimal.js und cover_automation.js
+ * nutzen beide diese Version statt eigener Implementierungen.
+ *
+ * @param {object} runtime  - Laufzeitzustand mit devices-Map
+ * @param {string} deviceId - Gerätekennung
+ * @returns {boolean}
+ */
+function isCoverDevice(runtime, deviceId) {
+  const device = runtime && runtime.devices ? runtime.devices[deviceId] : null;
+  if (!device) {
+    return false;
+  }
+
+  const meta = device.meta || {};
+  const controlMode = String(meta.control_mode || "").toLowerCase();
+  const deviceClass = String(meta.device_class || "");
+  const caps = Array.isArray(meta.caps)
+    ? meta.caps.map((cap) => String(cap).toLowerCase())
+    : [];
+
+  // 1. Steuerungsmodus prüfen (expliziteste Quelle).
+  if (controlMode === "cover" || controlMode.includes("shutter") || controlMode.includes("blind")) {
+    return true;
+  }
+
+  // 2. Geräteklassen-Muster.
+  if (NET_ZRL_DEVICE_CLASS_PATTERN.test(deviceClass)) {
+    return true;
+  }
+
+  // 3. Fähigkeitsliste.
+  if (caps.includes("cover")) {
+    return true;
+  }
+
+  // 4. Fallback: Device-ID-Präfix.
+  return NET_ZRL_DEVICE_CLASS_PATTERN.test(deviceId);
 }
 
 module.exports = {
@@ -152,5 +259,6 @@ module.exports = {
   deriveCapabilities,
   hasCapability,
   inferBaseTypeFromDeviceId,
+  isCoverDevice,
   normalizeCapabilities
 };

@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "90_master_diag",
     "disabled": false,
-    "info": "Haelt Master-Status und Master-Events getrennt vom normalen Geraetepfad."
+    "info": "Hält Master-Status und Master-Events getrennt vom normalen Gerätepfad. Masterdiagnose bleibt außerhalb des normalen device stores. Die Fachlogik liegt zentral in /data/lib/topic_handlers.js."
   },
   {
     "id": "comment_90_master",
     "type": "comment",
     "z": "tab_90_master",
     "name": "Master getrennt halten",
-    "info": "Masterdiagnose bleibt ausserhalb des normalen device stores. Die Fachlogik liegt zentral in /data/lib/topic_handlers.js.",
+    "info": "Masterdiagnose bleibt außerhalb des normalen device stores. Die Fachlogik liegt zentral in /data/lib/topic_handlers.js. SQLite-Batches werden über linkout_90_sqlite an den zentralen Persistenz-Tab weitergeleitet.",
     "x": 180,
     "y": 60,
     "wires": []

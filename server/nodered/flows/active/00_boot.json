@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "00_boot",
     "disabled": false,
-    "info": "Initialisiert den minimalen Laufzeitzustand fuer den aktuellen Server."
+    "info": "Initialisiert den minimalen Laufzeitzustand (smarthome_runtime) beim Serverstart. Legt das gemeinsame Runtime-Objekt im globalen Node-RED-Kontext an, damit alle nachfolgenden Handler darauf zugreifen können."
   },
   {
     "id": "comment_00_boot",
     "type": "comment",
     "z": "tab_00_boot",
     "name": "Server-Boot",
-    "info": "Legt den gemeinsamen Runtime-State an. Die Fachlogik kommt ueber die globale Lib-Bruecke aus /data/lib/*.js.",
+    "info": "Legt den gemeinsamen Runtime-State an. Die Fachlogik kommt über die globale Lib-Brücke aus /data/lib/*.js. Wird einmalig beim Start (once: true) ausgeführt.",
     "x": 170,
     "y": 80,
     "wires": []

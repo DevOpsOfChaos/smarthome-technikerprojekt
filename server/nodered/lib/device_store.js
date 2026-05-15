@@ -1,10 +1,37 @@
+/**
+ * =============================================================================
+ * @modul     device_store
+ * @beschreibung  Zentraler Laufzeitzustand (Runtime-State) des Servers.
+ *                Hält alle Geräte und Master-Gateways im Speicher, normalisiert
+ *                eingehende MQTT-Daten und stellt Zugriffsfunktionen bereit.
+ *
+ * @funktionen
+ *   - createRuntimeState / ensureRuntime   → Laufzeitzustand initialisieren
+ *   - createEmptyDevice / createEmptyMaster → Leere Datenstrukturen anlegen
+ *   - ensureDevice / ensureMaster           → Geräte/Master abrufen oder anlegen
+ *   - applyMeta / applyAvailability         → Metadaten und Verfügbarkeit schreiben
+ *   - applyState / applyEvent / applyAck    → Zustand, Ereignisse, Bestätigungen
+ *   - applyMasterStatus                     → Gateway-Status schreiben
+ *
+ * @nutzung   Wird von topic_handlers.js und den Flow-Funktionen verwendet.
+ * @export    createRuntimeState, ensureRuntime, ensureDevice, ensureMaster,
+ *            applyMeta, applyAvailability, applyState, applyEvent, applyAck,
+ *            applyMasterStatus
+ * =============================================================================
+ */
+
 "use strict";
 
 const capabilityHelpers = require("./capability_helpers");
 const timeHelpers = require("./time_helpers");
 
-// Bekannte Zustandsfelder und ihre Normalisierungsfunktion.
-// Felder, die hier nicht aufgeführt sind, werden als dropped_state_fields vermerkt.
+// ===========================================================================
+// NORMALISIERER FÜR GERÄTEZUSTÄNDE
+// ===========================================================================
+// Jeder Eintrag ordnet einem Zustandsfeldnamen seine Normalisierungsfunktion zu.
+// Felder, die hier nicht aufgeführt sind, werden als dropped_state_fields vermerkt
+// – wichtig für die Diagnose unerwarteter Firmware-Felder.
+
 const DEVICE_STATE_NORMALIZERS = {
   fault:                normalizeBoolean,
   relay_1:              normalizeBoolean,
@@ -41,7 +68,12 @@ const DEVICE_STATE_NORMALIZERS = {
   button_last_action_at: normalizeTimestamp
 };
 
-// Konfigurationsfelder werden im Geräteobjekt separat von Zustandsfeldern gehalten.
+// ===========================================================================
+// NORMALISIERER FÜR GERÄTEKONFIGURATION
+// ===========================================================================
+// Konfigurationsfelder werden separat von Zustandsfeldern im device.config
+// gehalten – sie beschreiben Geräteverhalten, nicht Sensorwerte.
+
 const DEVICE_CONFIG_NORMALIZERS = {
   report_interval_s:      normalizeNumber,
   lux_threshold_on:       normalizeNumber,
@@ -52,7 +84,12 @@ const DEVICE_CONFIG_NORMALIZERS = {
   auto_schedule_enabled:  normalizeBoolean
 };
 
-// Metafelder, die aus dem Payload in device.meta übernommen werden.
+// ===========================================================================
+// METAFELDER
+// ===========================================================================
+// Diese Felder werden aus dem Payload eins-zu-eins in device.meta übernommen.
+// Sie stammen aus der Geräte-Selbstauskunft (Firmware-Broadcast nach Verbindung).
+
 const DEVICE_META_FIELDS = [
   "device_name",
   "device_class",
@@ -68,10 +105,14 @@ const DEVICE_META_FIELDS = [
   "source"
 ];
 
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+// ===========================================================================
+// PRIVATE NORMALISIERUNGSFUNKTIONEN
+// ===========================================================================
 
+/**
+ * Normalisiert auf String oder null.
+ * Leere Strings und reine Whitespace-Strings werden zu null.
+ */
 function normalizeTextOrNull(value) {
   if (value === undefined || value === null) {
     return null;
@@ -81,6 +122,10 @@ function normalizeTextOrNull(value) {
   return text ? text : null;
 }
 
+/**
+ * Normalisiert auf Boolean oder null.
+ * Nutzt die zentrale coerceBoolean-Funktion, gibt aber bei leeren Werten null zurück.
+ */
 function normalizeBoolean(value) {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -89,10 +134,17 @@ function normalizeBoolean(value) {
   return timeHelpers.coerceBoolean(value, false);
 }
 
+/**
+ * Normalisiert auf endliche Zahl oder null.
+ */
 function normalizeNumber(value) {
   return timeHelpers.coerceNumber(value, null);
 }
 
+/**
+ * Normalisiert einen Zeitstempel auf ISO-8601 oder Fallback.
+ * Leere Werte → Fallback (Standard: jetzt).
+ */
 function normalizeTimestamp(value, fallback) {
   if (value === undefined || value === null || value === "") {
     return fallback || null;
@@ -101,13 +153,23 @@ function normalizeTimestamp(value, fallback) {
   return timeHelpers.coerceTimestamp(value, fallback || timeHelpers.nowIso());
 }
 
+/**
+ * Klont ein einfaches Objekt flach. Gibt leeres Objekt zurück, wenn Eingabe kein Objekt ist.
+ */
 function cloneObject(input) {
-  return isPlainObject(input) ? { ...input } : {};
+  return timeHelpers.isPlainObject(input) ? { ...input } : {};
 }
 
-/*
- * Zweck: Erzeugt einen leeren, initialisierten Laufzeitzustand für den Server.
- * Rückgabe: Objekt mit leeren devices- und masters-Maps sowie Zeitstempel.
+// ===========================================================================
+// LAUFZEITZUSTAND – INITIALISIERUNG
+// ===========================================================================
+
+/**
+ * Erzeugt einen leeren, initialisierten Laufzeitzustand.
+ * Wird beim Serverstart und bei vollständig ungültigem Runtime-State aufgerufen.
+ *
+ * @param {string} now - ISO-Zeitstempel (Standard: jetzt)
+ * @returns {object} Runtime-State mit leeren devices-/masters-Maps
  */
 function createRuntimeState(now = timeHelpers.nowIso()) {
   return {
@@ -118,21 +180,25 @@ function createRuntimeState(now = timeHelpers.nowIso()) {
   };
 }
 
-/*
- * Zweck: Stellt sicher, dass der Laufzeitzustand vollständig und gültig ist.
- * Fehlende Teilstrukturen werden ergänzt, ohne vorhandene Daten zu überschreiben.
- * Rückgabe: Geprüftes/repariertes Runtime-Objekt.
+/**
+ * Stellt sicher, dass der Laufzeitzustand vollständig und gültig ist.
+ * Fehlende Teilstrukturen werden ergänzt – vorhandene Daten bleiben unangetastet.
+ * Wird vor jedem Zugriff auf den Runtime-State aufgerufen.
+ *
+ * @param {object} runtimeState - Aktueller (ggf. unvollständiger) State
+ * @param {string} now          - ISO-Zeitstempel
+ * @returns {object} Geprüfter/reparierter Runtime-State
  */
 function ensureRuntime(runtimeState, now = timeHelpers.nowIso()) {
-  if (!isPlainObject(runtimeState)) {
+  if (!timeHelpers.isPlainObject(runtimeState)) {
     return createRuntimeState(now);
   }
 
-  if (!isPlainObject(runtimeState.devices)) {
+  if (!timeHelpers.isPlainObject(runtimeState.devices)) {
     runtimeState.devices = {};
   }
 
-  if (!isPlainObject(runtimeState.masters)) {
+  if (!timeHelpers.isPlainObject(runtimeState.masters)) {
     runtimeState.masters = {};
   }
 
@@ -147,10 +213,18 @@ function ensureRuntime(runtimeState, now = timeHelpers.nowIso()) {
   return runtimeState;
 }
 
-/*
- * Zweck: Erzeugt ein leeres Geräteobjekt für eine noch unbekannte Device-ID.
+// ===========================================================================
+// LAUFZEITZUSTAND – GERÄTE UND MASTER
+// ===========================================================================
+
+/**
+ * Erzeugt ein leeres Geräteobjekt für eine noch unbekannte Device-ID.
  * Der Basistyp wird aus der ID abgeleitet, falls noch keine Metadaten vorliegen.
- * Rückgabe: Vollständiges, leeres Geräteobjekt mit allen Pflichtfeldern.
+ * Das Objekt enthält alle Pflichtfelder für spätere meta/state/event/ack-Updates.
+ *
+ * @param {string} deviceId - Eindeutige Gerätekennung
+ * @param {string} now      - ISO-Zeitstempel
+ * @returns {object} Vollständiges, leeres Geräteobjekt
  */
 function createEmptyDevice(deviceId, now = timeHelpers.nowIso()) {
   return {
@@ -190,9 +264,12 @@ function createEmptyDevice(deviceId, now = timeHelpers.nowIso()) {
   };
 }
 
-/*
- * Zweck: Erzeugt ein leeres Master-Objekt für ein noch unbekanntes Gateway.
- * Rückgabe: Vollständiges, leeres Master-Objekt mit allen Pflichtfeldern.
+/**
+ * Erzeugt ein leeres Master-Objekt (Gateway) für eine unbekannte Master-ID.
+ *
+ * @param {string} masterId - Eindeutige Master-Kennung
+ * @param {string} now      - ISO-Zeitstempel
+ * @returns {object} Vollständiges, leeres Master-Objekt
  */
 function createEmptyMaster(masterId, now = timeHelpers.nowIso()) {
   return {
@@ -219,14 +296,18 @@ function createEmptyMaster(masterId, now = timeHelpers.nowIso()) {
   };
 }
 
-/*
- * Zweck: Gibt das Geräteobjekt für eine Device-ID zurück.
+/**
+ * Gibt das Geräteobjekt für eine Device-ID zurück und legt es bei Bedarf neu an.
  *
- * autoCreate steuert, ob unbekannte Geräte automatisch angelegt werden:
- * - true (Standard): Gerät wird bei erster Nachricht angelegt (MQTT-Ingest)
+ * Steuerparameter autoCreate (in options):
+ * - true  (Standard): Gerät wird bei erster Nachricht automatisch angelegt (MQTT-Ingest)
  * - false: null wird zurückgegeben (für lesende oder prüfende Pfade)
  *
- * Rückgabe: Geräteobjekt oder null.
+ * @param {object} runtimeState - Laufzeitzustand
+ * @param {string} deviceId     - Gerätekennung
+ * @param {string} now          - ISO-Zeitstempel
+ * @param {object} options      - { autoCreate: boolean }
+ * @returns {object|null} Geräteobjekt oder null
  */
 function ensureDevice(runtimeState, deviceId, now = timeHelpers.nowIso(), options = {}) {
   const runtime = ensureRuntime(runtimeState, now);
@@ -246,9 +327,13 @@ function ensureDevice(runtimeState, deviceId, now = timeHelpers.nowIso(), option
   return runtime.devices[normalizedId];
 }
 
-/*
- * Zweck: Gibt das Master-Objekt für eine Master-ID zurück, legt es ggf. neu an.
- * Rückgabe: Master-Objekt oder null bei ungültiger ID.
+/**
+ * Gibt das Master-Objekt für eine Master-ID zurück, legt es ggf. neu an.
+ *
+ * @param {object} runtimeState - Laufzeitzustand
+ * @param {string} masterId     - Master-Kennung
+ * @param {string} now          - ISO-Zeitstempel
+ * @returns {object|null} Master-Objekt oder null
  */
 function ensureMaster(runtimeState, masterId, now = timeHelpers.nowIso()) {
   const runtime = ensureRuntime(runtimeState, now);
@@ -264,26 +349,43 @@ function ensureMaster(runtimeState, masterId, now = timeHelpers.nowIso()) {
   return runtime.masters[normalizedId];
 }
 
-// Aktualisiert updated_at und last_seen_at bei jeder eingehenden Nachricht.
+// ===========================================================================
+// LAUFZEITZUSTAND – INTERNE HELFER
+// ===========================================================================
+
+/**
+ * Aktualisiert die Zeitstempel bei jeder eingehenden Nachricht.
+ * updated_at und last_seen_at werden auf den Empfangszeitpunkt gesetzt.
+ */
 function touchDevice(device, receivedAt) {
   device.updated_at = receivedAt;
   device.last_seen_at = receivedAt;
 }
 
+/**
+ * Vermerkt den letzten Handler im Diagnosebereich des Geräts.
+ */
 function touchDeviceHandler(device, handlerName) {
   device.diagnostics.last_handler = handlerName;
   device.diagnostics.last_topic = handlerName;
 }
 
-/*
- * Zweck: Übernimmt Metadaten (Klasse, Fähigkeiten, Firmware) in das Geräteobjekt.
+// ===========================================================================
+// DATENÜBERNAHME – GERÄT
+// ===========================================================================
+
+/**
+ * Übernimmt Metadaten (Klasse, Fähigkeiten, Firmware-Version) in das Geräteobjekt.
  *
- * Eingaben:
- * - device: Geräteobjekt aus dem Runtime-State
- * - payload: Rohpayload der Meta-Nachricht
- * - receivedAt: Empfangszeitpunkt
+ * Eingang:  Payload der Meta-Nachricht vom Gerät.
+ * Wirkung:  device.meta wird aktualisiert, device.identity neu abgeleitet.
+ *           Fähigkeiten (caps) werden bei jeder Meta-Aktualisierung neu aus Klasse
+ *           und Bitmaske berechnet – damit Klasse und Caps immer konsistent sind.
  *
- * Seiteneffekt: Aktualisiert device.meta, device.identity und leitet Capabilities neu ab.
+ * @param {object} device     - Geräteobjekt aus dem Runtime-State
+ * @param {object} payload    - Rohpayload der Meta-Nachricht
+ * @param {string} receivedAt - Empfangszeitpunkt
+ * @returns {object|null} Aktualisiertes Gerät
  */
 function applyMeta(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
@@ -293,12 +395,14 @@ function applyMeta(device, payload, receivedAt = timeHelpers.nowIso()) {
   const raw = cloneObject(payload);
   const nextMeta = { ...cloneObject(device.meta), ...raw };
 
+  // Bekannte Metafelder aus Payload übernehmen und normalisieren.
   DEVICE_META_FIELDS.forEach((fieldName) => {
     if (Object.prototype.hasOwnProperty.call(raw, fieldName)) {
       nextMeta[fieldName] = normalizeTextOrNull(raw[fieldName]);
     }
   });
 
+  // sim_case ist ein Sonderfall – kann boolesch oder String sein.
   if (Object.prototype.hasOwnProperty.call(raw, "sim_case")) {
     nextMeta.sim_case = raw.sim_case;
   }
@@ -306,8 +410,8 @@ function applyMeta(device, payload, receivedAt = timeHelpers.nowIso()) {
   nextMeta.device_id = device.identity.device_id;
   nextMeta.device_name = normalizeTextOrNull(nextMeta.device_name) || device.identity.device_name;
   nextMeta.device_class = normalizeTextOrNull(nextMeta.device_class);
-  // Fähigkeiten werden bei jeder Meta-Aktualisierung neu abgeleitet,
-  // damit Klasse und caps-Bitmaske immer konsistent sind.
+
+  // Fähigkeiten aus device_class + caps-Bitmaske neu ableiten.
   nextMeta.caps = capabilityHelpers.deriveCapabilities({
     device_class: nextMeta.device_class,
     caps: capabilityHelpers.normalizeCapabilities(nextMeta.caps)
@@ -329,14 +433,17 @@ function applyMeta(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
-/*
- * Zweck: Übernimmt Verfügbarkeitsdaten (online/offline) in das Geräteobjekt.
+/**
+ * Übernimmt Verfügbarkeitsdaten (online/offline/late) in das Geräteobjekt.
  *
- * Eingaben:
- * - payload.availability: Statuslabel ("online", "offline", "late", …)
- * - payload.online: optionaler expliziter Boolean
+ * Eingang:  payload.availability (Statuslabel), payload.online (Boolean)
+ * Wirkung:  device.availability wird aktualisiert. Das online-Flag wird
+ *           aus dem Payload oder aus dem availability-Label abgeleitet.
  *
- * Seiteneffekt: Aktualisiert device.availability inkl. online-Flag und last_seen_at.
+ * @param {object} device     - Geräteobjekt
+ * @param {object} payload    - Rohpayload der Availability-Nachricht
+ * @param {string} receivedAt - Empfangszeitpunkt
+ * @returns {object|null} Aktualisiertes Gerät
  */
 function applyAvailability(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
@@ -354,7 +461,7 @@ function applyAvailability(device, payload, receivedAt = timeHelpers.nowIso()) {
     nextAvailability.availability = "unknown";
   }
 
-  // online-Flag aus Payload übernehmen oder aus availability-Label ableiten
+  // online-Flag: explizite Angabe > Label-Ableitung > vorheriger Wert > false
   if (Object.prototype.hasOwnProperty.call(raw, "online")) {
     nextAvailability.online = timeHelpers.coerceBoolean(raw.online, false);
   } else if (nextAvailability.availability === "online") {
@@ -376,16 +483,20 @@ function applyAvailability(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
-/*
- * Zweck: Übernimmt Zustandsdaten (Sensoren, Aktorstatus) in das Geräteobjekt.
+/**
+ * Übernimmt Zustandsdaten (Sensoren, Aktorstatus) in das Geräteobjekt.
  *
- * Eingabe: payload mit beliebigen Zustandsfeldern.
+ * Eingang:  Payload mit beliebigen Zustandsfeldern (temp_01c, relay_1, lux, …).
+ * Wirkung:
+ *   - Bekannte Felder werden normalisiert und in device.state geschrieben.
+ *   - Konfigurationsfelder gehen in device.config.
+ *   - Unbekannte Felder landen in den Diagnosedaten (dropped_state_fields).
+ *   - cover_calibrated und is_calibrated werden synchronisiert (Dual-Field-Kompatibilität).
  *
- * Seiteneffekt:
- * - Bekannte Felder werden normalisiert und in device.state geschrieben.
- * - Konfigurationsfelder (report_interval_s, …) gehen in device.config.
- * - Unbekannte Felder werden als dropped_state_fields diagnostisch vermerkt.
- * - cover_calibrated und is_calibrated werden synchronisiert (dual-field-Kompatibilität).
+ * @param {object} device     - Geräteobjekt
+ * @param {object} payload    - Rohpayload der State-Nachricht
+ * @param {string} receivedAt - Empfangszeitpunkt
+ * @returns {object|null} Aktualisiertes Gerät
  */
 function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
@@ -400,27 +511,32 @@ function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
       return;
     }
 
+    // Bekanntes Zustandsfeld → normalisieren und in state schreiben.
     if (Object.prototype.hasOwnProperty.call(DEVICE_STATE_NORMALIZERS, fieldName)) {
       device.state[fieldName] = DEVICE_STATE_NORMALIZERS[fieldName](fieldValue);
       return;
     }
 
+    // Konfigurationsfeld → normalisieren und in config schreiben.
     if (Object.prototype.hasOwnProperty.call(DEVICE_CONFIG_NORMALIZERS, fieldName)) {
       device.config[fieldName] = DEVICE_CONFIG_NORMALIZERS[fieldName](fieldValue);
       return;
     }
 
+    // Unbekanntes Feld → für Diagnose vermerken.
     droppedStateFields.push(fieldName);
   });
 
-  // Beide Kalibrierungsfelder synchron halten, da Firmware beides senden kann.
+  // Dual-Field-Synchronisation: cover_calibrated und is_calibrated müssen
+  // zwingend denselben Wert haben, da Firmware beide senden kann.
   const coverCalibrated = device.state.cover_calibrated ?? device.state.is_calibrated;
   if (coverCalibrated !== undefined) {
     device.state.cover_calibrated = coverCalibrated;
     device.state.is_calibrated = coverCalibrated;
   }
 
-  if (!isPlainObject(device.availability)) {
+  // Verfügbarkeitsstruktur sicherstellen – last_seen_at wird immer aktualisiert.
+  if (!timeHelpers.isPlainObject(device.availability)) {
     device.availability = { availability: "unknown", online: false, last_seen_at: null };
   }
   device.availability.last_seen_at = receivedAt;
@@ -432,12 +548,18 @@ function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
-/*
- * Zweck: Übernimmt ein Geräteereignis (z. B. Tastendruck, Alarm) in das Geräteobjekt.
+/**
+ * Übernimmt ein Geräteereignis (Tastendruck, Regenalarm, Fehler) in das Geräteobjekt.
  *
- * Seiteneffekt:
- * - Schreibt das normalisierte Ereignis in device.last_event.
- * - Leitet ggf. Zustandsfelder aus dem Ereignis ab (z. B. rain aus rain_detected).
+ * Eingang:  Payload mit event_type, event_label, event_trigger, Parametern.
+ * Wirkung:
+ *   - Das normalisierte Ereignis wird in device.last_event geschrieben.
+ *   - Ggf. werden Zustandsfelder aus dem Ereignis abgeleitet (z. B. rain aus rain_detected).
+ *
+ * @param {object} device     - Geräteobjekt
+ * @param {object} payload    - Rohpayload der Event-Nachricht
+ * @param {string} receivedAt - Empfangszeitpunkt
+ * @returns {object|null} Aktualisiertes Gerät
  */
 function applyEvent(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
@@ -465,6 +587,15 @@ function applyEvent(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
+// ===========================================================================
+// EREIGNISBASIERTE ZUSTANDSABLEITUNG
+// ===========================================================================
+
+/**
+ * Versucht, aus einem Event-Parameter einen Boolean zu lesen.
+ * Versteht: booleans, Zahlen (0/nicht-0), und textuelle Werte
+ * ("wet"/"nass" → true, "dry"/"trocken" → false, usw.).
+ */
 function booleanFromEventParam(value) {
   if (value === undefined || value === null || value === "") {
     return null;
@@ -489,8 +620,12 @@ function booleanFromEventParam(value) {
   return null;
 }
 
+/**
+ * Vermerkt ein abgeleitetes Zustandsfeld in den Diagnosedaten.
+ * Format: "feldname:event:event_label" (z. B. "rain:event:rain_detected").
+ */
 function rememberDerivedStateField(device, fieldName, eventLabel) {
-  if (!isPlainObject(device.diagnostics)) {
+  if (!timeHelpers.isPlainObject(device.diagnostics)) {
     device.diagnostics = {};
   }
 
@@ -503,11 +638,12 @@ function rememberDerivedStateField(device, fieldName, eventLabel) {
   }
 }
 
-/*
- * Zweck: Leitet Zustandsfelder aus bestimmten Ereignissen ab.
+/**
+ * Leitet Zustandsfelder aus bestimmten Ereignissen ab.
  *
  * Derzeit implementiert: rain_detected → device.state.rain
- * Erweiterbar für weitere ereignisbasierte Zustandsableitungen.
+ * Die Funktion ist bewusst erweiterbar für weitere Ereignistypen.
+ * Kein Seiteneffekt außerhalb des übergebenen device-Objekts.
  */
 function applyStateFromEvent(device) {
   const event = cloneObject(device && device.last_event);
@@ -525,11 +661,21 @@ function applyStateFromEvent(device) {
   rememberDerivedStateField(device, "rain", eventLabel);
 }
 
-/*
- * Zweck: Übernimmt eine Befehlsbestätigung (Ack) in das Geräteobjekt.
+// ===========================================================================
+// DATENÜBERNAHME – BESTÄTIGUNGEN & MASTER
+// ===========================================================================
+
+/**
+ * Übernimmt eine Befehlsbestätigung (Ack) vom Gerät in das Geräteobjekt.
  *
- * Seiteneffekt: Schreibt request_id, channel, status, status_code und ack_seq
- *               in device.last_ack für die UI-Rückmeldung.
+ * Eingang:  Payload mit request_id, channel, status, status_code, ack_seq usw.
+ * Wirkung:  device.last_ack wird gesetzt. Dient der UI als Rückmeldung,
+ *           ob ein gesendeter Befehl das Gerät erreicht hat.
+ *
+ * @param {object} device     - Geräteobjekt
+ * @param {object} payload    - Rohpayload der Ack-Nachricht
+ * @param {string} receivedAt - Empfangszeitpunkt
+ * @returns {object|null} Aktualisiertes Gerät
  */
 function applyAck(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!device) {
@@ -557,9 +703,17 @@ function applyAck(device, payload, receivedAt = timeHelpers.nowIso()) {
   return device;
 }
 
-/*
- * Zweck: Übernimmt Statusdaten eines Master-Geräts (Gateway).
- * Seiteneffekt: Aktualisiert online, wifi, mqtt, espnow, fw und last_seen_at.
+/**
+ * Übernimmt Statusdaten eines Master-Geräts (Gateway).
+ *
+ * Eingang:  Payload mit online, wifi, mqtt, espnow, fw.
+ * Wirkung:  master.status wird mit normalisierten Werten aktualisiert.
+ *           Alle Verbindungsarten werden als Boolean geprüft und gesetzt.
+ *
+ * @param {object} master     - Master-Objekt
+ * @param {object} payload    - Rohpayload der Status-Nachricht
+ * @param {string} receivedAt - Empfangszeitpunkt
+ * @returns {object|null} Aktualisiertes Master-Objekt
  */
 function applyMasterStatus(master, payload, receivedAt = timeHelpers.nowIso()) {
   if (!master) {
@@ -590,7 +744,7 @@ function applyMasterStatus(master, payload, receivedAt = timeHelpers.nowIso()) {
   return master;
 }
 
-
+// Helfer für sqlite_writes.js – konvertiert Wert zu String oder null.
 function textOrNull(value) {
   return value === undefined || value === null ? null : String(value);
 }

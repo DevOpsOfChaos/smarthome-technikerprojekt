@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "40_command_minimal",
     "disabled": false,
-    "info": "Enge offizielle Command-Einstiege fuer net_erl relay_1 und cover mit serverseitiger request_id."
+    "info": "Enge offizielle Command-Endpunkte für net_erl relay_1 und Rolladen (cover) mit serverseitiger request_id. Baut bewusst nur enge Pfade: HTTP POST → request_id erzeugen → MQTT command publizieren. Ack und State kommen über die bestehende Ingest-Kette zurück."
   },
   {
     "id": "comment_40_command_minimal",
     "type": "comment",
     "z": "tab_40_command_minimal",
     "name": "Minimaler Command-Pfad",
-    "info": "Dieser Tab baut absichtlich nur enge Pfade: POST -> request_id erzeugen -> MQTT command publizieren. ACK und State kommen ueber die bestehende Ingest-Kette zurueck.",
+    "info": "Dieser Tab baut absichtlich nur enge Pfade: POST → request_id erzeugen → MQTT command publizieren. ACK und State kommen über die bestehende Ingest-Kette zurück. Validierung und Befehlserzeugung liegen in /data/lib/command_minimal.js.",
     "x": 180,
     "y": 60,
     "wires": []

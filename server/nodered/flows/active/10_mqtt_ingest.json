@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "10_mqtt_ingest",
     "disabled": false,
-    "info": "Abonniert die relevanten MQTT-Themen und verteilt sie an kleine Handler."
+    "info": "Abonniert die relevanten MQTT-Themen (smarthome/device/+/+ und smarthome/master/+/+) und verteilt eingehende Nachrichten an die passenden Handler. Topic-Erkennung liegt zentral in /data/lib/topic_router.js. JSON-Parsing vor dem Routing, um ungültige Payloads früh abzufangen."
   },
   {
     "id": "comment_10_ingest",
     "type": "comment",
     "z": "tab_10_ingest",
     "name": "MQTT Ingest",
-    "info": "Der aktuelle Server verarbeitet meta, availability, state, event, ack sowie master status/event. Topic-Erkennung liegt zentral in /data/lib/topic_router.js.",
+    "info": "Der aktuelle Server verarbeitet meta, availability, state, event, ack sowie master status. Topic-Erkennung liegt zentral in /data/lib/topic_router.js. Die Flow-Nodes bleiben nur Node-RED-Brücken – die Fachlogik liegt in den Lib-Dateien.",
     "x": 150,
     "y": 60,
     "wires": []

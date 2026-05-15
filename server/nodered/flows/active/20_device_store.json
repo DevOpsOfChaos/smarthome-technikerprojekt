@@ -4,14 +4,14 @@
         "type": "tab",
         "label": "20_device_store",
         "disabled": false,
-        "info": "Pflegt das gemeinsame Geraeteobjekt. State bleibt Hauptwahrheit, Event und ACK ergaenzen nur."
+        "info": "Pflegt das gemeinsame Geräteobjekt (smarthome_runtime). Verarbeitet alle Device-Nachrichten (meta, availability, state, event, ack) über die zentralen Handler in /data/lib/topic_handlers.js und leitet vorbereitete SQLite-Batches an die Persistenzschicht weiter. State bleibt Hauptwahrheit, Event und Ack ergänzen nur."
     },
     {
         "id": "comment_20_store",
         "type": "comment",
         "z": "tab_20_store",
-        "name": "Geraeteobjekt",
-        "info": "Die fachliche Wahrheit liegt in /data/lib/device_store.js und /data/lib/topic_handlers.js. Die Function-Nodes bleiben nur Node-RED-Bruecken.",
+        "name": "Geräteobjekt",
+        "info": "Die fachliche Wahrheit liegt in /data/lib/device_store.js und /data/lib/topic_handlers.js. Die Function-Nodes bleiben nur Node-RED-Brücken – sie rufen die Lib-Funktionen auf und speichern das Ergebnis im globalen Kontext.",
         "x": 170,
         "y": 60,
         "wires": []

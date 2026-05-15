@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "30_sqlite_persist",
     "disabled": false,
-    "info": "Fuehrt die zentral vorbereiteten SQLite-Batches aus. Die SQL-Fachlogik bleibt in /data/lib/sqlite_writes.js."
+    "info": "Führt die zentral vorbereiteten SQLite-Batches aus. Alle Handler liefern nur noch vorbereitete Batch-Statements – dieser Tab führt sie atomar (BEGIN IMMEDIATE … COMMIT) gegen die Serverdatenbank aus. Fehler werden über catch+debug protokolliert."
   },
   {
     "id": "comment_30_sqlite",
     "type": "comment",
     "z": "tab_30_sqlite",
     "name": "Zentraler SQLite-Pfad",
-    "info": "Die Handler liefern nur noch vorbereitete Batch-Statements. Dieser Tab fuehrt sie gesammelt gegen die Serverdatenbank aus.",
+    "info": "Die Handler liefern nur noch vorbereitete Batch-Statements (msg.sqlite_batch). Dieser Tab führt sie gesammelt gegen die Serverdatenbank aus. Die SQL-Fachlogik bleibt in /data/lib/sqlite_writes.js.",
     "x": 190,
     "y": 60,
     "wires": []

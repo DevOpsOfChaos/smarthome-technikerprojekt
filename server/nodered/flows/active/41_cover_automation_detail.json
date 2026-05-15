@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "41_cover_automation_detail",
     "disabled": false,
-    "info": "Kleine Cover-Detailseite mit zwei lokalen Zeit/Wert-Slots. Kein Teil des MQTT-Vertrags."
+    "info": "Kleine Cover-Detailseite mit zwei lokalen Zeit/Wert-Slots für die Zeitautomatik. Kein Teil des MQTT-Vertrags – die Fahrten nutzen intern denselben Cover-Command-Builder, aber es werden keine Zeitfelder in das Geräteobjekt oder den MQTT-Vertrag gezogen."
   },
   {
     "id": "comment_41_cover_automation_detail",
     "type": "comment",
     "z": "tab_41_cover_automation_detail",
     "name": "Lokale Cover-Zeitautomatik",
-    "info": "Diese Einbaustelle bleibt bewusst lokal zur Detailseite. Die Fahrten nutzen intern denselben Cover-Command-Builder, aber es werden keine Zeitfelder in das Geräteobjekt oder in den MQTT-Vertrag gezogen.",
+    "info": "Diese Einbaustelle bleibt bewusst lokal zur Detailseite. Die Fahrten nutzen intern denselben Cover-Command-Builder aus /data/lib/command_minimal.js. Zeitkonfiguration wird nur in /data/cover_automation.json gespeichert – nicht im Geräteobjekt.",
     "x": 220,
     "y": 60,
     "wires": []
