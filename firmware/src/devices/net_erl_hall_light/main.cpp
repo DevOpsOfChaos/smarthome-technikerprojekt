@@ -58,7 +58,10 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "MathUtils.h"
 #include "../../basetypes/net_erl/NetErlProvisioning.h"
+
+using SmartHome::clampToU16;
 #include "../../../include/DebugConfig.h"
 #include "../../../include/ProjectVersion.h"
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
@@ -172,9 +175,6 @@ String htmlEscapeLocal(const String& s) {
     }
     return e;
 }
-
-// clampToU16 – Wert auf uint16-Bereich begrenzen (0-65535)
-uint16_t clampToU16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
 
 void logf(const char* l, const char* f, ...) {
     if (!DEBUG_LOKAL_AKTIV) return;
