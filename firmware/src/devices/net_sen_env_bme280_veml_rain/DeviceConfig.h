@@ -1,9 +1,34 @@
+// =============================================================================
+// DeviceConfig.h – Geraetekonfiguration NET-SEN Env BME280+VEML+Rain
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/devices/net_sen_env_bme280_veml_rain/DeviceConfig.h
+//
+// === EINSATZZWECK ===
+// [HIER EINTRAGEN]
+// === EINSATZZWECK ===
+//
+// Geraete-Identitaet:
+//   ID:       NET-SEN-002
+//   Name:     NET-SEN Env BME280+VEML+Rain
+//   Variante: net_sen_env_bme280_veml_rain
+//   Caps:     TEMP | HUM | LUX | PRESSURE | RAIN
+//
+// Sensoren:
+//   BME280:      I2C, Adresse 0x76/0x77
+//   VEML7700:    I2C, Adresse 0x10
+//   Regensensor: GPIO3, digital, active-LOW mit Pullup
+//
+// Regen wird aktuell als Event gemeldet (STATE-Payload hat noch kein Regenfeld).
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+// =============================================================================
+
 #pragma once
 
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
-
-// Konkretes Geraet: net_sen-Umweltpfad mit BME280 + VEML7700 + digitalem Regensensor.
-// Regen wird aktuell als Event gemeldet; der net_sen-State-Payload hat noch kein Regenfeld.
 
 #define NET_SEN_DEVICE_ID "NET-SEN-002"
 #define NET_SEN_DEVICE_NAME "NET-SEN Env BME280+VEML+Rain"
@@ -22,15 +47,18 @@
 #define NET_SEN_MAX_REPORT_INTERVAL_S 600U
 #define NET_SEN_LOOP_INTERVAL_MS 50UL
 
+// Sensor-Timing
 #define NET_SEN_ENV_BME280_VEML_RAIN_SENSOR_READ_INTERVAL_MS 2500UL
 #define NET_SEN_ENV_BME280_VEML_RAIN_ERROR_LOG_INTERVAL_MS 15000UL
 #define NET_SEN_ENV_BME280_VEML_RAIN_SNAPSHOT_LOG_INTERVAL_MS 30000UL
 
+// Hysterese
 #define NET_SEN_ENV_BME280_VEML_RAIN_TEMP_DELTA_01C 10
 #define NET_SEN_ENV_BME280_VEML_RAIN_HUM_DELTA_01PCT 50U
 #define NET_SEN_ENV_BME280_VEML_RAIN_LUX_DELTA 25U
 #define NET_SEN_ENV_BME280_VEML_RAIN_PRESSURE_DELTA_PA 30UL
 
+// I2C-Adressen
 #define NET_SEN_ENV_BME280_PRIMARY_ADDRESS 0x76
 #define NET_SEN_ENV_BME280_FALLBACK_ADDRESS 0x77
 #define NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS 1050UL
