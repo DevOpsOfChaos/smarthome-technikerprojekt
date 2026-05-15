@@ -2,7 +2,7 @@
 // PinConfig.h – GPIO-Pin-Mapping fuer Master
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/basetypes/master/PinConfig.h
+// Pfad:       firmware/src/basetypes/master_firmware/PinConfig.h
 //
 // Datei-Funktion:
 //   Pin-Konfiguration fuer den ESP-NOW-Master. Der Master nutzt keine

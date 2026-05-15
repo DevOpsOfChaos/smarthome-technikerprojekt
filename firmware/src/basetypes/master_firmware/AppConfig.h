@@ -2,7 +2,7 @@
 // AppConfig.h – Master-Konfiguration (Profile, Timer, Limits)
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/basetypes/master/AppConfig.h
+// Pfad:       firmware/src/basetypes/master_firmware/AppConfig.h
 //
 // Datei-Funktion:
 //   Hauptkonfiguration fuer den ESP-NOW-Master. Definiert zwei Profile

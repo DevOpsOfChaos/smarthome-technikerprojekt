@@ -2,7 +2,7 @@
 // main.cpp – Master: ESP-NOW to MQTT Bridge
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/basetypes/master/main.cpp
+// Pfad:       firmware/src/basetypes/master_firmware/main.cpp
 //
 // Datei-Funktion:
 //   Dynamischer Master als ESP-NOW ↔ MQTT-Bruecke. Empfaengt HELLO,
