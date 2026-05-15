@@ -38,12 +38,14 @@
 #include "DeviceConfig.h"
 #include "PinConfig.h"
 #include "MathUtils.h"
+#include "SensorUtils.h"
 
 using SmartHome::clampToU16;
 using SmartHome::clampHum01pct;
 using SmartHome::absDiffU16;
 using SmartHome::absDiffI16;
 using SmartHome::valueChangedSignificantU32;
+using SmartHome::recoveryIsDue;
 
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS 1
@@ -142,12 +144,8 @@ bool initialisiereVeml7700(unsigned long jetzt) {
     return true;
 }
 
-bool sensorRecoveryFaellig(unsigned long letzter, unsigned long jetzt) {
-    return letzter == 0UL || (jetzt - letzter) >= SENSOR_RECOVERY_RETRY_INTERVAL_MS;
-}
-
 void versucheBmeRecovery(unsigned long jetzt) {
-    if (bme280Bereit || !sensorRecoveryFaellig(letzterBmeRecoveryMs, jetzt)) return;
+    if (bme280Bereit || !recoveryIsDue(letzterBmeRecoveryMs, jetzt, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) return;
     letzterBmeRecoveryMs = jetzt;
     bme280Bereit = initialisiereBme280();
     logf(bme280Bereit ? "INFO" : "WARN",
@@ -155,7 +153,7 @@ void versucheBmeRecovery(unsigned long jetzt) {
 }
 
 void versucheVemlRecovery(unsigned long jetzt) {
-    if (veml7700Bereit || !sensorRecoveryFaellig(letzterVemlRecoveryMs, jetzt)) return;
+    if (veml7700Bereit || !recoveryIsDue(letzterVemlRecoveryMs, jetzt, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) return;
     letzterVemlRecoveryMs = jetzt;
     veml7700Bereit = initialisiereVeml7700(jetzt);
     logf(veml7700Bereit ? "INFO" : "WARN",
