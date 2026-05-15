@@ -1,19 +1,19 @@
-// =============================================================================
-// main.cpp – NET-ERL Kitchen: Kuechenlicht mit Radar + Luftqualitaet (THIN)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_kitchen/main.cpp
-// Hardware:   ESP32-C3 + BME680 + VEML7700 + ENS160 + LD2410 + NeoPixel + Relais
-// Pattern:    Thin-Wrapper – Hooks in NetErlRuntime.h eingehängt
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-15 (Thin-Pattern-Migration)
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-ERL Kitchen: Kuechenlicht mit Radar + Luftqualitaet (Thin-Wrapper)
+ *
+ * @details Komplexester NET-ERL-Device-Adapter. Auto-Light mit LD2410-Radar,
+ *          BME680 (Temp/Feuchte/Druck/Gas), VEML7700 (Lux), ENS160 (AQI/TVOC/eCO2),
+ *          NeoPixel-LED-Ring. ENS160-Kompensation via BME680-Temperatur/Feuchte.
+ *          BME680-Gaswarmup: 180s + 5 gueltige Messungen.
+ *          ENS160 Stale-Detection: Werte verfallen nach Timeout.
+ *
+ * Hardware:   ESP32-C3 + BME680 + VEML7700 + ENS160 + LD2410 + NeoPixel + Relais
+ * Pattern:    Thin-Wrapper – Hooks in NetErlRuntime.h eingehängt
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -92,18 +92,24 @@ namespace {
 // SENSOR-HILFSFUNKTIONEN (device-spezifisch)
 // =============================================================================
 namespace {
+    /** @brief Mappt ENS160-AQI (1-5) auf Skala 0-500. @param r AQI-Rohwert (1-5) @return 0-500 (0=ungueltig) */
     uint16_t mapAqi500(uint16_t r) { return (r >= 1 && r <= ENS160_AQI_MAX_BASIC) ? (uint16_t)(r * 100U) : 0U; }
+    /** @brief Kodiert Celsius in Kelvin*64 fuer ENS160-Kompensation. */
     uint16_t encT(float c) { return (uint16_t)((c + 273.15f) * 64.0f); }
+    /** @brief Kodiert rel. Feuchte *512 fuer ENS160-Kompensation. */
     uint16_t encH(float h) { return (uint16_t)(h * 512.0f); }
 
+    /** @brief Schreibt Temp/Feuchte-Kompensation in ENS160-Register. @param a I2C-Adresse des ENS160 @param t Temperatur in °C @param h rel. Feuchte in % @return I2C-Fehlercode (0=OK) */
     int writeEnsEnv(uint8_t a, float t, float h) {
         uint8_t b[4]; uint16_t te = encT(t), he = encH(h);
         b[0] = te & 0xFF; b[1] = (te >> 8) & 0xFF; b[2] = he & 0xFF; b[3] = (he >> 8) & 0xFF;
         Wire.beginTransmission(a); Wire.write(ENS160_REG_TEMP_IN); Wire.write(b, 4); return Wire.endTransmission();
     }
 
+    /** @brief Konfiguriert VEML7700: Gain 1x, 400ms Integration. */
     void konfVeml() { veml.setGain(VEML7700_GAIN_1); veml.setIntegrationTime(VEML7700_IT_400MS); }
 
+    /** @brief Initialisiert BME680 mit Oversampling + Heizprofil (320°C, 150ms). @return true bei Erfolg */
     bool initBme() {
         uint8_t addrs[] = {(uint8_t)NET_ERL_BME680_PRIMARY_ADDRESS, (uint8_t)NET_ERL_BME680_FALLBACK_ADDRESS};
         for (uint8_t a : addrs) {
@@ -115,16 +121,19 @@ namespace {
         return false;
     }
 
+    /** @brief Initialisiert ENS160 (Primary 0x52, Fallback 0x53). @return true bei Erfolg */
     bool initEns() {
         ens160 = &ens160Addr52; if (ens160->begin()) { ens160_adresse = NET_ERL_ENS160_PRIMARY_ADDRESS; return true; }
         ens160 = &ens160Addr53; if (ens160->begin()) { ens160_adresse = NET_ERL_ENS160_FALLBACK_ADDRESS; return true; }
         ens160 = nullptr; return false;
     }
 
+    /** @brief Prueft ob BME680-Gassensor ausreichend warmgelaufen ist. @param j aktueller Zeitstempel in ms @return true wenn bereit */
     bool gasWarmupOk(unsigned long j) {
         return gasWarmupComplete(runtime.boot_ms, j, NET_ERL_BME680_GAS_WARMUP_MS, bme680_gueltige_messungen, NET_ERL_BME680_GAS_WARMUP_MIN_READS);
     }
 
+    /** @brief Prueft ob ENS160-Messwerte veraltet sind. @param j aktueller Zeitstempel in ms @return true wenn stale */
     bool ensStale(unsigned long j) {
         if (!ens_ok || !ens160) return true;
         return letzter_ens_gueltig_ms > 0 && (j - letzter_ens_gueltig_ms) > NET_ERL_ENS160_STALE_TIMEOUT_MS;
@@ -135,6 +144,9 @@ namespace {
 // CUSTOM HOOKS (von NetErlRuntime.h aufgerufen)
 // =============================================================================
 
+/**
+ * @brief Initialisiert I2C-Bus, erkennt alle Sensoren (BME680, VEML7700, ENS160) und setzt ENS160-Betriebsmodus.
+ */
 void netErlDeviceInit() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
     Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
@@ -153,21 +165,36 @@ void netErlDeviceInit() {
     pinMode(PIN_LD2410_OUT, INPUT);
 }
 
+/**
+ * @brief Setzt alle Sensor-Messwerte auf den ungueltigen Default-Wert zurueck.
+ */
 void netErlDeviceResetSensorDefaults() {
     temp_01c = INT16_MIN; hum_01pct = 0xFFFFU; lux = 0xFFFFU;
     pressure_pa = PRESSURE_UNGUELTIG; gas_ohm = GAS_OHM_UNGUELTIG;
     aqi = AIR_METRIC_UNGUELTIG; tvoc_ppb = AIR_METRIC_UNGUELTIG; eco2_ppm = AIR_METRIC_UNGUELTIG;
 }
 
+/**
+ * @brief Liest den LD2410-Radar-Praesenzstatus vom digitalen Pin.
+ * @return true bei erkannter Bewegung/Anwesenheit
+ */
 bool netErlDeviceReadPresence() {
     ld2410_raw = (digitalRead(PIN_LD2410_OUT) == HIGH);
     return ld2410_raw;
 }
 
+/**
+ * @brief Schaltet das Relais entsprechend dem Soll-Zustand.
+ * @param[in] on true = Relais ein (aktiv-high oder aktiv-low je nach RELAY_1_ACTIVE_HIGH)
+ */
 void netErlDeviceSetRelayOutput(bool on) {
     digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
 }
 
+/**
+ * @brief Aktualisiert den NeoPixel-LED-Ring (weiss bei Relais an, aus bei Relais aus).
+ * @param[in] relayOn true wenn Relais eingeschaltet ist
+ */
 void netErlDeviceUpdateIndicators(bool relayOn) {
     if (!ring_initialized) {
         ledRing.begin(); ledRing.setBrightness(LED_RING_HELLIGKEIT);
@@ -182,6 +209,20 @@ void netErlDeviceUpdateIndicators(bool relayOn) {
     ledRing.show();
 }
 
+/**
+ * @brief Pollt alle Sensoren und aktualisiert Messwerte, Recovery, Kompensation und Auto-Light-Logik.
+ * @param[in] nowMs Aktueller Systemzeitstempel in Millisekunden
+ *
+ * @details Ablauf:
+ *          1. Interval-Check (NET_ERL_ENV_SAMPLE_INTERVAL_MS)
+ *          2. Recovery: ausgefallene Sensoren (BME680, VEML7700, ENS160) periodisch neu initialisieren
+ *          3. BME680 auslesen (Temp, Feuchte, Druck, Gas); Plausibilitaet pruefen; Gas nur bei warmem Sensor
+ *          4. VEML7700 Lux auslesen
+ *          5. ENS160-Kompensation: Temperatur/Feuchte vom BME680 in ENS160-Register schreiben
+ *          6. ENS160 Messwerte lesen (AQI500 bevorzugt, Fallback AQI 1-5); Stale-Detection
+ *          7. Late-Lux: Auto-On-Entscheidung falls Lux-Wert nach Pending-Status verfuegbar
+ *          8. Delta-Detection: STATE-Trigger nur bei signifikanter Messwert-Aenderung
+ */
 void netErlDevicePollSensors(unsigned long nowMs) {
     if ((nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     letztes_env_sample_ms = nowMs;
@@ -279,6 +320,11 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     }
 }
 
+/**
+ * @brief Befuellt das ExtendedRelayComfortGasConfigStateReportPayload mit aktuellen Messwerten und Status.
+ * @param[out] payload Zeiger auf den Payload-Speicher (muss ExtendedRelayComfortGasConfigStateReportPayload sein)
+ * @param[in,out] size Zeiger auf die Payload-Groesse (wird auf die tatsaechliche Groesse gesetzt)
+ */
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     SmartHome::ExtendedRelayComfortGasConfigStateReportPayload* p =
         static_cast<SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
@@ -302,6 +348,10 @@ void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     if (size != nullptr) *size = sizeof(SmartHome::ExtendedRelayComfortGasConfigStateReportPayload);
 }
 
+/**
+ * @brief Baut die Auto-Flags fuer den Presence-Source- und Light-Guard-Status.
+ * @return Bitmaske mit SH_RELAY_COMFORT_FLAG_*-Werten
+ */
 uint8_t netErlDeviceBuildAutoFlags() {
     uint8_t f = 0;
     if (runtime.motion_aktiv) f |= SH_RELAY_COMFORT_FLAG_PRESENCE_SOURCE_AVAILABLE;
@@ -312,10 +362,17 @@ uint8_t netErlDeviceBuildAutoFlags() {
     return f;
 }
 
+/**
+ * @brief Prueft ob ein Sensorfehler vorliegt (BME680, VEML7700 oder ENS160 ausgefallen).
+ * @return true bei Sensorfehler
+ */
 bool netErlDeviceHasSensorFault() {
     return !(bme_ok && lux_ok) || !ens_ok;
 }
 
+/**
+ * @brief Gibt einen Snapshot aller aktuellen Sensorwerte als Log-Zeile aus.
+ */
 void netErlDeviceLogSnapshot() {
     logMsg("INFO", "snap t=%d h=%u l=%u p=%lu g=%lu a=%u tv=%u ec=%u m=%s r=%s",
         (int)temp_01c, hum_01pct, lux,
@@ -324,6 +381,10 @@ void netErlDeviceLogSnapshot() {
         runtime.motion_aktiv ? "1" : "0", runtime.relay_1 ? "1" : "0");
 }
 
+/**
+ * @brief Liest den Hardware-Button (BUTTON_1) aus.
+ * @return true wenn Button gedrueckt (beruecksichtigt BUTTON_1_ACTIVE_LOW)
+ */
 bool netErlDeviceReadButton() {
 #if BUTTON_1_ACTIVE_LOW
     return digitalRead(PIN_BUTTON_1) == LOW;

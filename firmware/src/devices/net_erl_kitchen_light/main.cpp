@@ -1,23 +1,17 @@
-// =============================================================================
-// main.cpp – NET-ERL Kitchen Light: Reines Relais (THIN)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_kitchen_light/main.cpp
-// Hardware:   ESP32-C3 + 1 Relais (kein Sensor)
-// Pattern:    Thin-Wrapper – Hooks in NetErlRuntime.h eingehängt
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Besonderheiten:
-//   - Kein Bewegungssensor → Auto-Light deaktiviert
-//   - Kein Umweltsensor → STATE ohne Temperatur/Feuchte/Lux
-//   - Relais per Master-CMD oder Button schaltbar
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-15
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-ERL Kitchen Light: Reines Relais ohne Sensorik (Thin-Wrapper)
+ *
+ * @details Thin-Wrapper fuer NetErlRuntime. Kein Bewegungssensor, kein Umweltsensor.
+ *          Relais per Master-CMD (MQTT->ESP-NOW) oder Button schaltbar.
+ *          Auto-Light-Logik deaktiviert (keine Sensordaten).
+ *
+ * Hardware:   ESP32-C3 + 1 Relais
+ * Pattern:    Thin-Wrapper – Hooks in NetErlRuntime.h eingehängt
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-15
+ */
 
 #include <Arduino.h>
 
@@ -49,28 +43,52 @@
 // CUSTOM HOOKS (von NetErlRuntime.h aufgerufen)
 // =============================================================================
 
+/**
+ * @brief Device-Init-Hook – keine Sensoren zu initialisieren.
+ * Wird von NetErlRuntime beim Boot aufgerufen.
+ */
 void netErlDeviceInit() {
     // Keine Sensoren zu initialisieren – nur Relais-Pin (von Runtime gesetzt)
 }
 
+/** @brief Keine Sensor-Defaults zurückzusetzen. */
 void netErlDeviceResetSensorDefaults() {
     // Keine Sensorwerte zurückzusetzen
 }
 
+/**
+ * @brief Bewegungserkennung – immer false (kein PIR-Sensor).
+ * @return false
+ */
 bool netErlDeviceReadPresence() {
     // Kein Bewegungssensor → immer false
     return false;
 }
 
+/**
+ * @brief Setzt den Relais-Ausgang (PIN_RELAY_1).
+ * @param on true = Relais aktiv (HIGH je nach RELAY_1_ACTIVE_HIGH)
+ */
 void netErlDeviceSetRelayOutput(bool on) {
     digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
 }
 
+/**
+ * @brief Sensor-Poll – keine Sensoren vorhanden, setzt fault=false.
+ * @param now aktueller millis()-Wert (ungenutzt)
+ */
 void netErlDevicePollSensors(unsigned long) {
     // Keine Sensoren zu pollen
     runtime.fault = false;
 }
 
+/**
+ * @brief Befuellt STATE-Payload: nur Relais-Status, alle Sensorwerte auf UNGUELTIG.
+ *
+ * @param[out] payload Zeiger auf RelayComfortConfigStateReportPayload
+ * @param[out] size    Geschriebene Payload-Groesse in Bytes
+ * @note temp_01c=INT16_MIN, hum_01pct/lux=0xFFFF, motion/auto_flags=0
+ */
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     // Minimal-State: nur Relais-Status, keine Sensorwerte
     SmartHome::RelayComfortConfigStateReportPayload* p =
@@ -90,15 +108,18 @@ void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     if (size != nullptr) *size = sizeof(SmartHome::RelayComfortConfigStateReportPayload);
 }
 
+/** @brief Keine Auto-Light-Logik → immer 0. @return 0 */
 uint8_t netErlDeviceBuildAutoFlags() {
     // Keine Auto-Light-Logik → keine Flags
     return 0;
 }
 
+/** @brief Keine Sensoren → kein Fehler. @return false */
 bool netErlDeviceHasSensorFault() {
     return false;  // Keine Sensoren → kein Fehler
 }
 
+/** @brief Loggt aktuellen Relais-Status (1/0). */
 void netErlDeviceLogSnapshot() {
     logMsg("INFO", "snap r=%s", runtime.relay_1 ? "1" : "0");
 }

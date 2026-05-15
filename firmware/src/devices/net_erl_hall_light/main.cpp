@@ -1,19 +1,18 @@
-// =============================================================================
-// main.cpp – NET-ERL Hall Light: Flurlicht mit PIR + Lux (THIN)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_hall_light/main.cpp
-// Hardware:   ESP32-C3 + BME280 + VEML7700 + PIR + Relais
-// Pattern:    Thin-Wrapper – Hooks in NetErlRuntime.h eingehängt
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-15 (Thin-Pattern-Migration)
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-ERL Hall Light: Flurlicht mit PIR + Lux (Thin-Wrapper)
+ *
+ * @details Auto-Light-Logik mit PIR-Bewegungssensor und VEML7700-Luxsensor.
+ *          BME280 fuer Temperatur/Feuchte. Late-Lux: Auto-On-Entscheidung
+ *          wird verzoegert bis der erste Lux-Wert vorliegt.
+ *          Nachlauf wird NICHT durch erneute Bewegung verlaengert.
+ *
+ * Hardware:   ESP32-C3 + BME280 + VEML7700 + PIR + 1 Relais
+ * Pattern:    Thin-Wrapper – Hooks in NetErlRuntime.h eingehängt
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -74,6 +73,7 @@ namespace {
 // SENSOR-HILFSFUNKTIONEN (device-spezifisch)
 // =============================================================================
 namespace {
+    /** @brief Initialisiert BME280 an konfigurierter I2C-Adresse. @return true bei Erfolg */
     bool initBme280() {
         const uint8_t addrs[] = {(uint8_t)NET_ERL_BME280_ADDRESS};
         for (uint8_t a : addrs) {
@@ -83,11 +83,17 @@ namespace {
         return false;
     }
 
+    /** @brief Konfiguriert VEML7700: Gain 1x, Integrationszeit 100ms. */
     void konfVeml7700() {
         veml7700.setGain(VEML7700_GAIN_1);
         veml7700.setIntegrationTime(VEML7700_IT_100MS);
     }
 
+    /**
+     * @brief Initialisiert VEML7700 und merkt Zeitstempel der Bereitschaft.
+     * @param jetzt aktueller millis()-Wert
+     * @return true bei Erfolg
+     */
     bool initVeml7700(unsigned long jetzt) {
         if (!veml7700.begin()) return false;
         konfVeml7700();
@@ -100,6 +106,10 @@ namespace {
 // CUSTOM HOOKS (von NetErlRuntime.h aufgerufen)
 // =============================================================================
 
+/**
+ * @brief Initialisiert I2C-Bus, BME280, VEML7700 und PIR-Pin.
+ * Wird einmalig von NetErlRuntime beim Boot aufgerufen.
+ */
 void netErlDeviceInit() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
 
@@ -112,15 +122,24 @@ void netErlDeviceInit() {
     pinMode(PIN_PIR, INPUT);
 }
 
+/** @brief Setzt alle Sensorwerte auf UNGUELTIG (INT16_MIN / 0xFFFF). */
 void netErlDeviceResetSensorDefaults() {
     temp_01c = INT16_MIN; hum_01pct = 0xFFFFU; lux = 0xFFFFU;
 }
 
+/**
+ * @brief Liest PIR-Sensor (digitalRead) und aktualisiert pir_raw.
+ * @return true wenn Bewegung erkannt (HIGH)
+ */
 bool netErlDeviceReadPresence() {
     pir_raw = (digitalRead(PIN_PIR) == HIGH);
     return pir_raw;
 }
 
+/**
+ * @brief Setzt Relais-Ausgang und optionale Status-LED.
+ * @param on true = Relais aktiv
+ */
 void netErlDeviceSetRelayOutput(bool on) {
     digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
 #if PIN_STATUS_LED >= 0
@@ -128,6 +147,24 @@ void netErlDeviceSetRelayOutput(bool on) {
 #endif
 }
 
+/**
+ * @brief Periodische Sensormessung mit Recovery, Late-Lux und Delta-Detection.
+ *
+ * Ablauf:
+ * 1. Sample-Intervall prüfen (NET_ERL_ENV_SAMPLE_INTERVAL_MS)
+ * 2. Sensor-Recovery: ausgefallene Sensoren periodisch neu initialisieren
+ * 3. BME280: Temperatur + Feuchte lesen, unplausible Werte führen zu bme280_ok=false
+ * 4. VEML7700: Lux lesen, unplausible Werte führen zu veml7700_ok=false
+ * 5. Late-Lux: Wenn motion_aktiv && pending_auto_on_decision && Lux jetzt verfügbar:
+ *    - Bei lux <= Schwelle: Relais auto-einschalten (mit Race-Schutz)
+ *    - Bei lux > Schwelle: blocked_by_lux setzen
+ * 6. Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Änderung
+ *
+ * @param nowMs aktueller millis()-Wert
+ *
+ * @note Late-Lux-Race-Schutz: Master-CMD kann relay_auto_owned löschen.
+ *       Nur einschalten wenn relay_auto_owned noch true ODER master_bekannt==false.
+ */
 void netErlDevicePollSensors(unsigned long nowMs) {
     if ((nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     letztes_env_sample_ms = nowMs;
@@ -193,6 +230,11 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     }
 }
 
+/**
+ * @brief Befüllt RelayComfortConfigStateReportPayload mit aktuellen Sensorwerten.
+ * @param[out] payload Zeiger auf den Payload-Struct
+ * @param[out] size    Geschriebene Größe in Bytes
+ */
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     SmartHome::RelayComfortConfigStateReportPayload* p =
         static_cast<SmartHome::RelayComfortConfigStateReportPayload*>(payload);
@@ -211,6 +253,19 @@ void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     if (size != nullptr) *size = sizeof(SmartHome::RelayComfortConfigStateReportPayload);
 }
 
+/**
+ * @brief Baut Auto-Light-Flags fuer STATE-Report.
+ *
+ * Gesetzte Flags:
+ * - PRESENCE_SOURCE_AVAILABLE wenn PIR Bewegung meldet
+ * - LIGHT_VALUE_AVAILABLE wenn VEML7700 ok
+ * - LIGHT_GUARD_ENABLED (immer)
+ * - AUTO_RELAY_OWNED wenn Auto-Light das Relais steuert
+ * - BLOCKED_BY_LUX wenn zu hell fuer Auto-On
+ * - 0x10 (BLOCKED_BY_MISSING_LUX) wenn Lux-Wert noch fehlt
+ *
+ * @return Bitmaske der Auto-Flags
+ */
 uint8_t netErlDeviceBuildAutoFlags() {
     uint8_t f = 0;
     if (runtime.motion_aktiv) f |= SH_RELAY_COMFORT_FLAG_PRESENCE_SOURCE_AVAILABLE;
@@ -223,10 +278,12 @@ uint8_t netErlDeviceBuildAutoFlags() {
     return f;
 }
 
+/** @brief true wenn BME280 oder VEML7700 ausgefallen. @return Fehlerstatus */
 bool netErlDeviceHasSensorFault() {
     return !(bme280_ok && veml7700_ok);
 }
 
+/** @brief Loggt alle aktuellen Sensorwerte + Relais-Status (Snapshot). */
 void netErlDeviceLogSnapshot() {
     logMsg("INFO", "snap t=%d h=%u l=%u m=%s r=%s auto=%s bl=%s fa=%s",
         (int)temp_01c, hum_01pct, lux,
