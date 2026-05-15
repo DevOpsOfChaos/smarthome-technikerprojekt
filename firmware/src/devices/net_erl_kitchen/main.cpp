@@ -156,8 +156,9 @@ String htmlEscape(const String& s) {
         switch (c) { case '&': e += "&amp;"; break; case '<': e += "&lt;"; break; case '>': e += "&gt;"; break; case '"': e += "&quot;"; break; case '\'': e += "&#39;"; break; default: e += c; }
     } return e;
 }
-
+// c16 – Wert auf uint16-Bereich begrenzen (0-65535)
 uint16_t c16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
+// cH – Wert auf 0.1%-Feuchtebereich begrenzen (0-1000)
 uint16_t cH(long v) { return v < 0L ? 0U : v > 1000L ? 1000U : (uint16_t)v; }
 
 void logf(const char* l, const char* f, ...) {
@@ -185,8 +186,11 @@ bool isMaster(const uint8_t* m) { return runtime.master_mac_gueltig && m && memc
 const uint8_t* helloDst() { return runtime.master_mac_gueltig ? runtime.master_mac : BROADCAST_MAC; }
 void setReportInt(uint32_t s) { runtime.report_interval_s = s; runtime.state_interval_ms = s * 1000UL; }
 
+// mapAqi500 – ENS160-AQI (1-5) auf Skala 0-500 abbilden (0 = ungueltig)
 uint16_t mapAqi500(uint16_t r) { return (r >= 1 && r <= ENS160_AQI_MAX_BASIC) ? (uint16_t)(r * 100U) : 0U; }
+// encT – Temperatur in Kelvin * 64 als uint16 kodieren (fuer ENS160-Kompensation)
 uint16_t encT(float c) { return (uint16_t)((c + 273.15f) * 64.0f); }
+// encH – Relative Feuchte * 512 als uint16 kodieren (fuer ENS160-Kompensation)
 uint16_t encH(float h) { return (uint16_t)(h * 512.0f); }
 
 int writeEnsEnv(uint8_t a, float t, float h) {
@@ -482,12 +486,15 @@ void defSensor() {
     runtime.sensor.motion = false; runtime.sensor.fault = false;
 }
 
+// recovDue – Prueft ob ein erneuter Sensor-Wiederherstellungsversuch faellig ist (l==0 => immer)
 bool recovDue(unsigned long l, unsigned long j) { return l == 0 || (j - l) >= SENSOR_RECOVERY_RETRY_INTERVAL_MS; }
 void bmeRecov(unsigned long j) { if (runtime.bme_ok || !recovDue(runtime.letzter_bme_recovery_ms, j)) return; runtime.letzter_bme_recovery_ms = j; runtime.bme_ok = initBme(); }
 void luxRecov(unsigned long j) { if (runtime.lux_ok || !recovDue(runtime.letzter_lux_recovery_ms, j)) return; runtime.letzter_lux_recovery_ms = j; runtime.lux_ok = veml.begin(); if (runtime.lux_ok) konfVeml(); }
 void ensRecov(unsigned long j) { if (runtime.ens_ok || !recovDue(runtime.letzter_ens_recovery_ms, j)) return; runtime.letzter_ens_recovery_ms = j; runtime.ens_ok = initEns(); if (runtime.ens_ok) ens160->setMode(ENS160_OPMODE_STD); }
 
+// gasWarmupOk – BME680-Gassensor ausreichend eingelaufen (Zeit + gueltige Messungen)?
 bool gasWarmupOk(unsigned long j) { return (j - runtime.boot_ms) >= NET_ERL_BME680_GAS_WARMUP_MS && runtime.bme680_gueltige_messungen >= NET_ERL_BME680_GAS_WARMUP_MIN_READS; }
+// ensStale – ENS160-Messwerte veraltet weil letzter gueltiger Wert zu lange zurueckliegt?
 bool ensStale(unsigned long j) {
     if (!runtime.ens_ok || !ens160) return true;
     return runtime.letzter_ens_gueltig_ms > 0 && (j - runtime.letzter_ens_gueltig_ms) > NET_ERL_ENS160_STALE_TIMEOUT_MS;
