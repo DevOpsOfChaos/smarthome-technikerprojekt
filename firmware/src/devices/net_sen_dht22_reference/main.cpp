@@ -28,6 +28,9 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "MathUtils.h"
+using SmartHome::absDiffU16;
+using SmartHome::absDiffI16;
 
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 1
 void netSenDeviceSensorInit();
@@ -61,15 +64,6 @@ uint16_t clampToHum01pct(long value) {
     if (value < (long)HUM_01PCT_MIN) return HUM_01PCT_MIN;
     if (value > (long)HUM_01PCT_MAX) return HUM_01PCT_MAX;
     return (uint16_t)value;
-}
-
-// absDiffU16 – Absolute Differenz zweier uint16-Werte
-uint16_t absDiffU16(uint16_t a, uint16_t b) {
-    return a > b ? (uint16_t)(a - b) : (uint16_t)(b - a);
-}
-
-int16_t absDiffI16(int16_t a, int16_t b) {
-    return a > b ? (int16_t)(a - b) : (int16_t)(b - a);
 }
 }  // namespace
 
