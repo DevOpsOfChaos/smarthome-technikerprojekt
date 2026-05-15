@@ -284,7 +284,10 @@ void provisioningLog(const char* level, const char* message) {
 //   Bei Haengern >8s wird das Geraet automatisch zurueckgesetzt.
 //   Muss periodisch via esp_task_wdt_reset() zurueckgesetzt werden.
 void initialisiereTaskWatchdog() {
-    const esp_err_t initErr = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+    esp_task_wdt_config_t wdtConfig = {};
+    wdtConfig.timeout_ms = TASK_WDT_TIMEOUT_S * 1000;
+    wdtConfig.trigger_panic = true;
+    const esp_err_t initErr = esp_task_wdt_init(&wdtConfig);
     if (initErr != ESP_OK && initErr != ESP_ERR_INVALID_STATE) {
         logf("WARN", "Task-Watchdog Init fehlgeschlagen (err=%d)", (int)initErr);
         return;
@@ -708,7 +711,7 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
 #endif
 
 // ESP-NOW Send-Callback (Warnung bei Fehlschlag)
-void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
         logf("WARN", "ESP-NOW Versand fehlgeschlagen");
     }

@@ -119,6 +119,9 @@ using SmartHome::gasWarmupComplete;
 using SmartHome::sensorValueStale;
 using SmartHome::intervalElapsed;
 
+// Forward-Deklaration – wird weiter unten als globale Variable definiert
+extern SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
+
 // =============================================================================
 // KONSTANTEN
 // =============================================================================
@@ -149,7 +152,7 @@ constexpr uint32_t SNAPSHOT_LOG_INTERVAL_MS = NET_ERL_SNAPSHOT_LOG_INTERVAL_MS;
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
 constexpr const char* STORAGE_NS = NET_ERL_STORAGE_NS;
 constexpr uint16_t STORAGE_VERSION = 1U;
-constexpr uint16_t PERSISTED_MAGIC = NET_ERL_PERSISTED_MAGIC;
+constexpr uint32_t PERSISTED_MAGIC = NET_ERL_PERSISTED_MAGIC;
 
 static_assert(sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE, "DEVICE_ID passt nicht in SSID-Puffer");
 
@@ -288,17 +291,20 @@ String htmlEscape(const String& s) {
     } return e;
 }
 
-void logf(const char* l, const char* f, ...) {
+void logMsg(const char* l, const char* f, ...) {
     if (!DEBUG_LOKAL_AKTIV) return;
     char m[224]; va_list a; va_start(a, f); vsnprintf(m, sizeof(m), f, a); va_end(a);
     Serial.print("["); Serial.print(l); Serial.print("] "); Serial.println(m);
 }
 
 void initWdt() {
-    esp_err_t e = esp_task_wdt_init(NET_ERL_WDT_TIMEOUT_S, true);
-    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) { logf("WARN", "WDT init err=%d", (int)e); return; }
+    esp_task_wdt_config_t wdtConfig = {};
+    wdtConfig.timeout_ms = NET_ERL_WDT_TIMEOUT_S * 1000;
+    wdtConfig.trigger_panic = true;
+    esp_err_t e = esp_task_wdt_init(&wdtConfig);
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) { logMsg("WARN", "WDT init err=%d", (int)e); return; }
     e = esp_task_wdt_add(nullptr);
-    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) logf("WARN", "WDT add err=%d", (int)e);
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) logMsg("WARN", "WDT add err=%d", (int)e);
 }
 
 void provLog(const char* l, const char* m) {
@@ -323,7 +329,7 @@ void setRelay(bool an, const char* g) {
     netErlDeviceSetRelayOutput(an);
     runtime.relay_1 = an;
     netErlDeviceUpdateIndicators(an);
-    logf("INFO", "Relay %s (%s)", an ? "ON" : "OFF", g ? g : "?");
+    logMsg("INFO", "Relay %s (%s)", an ? "ON" : "OFF", g ? g : "?");
 }
 
 // =============================================================================
@@ -438,7 +444,7 @@ bool sendPacketOpt(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, co
     SmartHome::finalizePacketCrc(h, buf + SH_HEADER_SIZE);
     memcpy(buf, &h, sizeof(h));
     if (esp_now_send(z, buf, SH_HEADER_SIZE + plen) != ESP_OK) {
-        logf("WARN", "%s send fail", lb ? lb : "?"); return false;
+        logMsg("WARN", "%s send fail", lb ? lb : "?"); return false;
     }
     if (seq) *seq = s; return true;
 }
@@ -516,9 +522,9 @@ bool sendRelayEvent(uint8_t tr) {
 // =============================================================================
 
 void handleHelloAck(const uint8_t* s, const SmartHome::HelloAckPayload& p) {
-    if (p.ack_status != SH_ACK_OK) { logf("WARN", "HELLO_ACK status=%d", (int)p.ack_status); return; }
-    if (!runtime.master_mac_gueltig) { logf("WARN", "HELLO_ACK: master MAC nicht gueltig"); return; }
-    if (!isMaster(s)) { logf("WARN", "HELLO_ACK: Absender ist nicht Master"); return; }
+    if (p.ack_status != SH_ACK_OK) { logMsg("WARN", "HELLO_ACK status=%d", (int)p.ack_status); return; }
+    if (!runtime.master_mac_gueltig) { logMsg("WARN", "HELLO_ACK: master MAC nicht gueltig"); return; }
+    if (!isMaster(s)) { logMsg("WARN", "HELLO_ACK: Absender ist nicht Master"); return; }
     runtime.master_bekannt = true; runtime.state_report_offen = true;
     ensurePeer(runtime.master_mac);
 }
@@ -628,15 +634,15 @@ void onEspNowRcv(const esp_now_recv_info_t* i, const uint8_t* d, int l) { if (i)
 void onEspNowRcv(const uint8_t* s, const uint8_t* d, int l) { handleEspNow(s, d, l); }
 #endif
 
-void onEspNowSent(const uint8_t*, esp_now_send_status_t s) {
-    if (s != ESP_NOW_SEND_SUCCESS) logf("WARN", "ESP-NOW send fail");
+void onEspNowSent(const wifi_tx_info_t*, esp_now_send_status_t s) {
+    if (s != ESP_NOW_SEND_SUCCESS) logMsg("WARN", "ESP-NOW send fail");
 }
 
 void initFunk() {
     if (runtime.funk_bereit || runtime.setup_mode) return;
     WiFi.mode(WIFI_STA); WiFi.disconnect(); WiFi.setSleep(false);
     esp_wifi_set_channel(WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
-    if (esp_now_init() != ESP_OK) { logf("WARN", "ESP-NOW init fail"); return; }
+    if (esp_now_init() != ESP_OK) { logMsg("WARN", "ESP-NOW init fail"); return; }
     esp_now_register_send_cb(onEspNowSent);
     esp_now_register_recv_cb(onEspNowRcv);
     runtime.funk_bereit = true; ensurePeer(BROADCAST_MAC);
@@ -754,12 +760,12 @@ void setup() {
         &runtime.restart_requested_at_ms, runtime.setup_ap_ssid, sizeof(runtime.setup_ap_ssid),
         &provisioningHandler, provLog);
 
-    if (!runtime.provisioning_bereit) { logf("WARN", "Prov init fail"); return; }
+    if (!runtime.provisioning_bereit) { logMsg("WARN", "Prov init fail"); return; }
 
     setReportInt(nodeProvisioning.sanitizeStatusSendInterval(runtime.report_interval_s));
     runtime.stored_sensor_send_interval_s = nodeProvisioning.sanitizeSensorSendInterval(runtime.stored_sensor_send_interval_s);
-    logf("INFO", "%s v%s (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
-    logf("INFO", "%s %s %s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
+    logMsg("INFO", "%s v%s (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
+    logMsg("INFO", "%s %s %s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
 
     if (!nodeProvisioning.hasStoredMasterMac()) { nodeProvisioning.enterSetupMode(); return; }
     initFunk(); sendHello();

@@ -102,8 +102,8 @@ bool istRegenZustand(uint16_t raw, bool bisherRegen) {
 // device_init_io – GPIO-Initialisierung: ADC-Pin, erste Messung, Log
 void device_init_io() {
     pinMode(BAT_SEN_RAIN_SIGNAL_PIN, INPUT);
-    adcAttachPin(BAT_SEN_RAIN_SIGNAL_PIN);
-    analogSetPinAttenuation(BAT_SEN_RAIN_SIGNAL_PIN, ADC_11db);
+    // ADC-Pin konfigurieren (ESP32 Arduino 3.x: analogReadPin nicht mehr nötig)
+    // Attenuation wird in ESP32 Arduino 3.x automatisch gesetzt
 
     rain_raw = leseRainRaw();
     regen_erkannt = istRegenZustand(rain_raw, false);

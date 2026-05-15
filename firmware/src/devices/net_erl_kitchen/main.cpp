@@ -45,6 +45,13 @@
 #define NET_ERL_DEVICE_HAS_CUSTOM_HOOKS 1
 
 // =============================================================================
+// RUNTIME (Baukasten Block 3 – liefert setup() und loop())
+// =============================================================================
+#include "../../basetypes/net_erl/NetErlRuntime.h"
+
+using SmartHome::absDiffU32;
+
+// =============================================================================
 // DEVICE-SPEZIFISCHE OBJEKTE
 // =============================================================================
 
@@ -134,14 +141,14 @@ void netErlDeviceInit() {
     Wire.setTimeOut(I2C_TIMEOUT_MS);
 
     bme_ok = initBme();
-    if (!bme_ok) logf("WARN", "BME680 init fail");
+    if (!bme_ok) logMsg("WARN", "BME680 init fail");
 
-    if (!veml.begin()) { lux_ok = false; logf("WARN", "VEML7700 init fail"); }
+    if (!veml.begin()) { lux_ok = false; logMsg("WARN", "VEML7700 init fail"); }
     else { lux_ok = true; konfVeml(); }
 
     ens_ok = initEns();
-    if (!ens_ok) { logf("WARN", "ENS160 init fail"); }
-    else if (!ens160->setMode(ENS160_OPMODE_STD)) { ens_ok = false; logf("WARN", "ENS160 mode fail"); }
+    if (!ens_ok) { logMsg("WARN", "ENS160 init fail"); }
+    else if (!ens160->setMode(ENS160_OPMODE_STD)) { ens_ok = false; logMsg("WARN", "ENS160 mode fail"); }
 
     pinMode(PIN_LD2410_OUT, INPUT);
 }
@@ -202,20 +209,20 @@ void netErlDevicePollSensors(unsigned long nowMs) {
             pressure_pa = (uint32_t)lroundf(p);
             if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++;
             gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
-        } else { bme_ok = false; logf("WARN", "BME680 unplausibel"); }
+        } else { bme_ok = false; logMsg("WARN", "BME680 unplausibel"); }
     }
 
     // VEML7700 lesen
     if (lux_ok) {
         float l = veml.readLux();
         if (!isnan(l) && l >= 0) lux = clampToU16((long)lroundf(l));
-        else { lux_ok = false; logf("WARN", "VEML7700 read fail"); }
+        else { lux_ok = false; logMsg("WARN", "VEML7700 read fail"); }
     }
 
     // ENS160 Kompensation schreiben
     if (ens_ok && ens160 && bme_ok) {
         int r = writeEnsEnv(ens160_adresse, bme680.temperature, bme680.humidity);
-        if (r != 0) logf("WARN", "ENS160 comp fail err=%d", r);
+        if (r != 0) logMsg("WARN", "ENS160 comp fail err=%d", r);
     }
 
     // ENS160 Messwerte lesen
@@ -305,7 +312,7 @@ bool netErlDeviceHasSensorFault() {
 }
 
 void netErlDeviceLogSnapshot() {
-    logf("INFO", "snap t=%d h=%u l=%u p=%lu g=%lu a=%u tv=%u ec=%u m=%s r=%s",
+    logMsg("INFO", "snap t=%d h=%u l=%u p=%lu g=%lu a=%u tv=%u ec=%u m=%s r=%s",
         (int)temp_01c, hum_01pct, lux,
         (unsigned long)pressure_pa, (unsigned long)gas_ohm,
         aqi, tvoc_ppb, eco2_ppm,
@@ -319,8 +326,3 @@ bool netErlDeviceReadButton() {
     return digitalRead(PIN_BUTTON_1) == HIGH;
 #endif
 }
-
-// =============================================================================
-// RUNTIME (Baukasten Block 3 – liefert setup() und loop())
-// =============================================================================
-#include "../../basetypes/net_erl/NetErlRuntime.h"

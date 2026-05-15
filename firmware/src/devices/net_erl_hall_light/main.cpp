@@ -42,6 +42,11 @@
 #define NET_ERL_DEVICE_HAS_CUSTOM_HOOKS 1
 
 // =============================================================================
+// RUNTIME (Baukasten Block 3 – liefert setup() und loop())
+// =============================================================================
+#include "../../basetypes/net_erl/NetErlRuntime.h"
+
+// =============================================================================
 // DEVICE-SPEZIFISCHE OBJEKTE
 // =============================================================================
 
@@ -99,10 +104,10 @@ void netErlDeviceInit() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
 
     bme280_ok = initBme280();
-    if (!bme280_ok) logf("WARN", "BME280 init fail");
+    if (!bme280_ok) logMsg("WARN", "BME280 init fail");
 
     veml7700_ok = initVeml7700(millis());
-    if (!veml7700_ok) logf("WARN", "VEML7700 init fail");
+    if (!veml7700_ok) logMsg("WARN", "VEML7700 init fail");
 
     pinMode(PIN_PIR, INPUT);
 }
@@ -142,14 +147,14 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         if (!isnan(t) && !isnan(h) && h >= 0 && h <= 100) {
             temp_01c = (int16_t)lroundf(t * 10.0f);
             hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
-        } else { bme280_ok = false; logf("WARN", "BME280 unplausibel"); }
+        } else { bme280_ok = false; logMsg("WARN", "BME280 unplausibel"); }
     }
 
     // VEML7700 lesen
     if (veml7700_ok) {
         float l = veml7700.readLux();
         if (!isnan(l) && l >= 0) lux = clampToU16((long)lroundf(l));
-        else { veml7700_ok = false; logf("WARN", "VEML7700 read fail"); }
+        else { veml7700_ok = false; logMsg("WARN", "VEML7700 read fail"); }
     }
 
     // Status aktualisieren
@@ -218,15 +223,10 @@ bool netErlDeviceHasSensorFault() {
 }
 
 void netErlDeviceLogSnapshot() {
-    logf("INFO", "snap t=%d h=%u l=%u m=%s r=%s auto=%s bl=%s fa=%s",
+    logMsg("INFO", "snap t=%d h=%u l=%u m=%s r=%s auto=%s bl=%s fa=%s",
         (int)temp_01c, hum_01pct, lux,
         runtime.motion_aktiv ? "1" : "0", runtime.relay_1 ? "1" : "0",
         runtime.relay_auto_owned ? "1" : "0",
         runtime.blocked_by_lux ? "1" : "0",
         runtime.fault ? "1" : "0");
 }
-
-// =============================================================================
-// RUNTIME (Baukasten Block 3 – liefert setup() und loop())
-// =============================================================================
-#include "../../basetypes/net_erl/NetErlRuntime.h"

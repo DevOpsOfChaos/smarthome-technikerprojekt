@@ -1302,7 +1302,7 @@ void logEspNowSendStatus(const uint8_t* mac, esp_now_send_status_t status) {
 }
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
-void onEspNowSent(const esp_now_send_info_t* info, esp_now_send_status_t status) {
+void onEspNowSent(const wifi_tx_info_t* info, esp_now_send_status_t status) {
     if (info == nullptr) return;
     logEspNowSendStatus(info->des_addr, status);
 }
@@ -1966,8 +1966,10 @@ void gibStartmeldungAus() {
     Serial.println("================================");
 }
 
+}  // namespace
+
 // =============================================================================
-// ARDUINO – setup() und loop()
+// ARDUINO ENTRY POINTS – setup() und loop() (globaler Scope)
 // =============================================================================
 
 void setup() {

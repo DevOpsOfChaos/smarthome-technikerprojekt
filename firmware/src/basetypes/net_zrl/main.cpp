@@ -2378,7 +2378,7 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
 }
 #endif
 
-void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
         logf("WARN", "ESP-NOW Versand fehlgeschlagen");
     }
@@ -2446,8 +2446,10 @@ void initialisierePin(int pin, uint8_t mode) {
     if (pin >= 0) pinMode(pin, mode);
 }
 
+}  // namespace
+
 // =============================================================================
-// SETUP / LOOP – Arduino-Hauptroutinen
+// ARDUINO ENTRY POINTS – setup() und loop() (globaler Scope)
 // =============================================================================
 
 void setup() {

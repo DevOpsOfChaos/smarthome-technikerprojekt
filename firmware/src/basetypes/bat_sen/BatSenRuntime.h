@@ -52,6 +52,12 @@
 #include "../../../lib/sh_protocol/src/Protocol.h"
 
 // =============================================================================
+// FORWARD DECLARATIONS – nodeProvisioning (used before definition)
+// =============================================================================
+
+extern SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
+
+// =============================================================================
 // KONSTANTEN – Debug, Version, RTC-Speicher, Broadcast, Custom-Hooks
 // =============================================================================
 
@@ -775,7 +781,7 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
 }
 #endif
 
-void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
         logf("WARN", "ESP-NOW Versand fehlgeschlagen");
     }

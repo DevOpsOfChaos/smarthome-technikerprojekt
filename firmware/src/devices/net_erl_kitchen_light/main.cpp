@@ -41,6 +41,11 @@
 #define NET_ERL_DEVICE_HAS_CUSTOM_HOOKS 1
 
 // =============================================================================
+// RUNTIME (Baukasten Block 3 – liefert setup() und loop())
+// =============================================================================
+#include "../../basetypes/net_erl/NetErlRuntime.h"
+
+// =============================================================================
 // CUSTOM HOOKS (von NetErlRuntime.h aufgerufen)
 // =============================================================================
 
@@ -95,10 +100,5 @@ bool netErlDeviceHasSensorFault() {
 }
 
 void netErlDeviceLogSnapshot() {
-    logf("INFO", "snap r=%s", runtime.relay_1 ? "1" : "0");
+    logMsg("INFO", "snap r=%s", runtime.relay_1 ? "1" : "0");
 }
-
-// =============================================================================
-// RUNTIME (Baukasten Block 3 – liefert setup() und loop())
-// =============================================================================
-#include "../../basetypes/net_erl/NetErlRuntime.h"
