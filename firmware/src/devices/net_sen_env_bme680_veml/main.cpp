@@ -37,6 +37,18 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "MathUtils.h"
+#include "SensorUtils.h"
+
+using SmartHome::clampToU16;
+using SmartHome::clampHum01pct;
+using SmartHome::absDiffU16;
+using SmartHome::absDiffI16;
+using SmartHome::valueChangedSignificantU32;
+using SmartHome::updateAndCheckU32;
+using SmartHome::recoveryIsDue;
+using SmartHome::sensorValueStale;
+using SmartHome::gasWarmupComplete;
 
 #ifndef ENS160_REG_TEMP_IN
 #define ENS160_REG_TEMP_IN 0x13
@@ -82,36 +94,18 @@ ErwState erwState = {NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_GAS_OHM_UNGUELTIG,
 bool erwChanged = true;
 
 // -- Hilfsfunktionen --
-// c16 – Wert auf uint16-Bereich begrenzen (0-65535)
-uint16_t c16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
-// cH – Wert auf 0.1%-Feuchtebereich begrenzen (0-1000)
-uint16_t cH(long v) { return v < 0L ? 0U : v > 1000L ? 1000U : (uint16_t)v; }
-// ad16 – Absolute Differenz zweier uint16-Werte
-uint16_t ad16(uint16_t a, uint16_t b) { return a > b ? a - b : b - a; }
-// adI16 – Absolute Differenz zweier int16-Werte
-int16_t adI16(int16_t a, int16_t b) { return a > b ? a - b : b - a; }
-// chkU32 – Prueft ob sich Wert n gegenueber alt a signifikant geaendert hat (>= delta)
-bool chkU32(uint32_t a, uint32_t n, uint32_t inv, uint32_t d) {
-    if (a == n) return false;
-    if (a == inv || n == inv) return true;
-    return (a > n ? a - n : n - a) >= d;
-}
-// setU32 – Wert setzen + Aenderung erkennen (analog chkU32, schreibt direkt)
-bool setU32(uint32_t* z, uint32_t n, uint32_t inv, uint32_t d) {
-    if (!z) return false; bool c = chkU32(*z, n, inv, d); *z = n; return c;
-}
-
 // gasWarmupOk – BME680-Gassensor ausreichend warmgelaufen?
 bool gasWarmupOk(unsigned long j) {
-    return (j - bootMs) >= NET_SEN_ENV_BME680_GAS_WARMUP_MS && bmeReads >= NET_SEN_ENV_BME680_GAS_WARMUP_MIN_READS;
+    return gasWarmupComplete(bootMs, j, NET_SEN_ENV_BME680_GAS_WARMUP_MS, bmeReads, NET_SEN_ENV_BME680_GAS_WARMUP_MIN_READS);
 }
 // ensWarmupOk – ENS160-Warmup-Phase abgeschlossen?
-bool ensWarmupOk(unsigned long j) { return (j - bootMs) >= NET_SEN_ENV_ENS160_WARMUP_MS; }
+bool ensWarmupOk(unsigned long j) {
+    return (j - bootMs) >= NET_SEN_ENV_ENS160_WARMUP_MS;
+}
 // ensStale – ENS160-Messwerte veraltet?
 bool ensStale(unsigned long j) {
     if (!ensWarmupOk(j)) return false;
-    if (!ensOk || !ens) return true;
-    return lastEnsValid == 0UL || (j - lastEnsValid) > NET_SEN_ENV_ENS160_STALE_TIMEOUT_MS;
+    return sensorValueStale(ensOk && (ens != nullptr), lastEnsValid, j, NET_SEN_ENV_ENS160_STALE_TIMEOUT_MS);
 }
 // mapAqi500 – ENS160-AQI (1-5) auf Skala 0-500 abbilden (0 = ungueltig)
 uint16_t mapAqi500(uint16_t r) { return (r >= 1U && r <= ENS160_AQI_MAX_BASIC) ? (uint16_t)(r * 100U) : 0U; }
@@ -219,7 +213,7 @@ bool netSenDeviceSensorPoll(int16_t* t01c, uint16_t* h01p, uint16_t* lux, uint8_
         bmeT = sensorBme680.temperature; bmeH = sensorBme680.humidity;
         float p = sensorBme680.pressure; uint32_t g = sensorBme680.gas_resistance;
         if (isfinite(bmeT) && isfinite(bmeH) && isfinite(p) && bmeH >= 0 && bmeH <= 100 && p >= 30000 && p <= 110000) {
-            nT = (int16_t)lroundf(bmeT * 10.0f); nH = cH((long)lroundf(bmeH * 10.0f));
+            nT = (int16_t)lroundf(bmeT * 10.0f); nH = clampHum01pct((long)lroundf(bmeH * 10.0f));
             nP = (uint32_t)lroundf(p); bv = true;
             if (bmeReads < 255) bmeReads++;
             if (gasWarmupOk(j) && g > 0) { nG = g; if (!gasWarmupLogged) { logf("INFO", "Gas warmup done"); gasWarmupLogged = true; } }
@@ -229,7 +223,7 @@ bool netSenDeviceSensorPoll(int16_t* t01c, uint16_t* h01p, uint16_t* lux, uint8_
     // VEML7700 lesen
     if (vemlOk && (j - bootMs) >= NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS) {
         float l = sensorVeml.readLux();
-        if (isfinite(l) && l >= 0) { nL = c16((long)lroundf(l)); vv = true; }
+        if (isfinite(l) && l >= 0) { nL = clampToU16((long)lroundf(l)); vv = true; }
         else logVeml(j, "Lux unplausibel");
     } else if (!vemlOk) logVeml(j, "Sensor nicht init");
 
@@ -247,8 +241,8 @@ bool netSenDeviceSensorPoll(int16_t* t01c, uint16_t* h01p, uint16_t* lux, uint8_
     if (!ensValid && ensStale(j)) { nA = NET_SEN_AIR_METRIC_UNGUELTIG; nTv = NET_SEN_AIR_METRIC_UNGUELTIG; nEc = NET_SEN_AIR_METRIC_UNGUELTIG; }
 
     // Hysterese Extended State
-    bool eChg = setU32(&erwState.pp, nP, NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_ENV_BME680_VEML_PRESSURE_DELTA_PA);
-    eChg = setU32(&erwState.go, nG, NET_SEN_GAS_OHM_UNGUELTIG, NET_SEN_ENV_BME680_VEML_GAS_DELTA_OHM) || eChg;
+    bool eChg = updateAndCheckU32(&erwState.pp, nP, NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_ENV_BME680_VEML_PRESSURE_DELTA_PA);
+    eChg = updateAndCheckU32(&erwState.go, nG, NET_SEN_GAS_OHM_UNGUELTIG, NET_SEN_ENV_BME680_VEML_GAS_DELTA_OHM) || eChg;
     erwChanged = (eChg) || erwChanged;  // keep mark
 
     bool ef = ensStale(j);
@@ -261,7 +255,7 @@ bool netSenDeviceSensorPoll(int16_t* t01c, uint16_t* h01p, uint16_t* lux, uint8_
              erwState.aqi, erwState.tvoc, erwState.eco2, nF ? "true" : "false");
         lastSnap = j;
     }
-    return adI16(nT, vT) >= NET_SEN_ENV_BME680_VEML_TEMP_DELTA_01C ||
-           ad16(nH, vH) >= NET_SEN_ENV_BME680_VEML_HUM_DELTA_01PCT ||
-           ad16(nL, vL) >= NET_SEN_ENV_BME680_VEML_LUX_DELTA || vM != 0U || nF != vF;
+    return absDiffI16(nT, vT) >= NET_SEN_ENV_BME680_VEML_TEMP_DELTA_01C ||
+           absDiffU16(nH, vH) >= NET_SEN_ENV_BME680_VEML_HUM_DELTA_01PCT ||
+           absDiffU16(nL, vL) >= NET_SEN_ENV_BME680_VEML_LUX_DELTA || vM != 0U || nF != vF;
 }
