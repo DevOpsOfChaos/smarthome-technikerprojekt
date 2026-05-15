@@ -1,6 +1,34 @@
+// =============================================================================
+// PinConfig.h – GPIO-Pin-Mapping fuer NET-ERL Kitchen
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/devices/net_erl_kitchen/PinConfig.h
+// Hardware:   ESP32-C3
+//
+// === EINSATZZWECK ===
+// [HIER EINTRAGEN: Kuechenlicht mit Radar-Praesenz und Luftqualitaet]
+// === EINSATZZWECK ===
+//
+// Pin-Belegung:
+//   I2C SDA:      GPIO1  – BME680 (0x76), VEML7700 (0x10), ENS160 (0x52)
+//   I2C SCL:      GPIO0
+//   Button:       GPIO6  – active-LOW, 40ms Debounce, 5s Hold = Setup
+//   LD2410 OUT:   GPIO7  – HIGH = Praesenz erkannt
+//   NeoPixel:     GPIO8  – 17 LEDs, GRB, 800kHz
+//   Relais:       GPIO10 – active-HIGH
+//   LD2410 UART:  GPIO20 (RX), GPIO21 (TX)
+//   Status-LED:   -1    – nicht bestueckt
+//
+// Setup-Button = gleicher Pin wie Button (GPIO6, nur langes Halten)
+// Setup-LED = -1 (keine separate LED fuer Setup)
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+// =============================================================================
+
 #pragma once
 
-// Pinlinie aus dem erprobten Kitchen-Aufbau.
 #define PIN_SENSOR_SDA 1
 #define PIN_SENSOR_SCL 0
 #define PIN_BUTTON_1 6
@@ -11,12 +39,10 @@
 #define PIN_LD2410_UART_TX 21
 
 #define LED_RING_COUNT 17
-
 #define BUTTON_1_ACTIVE_LOW 1
 #define RELAY_1_ACTIVE_HIGH 1
 #define PIN_STATUS_LED -1
 
-// Setup nutzt denselben Button nur bei langem Halten.
 #define SETUP_BUTTON_PIN PIN_BUTTON_1
 #define SETUP_BUTTON_ACTIVE_LOW BUTTON_1_ACTIVE_LOW
 #define SETUP_BUTTON_HOLD_MS 5000UL

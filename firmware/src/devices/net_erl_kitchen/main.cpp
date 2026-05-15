@@ -1,3 +1,33 @@
+// =============================================================================
+// main.cpp – NET-ERL Kitchen: Kuechenlicht mit Radar + Luftqualitaet
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/devices/net_erl_kitchen/main.cpp
+// Hardware:   ESP32-C3 + BME680 + VEML7700 + ENS160 + LD2410 + NeoPixel + Relais
+//
+// === EINSATZZWECK ===
+// [HIER EINTRAGEN: Kuechen-Arbeitslicht mit Praesenz- und Luftqualitaetsueberwachung]
+// === EINSATZZWECK ===
+//
+// Pin-Belegung (siehe PinConfig.h):
+//   I2C:       SDA=GPIO1, SCL=GPIO0 (BME680 0x76, VEML7700 0x10, ENS160 0x52)
+//   LD2410:    OUT=GPIO7 (HIGH=Praesenz)
+//   Button:    GPIO6 (active-LOW, 40ms Debounce)
+//   NeoPixel:  GPIO8 (17 LEDs, folgen Relais)
+//   Relais:    GPIO10 (active-HIGH)
+//
+// Besonderheiten:
+//   - LD2410 Radar (digital OUT, kein UART-Parsing)
+//   - NeoPixel-Ring als Relais-Anzeige
+//   - I2C Takt = 10000Hz (langsam, stabil)
+//   - STATE via ExtendedRelayComfortGasConfigStateReportPayload
+//   - Sensor-Maske: THLPGAMXXX, Input-Maske: BXXXX
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+// =============================================================================
+
 #include <Arduino.h>
 #include <ShNodeProvisioning.h>
 #include <WiFi.h>
@@ -5,7 +35,6 @@
 #include <esp_now.h>
 #include <esp_task_wdt.h>
 #include <esp_wifi.h>
-#include <stdarg.h>
 #include <string.h>
 #include <math.h>
 #include <Adafruit_BME680.h>
@@ -17,18 +46,6 @@
 #define ENS160_REG_TEMP_IN 0x13
 #endif
 
-#if __has_include(<esp_arduino_version.h>)
-  #include <esp_arduino_version.h>
-#endif
-
-#if __has_include(<esp_idf_version.h>)
-  #include <esp_idf_version.h>
-#endif
-
-#ifndef ESP_ARDUINO_VERSION_MAJOR
-  #define ESP_ARDUINO_VERSION_MAJOR 2
-#endif
-
 #include "DeviceConfig.h"
 #include "PinConfig.h"
 #include "../../basetypes/net_erl/NetErlProvisioning.h"
@@ -36,6 +53,10 @@
 #include "../../../include/ProjectVersion.h"
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 #include "../../../lib/sh_protocol/src/Protocol.h"
+
+// =============================================================================
+// KONSTANTEN
+// =============================================================================
 
 constexpr bool DEBUG_LOKAL_AKTIV = (NET_ERL_DEBUG_ENABLED != 0) && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "NET-ERL";
@@ -45,7 +66,7 @@ const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 constexpr char DEVICE_ID[] = NET_ERL_DEVICE_ID;
 constexpr char DEVICE_NAME[] = NET_ERL_DEVICE_NAME;
 constexpr char FW_VARIANT[] = NET_ERL_FW_VARIANT;
-constexpr uint16_t DEVICE_CAPS = (uint16_t)NET_ERL_DEVICE_CAPS;
+constexpr uint16_t DEVICE_CAPS = NET_ERL_DEVICE_CAPS;
 constexpr uint8_t DEVICE_CONTROL_MODE = NET_ERL_DEVICE_CONTROL_MODE;
 constexpr uint8_t DEVICE_CONFIG_PROFILE = NET_ERL_DEVICE_CONFIG_PROFILE;
 constexpr uint8_t DEVICE_REPORTING_MODE = NET_ERL_DEVICE_REPORTING_MODE;
@@ -58,17 +79,14 @@ constexpr unsigned long LOOP_INTERVAL_MS = NET_ERL_LOOP_INTERVAL_MS;
 constexpr unsigned long SENSOR_RECOVERY_RETRY_INTERVAL_MS = NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS;
 constexpr uint32_t MIN_REPORT_INTERVAL_S = NET_ERL_MIN_REPORT_INTERVAL_S;
 constexpr uint32_t MAX_REPORT_INTERVAL_S = NET_ERL_MAX_REPORT_INTERVAL_S;
-constexpr uint32_t DEFAULT_STORED_SENSOR_SEND_INTERVAL_S = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
-constexpr uint32_t BOOT_COUNTER_PROTOCOL_PLACEHOLDER = NET_ERL_BOOT_COUNTER;
+constexpr uint32_t BOOT_COUNTER = NET_ERL_BOOT_COUNTER;
 
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
-constexpr const char* NET_ERL_KITCHEN_STORAGE_NAMESPACE = "net_erl_kit";
-constexpr const char* STORAGE_KEY_KITCHEN_SETUP = "kitchen_cfg_v1";
-static_assert(
-    sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
-    "NET_ERL_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
-constexpr uint32_t NET_ERL_KITCHEN_SETUP_MAGIC = 0x4B544331UL;
-constexpr uint16_t NET_ERL_KITCHEN_SETUP_VERSION = 1U;
+constexpr const char* STORAGE_NS = "net_erl_kit";
+constexpr const char* STORAGE_KEY = "kitchen_cfg_v1";
+static_assert(sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE, "DEVICE_ID passt nicht in SSID-Puffer");
+constexpr uint32_t MAGIC = 0x4B544331UL;
+constexpr uint16_t STORAGE_VERSION = 1U;
 constexpr uint32_t PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint32_t GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t AIR_METRIC_UNGUELTIG = 0xFFFFU;
@@ -77,1235 +95,478 @@ constexpr uint8_t LED_RING_HELLIGKEIT = 24U;
 constexpr uint32_t TASK_WDT_TIMEOUT_S = 15UL;
 constexpr uint16_t I2C_TIMEOUT_MS = 50U;
 
+// =============================================================================
+// GLOBALE OBJEKTE
+// =============================================================================
+
 Adafruit_BME680 bme680;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
 ScioSense_ENS160 ens160Addr52(NET_ERL_ENS160_PRIMARY_ADDRESS);
 ScioSense_ENS160 ens160Addr53(NET_ERL_ENS160_FALLBACK_ADDRESS);
 ScioSense_ENS160* ens160 = nullptr;
-Adafruit_NeoPixel ledRing((uint16_t)LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800);
+
+// =============================================================================
+// STRUKTUREN – SensorState, KitchenRuntime, Persistenz
+// =============================================================================
 
 struct SensorState {
-    int16_t temp_01c;
-    uint16_t hum_01pct;
-    uint16_t lux;
-    uint32_t pressure_pa;
-    uint32_t gas_ohm;
-    uint16_t aqi;
-    uint16_t tvoc_ppb;
-    uint16_t eco2_ppm;
-    bool motion;
-    bool fault;
+    int16_t temp_01c; uint16_t hum_01pct; uint16_t lux;
+    uint32_t pressure_pa; uint32_t gas_ohm; uint16_t aqi;
+    uint16_t tvoc_ppb; uint16_t eco2_ppm; bool motion; bool fault;
 };
 
 struct KitchenRuntime {
-    bool provisioning_bereit;
-    bool setup_mode;
-    bool setup_ap_aktiv;
-    bool restart_pending;
-    bool funk_bereit;
-    bool motion_aktiv;
-    bool relay_1;
-    bool fault;
-    bool bme_ok;
-    bool lux_ok;
-    bool ens_ok;
-    bool ld2410_raw;
-    bool button_raw_active;
-    bool button_stable_active;
-    bool button_last_stable_active;
-    bool ring_initialized;
-    bool relay_auto_owned;
-    bool blocked_by_lux;
-    bool pending_auto_on_decision;
-    uint8_t bme680_adresse;
-    uint8_t ens160_adresse;
-    uint8_t pending_motion_event_state;
-    unsigned long restart_requested_at_ms;
-    unsigned long letztes_hello_ms;
-    unsigned long letzter_heartbeat_ms;
-    unsigned long letzter_state_ms;
-    unsigned long letztes_sensor_poll_ms;
-    unsigned long letztes_env_sample_ms;
-    unsigned long letzter_bme_recovery_ms;
-    unsigned long letzter_lux_recovery_ms;
-    unsigned long letzter_ens_recovery_ms;
-    unsigned long letztes_snapshot_log_ms;
-    unsigned long boot_ms;
-    unsigned long letzter_ens_gueltig_ms;
-    unsigned long button_changed_at_ms;
-    unsigned long button_pressed_at_ms;
-    unsigned long letzte_motion_ms;
-    unsigned long state_interval_ms;
-    uint8_t bme680_gueltige_messungen;
-    uint8_t master_mac[6];
-    uint8_t naechste_seq;
-    bool master_bekannt;
-    bool master_mac_gueltig;
-    bool state_report_offen;
-    uint32_t report_interval_s;
-    // Wird von der gemeinsamen Node-Basis gespeichert;
-    // Kitchen nutzt fuer STATE report_interval_s.
-    uint32_t stored_sensor_send_interval_s;
-    uint16_t auto_on_lux_threshold;
-    uint16_t auto_off_delay_s;
+    bool provisioning_bereit, setup_mode, setup_ap_aktiv, restart_pending, funk_bereit;
+    bool motion_aktiv, relay_1, fault, bme_ok, lux_ok, ens_ok, ld2410_raw;
+    bool button_raw_active, button_stable_active, button_last_stable_active;
+    bool ring_initialized, relay_auto_owned, blocked_by_lux, pending_auto_on_decision;
+    uint8_t bme680_adresse, ens160_adresse, pending_motion_event_state;
+    unsigned long restart_requested_at_ms, letztes_hello_ms, letzter_heartbeat_ms, letzter_state_ms;
+    unsigned long letztes_sensor_poll_ms, letztes_env_sample_ms;
+    unsigned long letzter_bme_recovery_ms, letzter_lux_recovery_ms, letzter_ens_recovery_ms;
+    unsigned long letztes_snapshot_log_ms, boot_ms, letzter_ens_gueltig_ms;
+    unsigned long button_changed_at_ms, button_pressed_at_ms, letzte_motion_ms, state_interval_ms;
+    uint8_t bme680_gueltige_messungen, master_mac[6], naechste_seq;
+    bool master_bekannt, master_mac_gueltig, state_report_offen;
+    uint32_t report_interval_s, stored_sensor_send_interval_s;
+    uint16_t auto_on_lux_threshold, auto_off_delay_s;
     char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
     SensorState sensor;
 };
 
-struct KitchenPersistedSetupData {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t reserved;
-    uint16_t autoOnLuxThreshold;
-    uint16_t autoOffDelayS;
-};
-
-struct KitchenProvisioningSnapshot {
-    uint16_t auto_on_lux_threshold;
-    uint16_t auto_off_delay_s;
-};
+struct KitchenPersistedSetupData { uint32_t magic; uint16_t version; uint16_t reserved; uint16_t autoOnLuxThreshold; uint16_t autoOffDelayS; };
+struct KitchenSnapshot { uint16_t auto_on_lux_threshold; uint16_t auto_off_delay_s; };
 
 KitchenRuntime runtime = {};
 
-bool parseUIntValue(const char* text, uint32_t& outValue) {
-    if (text == nullptr || *text == '\0') return false;
+// =============================================================================
+// HILFSFUNKTIONEN
+// =============================================================================
 
-    uint32_t parsed = 0UL;
-    for (const char* current = text; *current != '\0'; ++current) {
-        if (*current < '0' || *current > '9') {
-            return false;
-        }
-
-        const uint32_t digit = (uint32_t)(*current - '0');
-        if (parsed > ((0xFFFFFFFFUL - digit) / 10UL)) {
-            return false;
-        }
-        parsed = (parsed * 10UL) + digit;
-    }
-
-    outValue = parsed;
+bool parseUInt(const char* t, uint32_t& v) {
+    if (!t || !*t) return false; v = 0;
+    for (const char* c = t; *c; ++c) { if (*c < '0' || *c > '9') return false; uint32_t d = *c - '0'; if (v > (0xFFFFFFFFUL - d) / 10UL) return false; v = v * 10 + d; }
     return true;
 }
 
-String htmlEscapeLocal(const String& text) {
-    String escaped;
-    escaped.reserve(text.length() + 16U);
+String htmlEscape(const String& s) {
+    String e; e.reserve(s.length() + 16);
+    for (size_t i = 0; i < s.length(); ++i) { char c = s[i];
+        switch (c) { case '&': e += "&amp;"; break; case '<': e += "&lt;"; break; case '>': e += "&gt;"; break; case '"': e += "&quot;"; break; case '\'': e += "&#39;"; break; default: e += c; }
+    } return e;
+}
 
-    for (size_t i = 0U; i < text.length(); ++i) {
-        const char current = text[i];
-        switch (current) {
-            case '&': escaped += F("&amp;"); break;
-            case '<': escaped += F("&lt;"); break;
-            case '>': escaped += F("&gt;"); break;
-            case '"': escaped += F("&quot;"); break;
-            case '\'': escaped += F("&#39;"); break;
-            default: escaped += current; break;
-        }
+uint16_t c16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
+uint16_t cH(long v) { return v < 0L ? 0U : v > 1000L ? 1000U : (uint16_t)v; }
+
+void logf(const char* l, const char* f, ...) {
+    if (!DEBUG_LOKAL_AKTIV) return; char m[224]; va_list a; va_start(a, f); vsnprintf(m, sizeof(m), f, a); va_end(a);
+    Serial.print("["); Serial.print(l); Serial.print("] "); Serial.println(m);
+}
+
+void initWdt() {
+    esp_err_t e = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) { logf("WARN", "WDT init err=%d", (int)e); return; }
+    e = esp_task_wdt_add(nullptr);
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) logf("WARN", "WDT add err=%d", (int)e);
+}
+
+void provLog(const char* l, const char* m) {
+    if (!DEBUG_LOKAL_AKTIV || !l || !m) return; Serial.print("["); Serial.print(l); Serial.print("] "); Serial.println(m);
+}
+
+void cpy(char* t, size_t s, const char* src) {
+    if (!t || !s) return; if (!src) { t[0] = '\0'; return; } strncpy(t, src, s - 1); t[s - 1] = '\0';
+}
+
+bool isBroadcast(const uint8_t* m) { return m && memcmp(m, BROADCAST_MAC, 6) == 0; }
+bool isMaster(const uint8_t* m) { return runtime.master_mac_gueltig && m && memcmp(m, runtime.master_mac, 6) == 0; }
+const uint8_t* helloDst() { return runtime.master_mac_gueltig ? runtime.master_mac : BROADCAST_MAC; }
+void setReportInt(uint32_t s) { runtime.report_interval_s = s; runtime.state_interval_ms = s * 1000UL; }
+
+uint16_t mapAqi500(uint16_t r) { return (r >= 1 && r <= ENS160_AQI_MAX_BASIC) ? (uint16_t)(r * 100U) : 0U; }
+uint16_t encT(float c) { return (uint16_t)((c + 273.15f) * 64.0f); }
+uint16_t encH(float h) { return (uint16_t)(h * 512.0f); }
+
+int writeEnsEnv(uint8_t a, float t, float h) {
+    uint8_t b[4]; uint16_t te = encT(t), he = encH(h);
+    b[0] = te & 0xFF; b[1] = (te >> 8) & 0xFF; b[2] = he & 0xFF; b[3] = (he >> 8) & 0xFF;
+    Wire.beginTransmission(a); Wire.write(ENS160_REG_TEMP_IN); Wire.write(b, 4); return Wire.endTransmission();
+}
+
+// =============================================================================
+// NEOPIXEL-RING – folgt Relais-Zustand
+// =============================================================================
+
+void updateRing(const char* grund) {
+    if (!runtime.ring_initialized) { ledRing.begin(); ledRing.setBrightness(LED_RING_HELLIGKEIT); ledRing.clear(); ledRing.show(); runtime.ring_initialized = true; }
+    if (runtime.relay_1) { uint32_t c = ledRing.Color(24, 24, 24); for (uint16_t i = 0; i < ledRing.numPixels(); ++i) ledRing.setPixelColor(i, c); }
+    else ledRing.clear();
+    ledRing.show();
+    logf("INFO", "Ring folgt Relais (%s)", grund ? grund : "?");
+}
+
+// =============================================================================
+// RELAIS
+// =============================================================================
+
+void setRelay(bool an, const char* g) {
+    digitalWrite(PIN_RELAY_1, an == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
+    runtime.relay_1 = an; updateRing(g);
+    logf("INFO", "Relay %s (%s)", an ? "ON" : "OFF", g ? g : "?");
+}
+
+// =============================================================================
+// PERSISTENZ
+// =============================================================================
+
+void snapK(Snapshot& s) { s.auto_on_lux_threshold = runtime.auto_on_lux_threshold; s.auto_off_delay_s = runtime.auto_off_delay_s; }
+void restK(const KitchenSnapshot& s) { runtime.auto_on_lux_threshold = s.auto_on_lux_threshold; runtime.auto_off_delay_s = s.auto_off_delay_s; }
+void snapBasis(SmartHome::ShNodeProvisioning::NodeBasisSnapshot& b, KitchenSnapshot& d) { nodeProvisioning.captureBasisSnapshot(b); snapK(d); }
+void restBasis(const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& b, const KitchenSnapshot& d) { nodeProvisioning.restoreBasisSnapshot(b); restK(d); setReportInt(runtime.report_interval_s); }
+
+// =============================================================================
+// PROVISIONING-HANDLER
+// =============================================================================
+
+class KitchenProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
+public:
+    const char* pageTitle() const override { return "NET-ERL Kitchen"; }
+    const char* pageIntro() const override { return "status_send_interval_s steuert STATE"; }
+    const char* deviceSectionTitle() const override { return "Kitchen"; }
+    const char* deviceSectionIntro() const override { return "Lux-Schwelle und Nachlauf."; }
+    void loadDeviceDefaults() override { runtime.auto_on_lux_threshold = NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD; runtime.auto_off_delay_s = NET_ERL_DEFAULT_AUTO_OFF_DELAY_S; }
+    bool loadDeviceSettings(Preferences& p) override {
+        KitchenPersistedSetupData d = {};
+        if (p.getBytesLength(STORAGE_KEY) != sizeof(d)) return false;
+        if (p.getBytes(STORAGE_KEY, &d, sizeof(d)) != sizeof(d)) return false;
+        if (d.magic != MAGIC || d.version != STORAGE_VERSION) return false;
+        runtime.auto_on_lux_threshold = d.autoOnLuxThreshold; runtime.auto_off_delay_s = d.autoOffDelayS; return true;
     }
-
-    return escaped;
-}
-
-uint16_t clampToU16(long value) {
-    if (value < 0L) return 0U;
-    if (value > 65535L) return 65535U;
-    return (uint16_t)value;
-}
-
-uint16_t clampHum01pct(long value) {
-    if (value < 0L) return 0U;
-    if (value > 1000L) return 1000U;
-    return (uint16_t)value;
-}
-
-void logf(const char* level, const char* format, ...);
-
-void initialisiereTaskWatchdog() {
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-    const esp_task_wdt_config_t config = {
-        .timeout_ms = TASK_WDT_TIMEOUT_S * 1000U,
-        .idle_core_mask = 0U,
-        .trigger_panic = true,
-    };
-    const esp_err_t initErr = esp_task_wdt_init(&config);
-    if (initErr == ESP_ERR_INVALID_STATE) {
-        const esp_err_t reconfigureErr = esp_task_wdt_reconfigure(&config);
-        if (reconfigureErr != ESP_OK) {
-            logf("WARN", "Task-Watchdog Reconfigure fehlgeschlagen (err=%d)", (int)reconfigureErr);
-        }
+    bool saveDeviceSettings(Preferences& p) override {
+        KitchenPersistedSetupData d = {}; d.magic = MAGIC; d.version = STORAGE_VERSION;
+        d.autoOnLuxThreshold = runtime.auto_on_lux_threshold; d.autoOffDelayS = runtime.auto_off_delay_s;
+        return p.putBytes(STORAGE_KEY, &d, sizeof(d)) == sizeof(d);
     }
-#else
-    const esp_err_t initErr = esp_task_wdt_init(TASK_WDT_TIMEOUT_S, true);
-#endif
-    if (initErr != ESP_OK && initErr != ESP_ERR_INVALID_STATE) {
-        logf("WARN", "Task-Watchdog Init fehlgeschlagen (err=%d)", (int)initErr);
-        return;
+    bool clearDeviceSettings(Preferences& p) override { p.remove(STORAGE_KEY); return true; }
+    void captureDeviceSnapshot() override { snapK(s_); }
+    void restoreDeviceSnapshot() override { restK(s_); }
+    bool parseDeviceSave(WebServer& srv, String& err) override {
+        p_ = {}; uint32_t v;
+        if (!parseUInt(srv.arg("auto_on_lux_threshold").c_str(), v) || v > 65535UL) { err = "auto_on_lux_threshold ungueltig"; return false; }
+        p_.auto_on_lux_threshold = (uint16_t)v;
+        if (!parseUInt(srv.arg("auto_off_delay_s").c_str(), v) || v > 65535UL) { err = "auto_off_delay_s ungueltig"; return false; }
+        p_.auto_off_delay_s = (uint16_t)v; p_.g = true; return true;
     }
-
-    const esp_err_t addErr = esp_task_wdt_add(nullptr);
-    if (addErr != ESP_OK && addErr != ESP_ERR_INVALID_STATE) {
-        logf("WARN", "Loop-Task konnte nicht beim Watchdog angemeldet werden (err=%d)", (int)addErr);
+    void applyParsedDeviceSettings() override { if (!p_.g) return; runtime.auto_on_lux_threshold = p_.auto_on_lux_threshold; runtime.auto_off_delay_s = p_.auto_off_delay_s; }
+    void discardParsedDeviceSettings() override { p_ = {}; }
+    void appendDeviceFieldsHtml(String& page, WebServer* src) const override {
+        String lt = src && src->hasArg("auto_on_lux_threshold") ? src->arg("auto_on_lux_threshold") : String(runtime.auto_on_lux_threshold);
+        String od = src && src->hasArg("auto_off_delay_s") ? src->arg("auto_off_delay_s") : String(runtime.auto_off_delay_s);
+        page += "<div class=\"field\"><label>auto_on_lux_threshold</label><input name=\"auto_on_lux_threshold\" type=\"number\" min=\"0\" max=\"65535\" value=\"" + htmlEscape(lt) + "\"><div class=\"hint\">Lux</div></div>";
+        page += "<div class=\"field\"><label>auto_off_delay_s</label><input name=\"auto_off_delay_s\" type=\"number\" min=\"0\" max=\"65535\" value=\"" + htmlEscape(od) + "\"><div class=\"hint\">Nachlauf (s)</div></div>";
     }
-}
-
-uint16_t mapEns160AqiZu500(uint16_t rawAqi) {
-    if (rawAqi >= 1U && rawAqi <= ENS160_AQI_MAX_BASIC) {
-        return (uint16_t)(rawAqi * 100U);
-    }
-    return 0U;
-}
-
-uint16_t encodeEns160Temp(float temperaturC) {
-    return (uint16_t)((temperaturC + 273.15f) * 64.0f);
-}
-
-uint16_t encodeEns160Humidity(float feuchtePct) {
-    return (uint16_t)(feuchtePct * 512.0f);
-}
-
-int schreibeEns160EnvData(uint8_t address, float temperaturC, float feuchtePct) {
-    uint8_t payload[4];
-    const uint16_t tempEncoded = encodeEns160Temp(temperaturC);
-    const uint16_t humidityEncoded = encodeEns160Humidity(feuchtePct);
-
-    payload[0] = (uint8_t)(tempEncoded & 0xFFU);
-    payload[1] = (uint8_t)((tempEncoded >> 8) & 0xFFU);
-    payload[2] = (uint8_t)(humidityEncoded & 0xFFU);
-    payload[3] = (uint8_t)((humidityEncoded >> 8) & 0xFFU);
-
-    Wire.beginTransmission(address);
-    Wire.write(ENS160_REG_TEMP_IN);
-    Wire.write(payload, sizeof(payload));
-    return (int)Wire.endTransmission();
-}
-
-bool bme680GasWarmupAbgeschlossen(unsigned long jetzt) {
-    return (jetzt - runtime.boot_ms) >= NET_ERL_BME680_GAS_WARMUP_MS &&
-           runtime.bme680_gueltige_messungen >= NET_ERL_BME680_GAS_WARMUP_MIN_READS;
-}
-
-bool ens160WarmupAbgeschlossen(unsigned long jetzt) {
-    return (jetzt - runtime.boot_ms) >= NET_ERL_ENS160_WARMUP_MS;
-}
-
-bool ens160FehltZuLange(unsigned long jetzt) {
-    if (!ens160WarmupAbgeschlossen(jetzt)) return false;
-    if (!runtime.ens_ok || ens160 == nullptr) return true;
-    if (runtime.letzter_ens_gueltig_ms == 0UL) return true;
-    return (jetzt - runtime.letzter_ens_gueltig_ms) > NET_ERL_ENS160_STALE_TIMEOUT_MS;
-}
-
-void logf(const char* level, const char* format, ...) {
-    if (!DEBUG_LOKAL_AKTIV) return;
-    char message[224];
-    va_list args;
-    va_start(args, format);
-    vsnprintf(message, sizeof(message), format, args);
-    va_end(args);
-    Serial.print("[");
-    Serial.print(level);
-    Serial.print("] ");
-    Serial.println(message);
-}
-
-void provisioningLog(const char* level, const char* message) {
-    if (!DEBUG_LOKAL_AKTIV || level == nullptr || message == nullptr) return;
-
-    Serial.print("[");
-    Serial.print(level);
-    Serial.print("] ");
-    Serial.println(message);
-}
-
-void copyText(char* target, size_t targetSize, const char* source) {
-    if (!target || targetSize == 0U) return;
-    if (!source) {
-        target[0] = '\0';
-        return;
-    }
-    strncpy(target, source, targetSize - 1U);
-    target[targetSize - 1U] = '\0';
-}
-
-bool istBroadcastMac(const uint8_t* mac) {
-    return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
-}
-
-bool senderIstBekannterMaster(const uint8_t* senderMac) {
-    return runtime.master_mac_gueltig &&
-           senderMac != nullptr &&
-           memcmp(senderMac, runtime.master_mac, sizeof(runtime.master_mac)) == 0;
-}
-
-const uint8_t* holeHelloZielMac() {
-    return runtime.master_mac_gueltig ? runtime.master_mac : BROADCAST_MAC;
-}
-
-void wendeReportIntervalAn(uint32_t wertS) {
-    runtime.report_interval_s = wertS;
-    runtime.state_interval_ms = (unsigned long)runtime.report_interval_s * 1000UL;
-}
-
-void holeKitchenProvisioningSnapshot(KitchenProvisioningSnapshot& snapshot) {
-    snapshot.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
-    snapshot.auto_off_delay_s = runtime.auto_off_delay_s;
-}
-
-void wendeKitchenProvisioningSnapshotAn(const KitchenProvisioningSnapshot& snapshot) {
-    runtime.auto_on_lux_threshold = snapshot.auto_on_lux_threshold;
-    runtime.auto_off_delay_s = snapshot.auto_off_delay_s;
-}
-
-bool kitchenPersistenzdatenGueltig(const KitchenPersistedSetupData& data) {
-    return data.magic == NET_ERL_KITCHEN_SETUP_MAGIC &&
-           data.version == NET_ERL_KITCHEN_SETUP_VERSION;
-}
-
-KitchenPersistedSetupData baueKitchenPersistenzdatenAusRuntime() {
-    KitchenPersistedSetupData data = {};
-    data.magic = NET_ERL_KITCHEN_SETUP_MAGIC;
-    data.version = NET_ERL_KITCHEN_SETUP_VERSION;
-    data.autoOnLuxThreshold = runtime.auto_on_lux_threshold;
-    data.autoOffDelayS = runtime.auto_off_delay_s;
-    return data;
-}
-
-void wendeKitchenPersistenzdatenAn(const KitchenPersistedSetupData& data) {
-    runtime.auto_on_lux_threshold = data.autoOnLuxThreshold;
-    runtime.auto_off_delay_s = data.autoOffDelayS;
-}
-
-void aktualisiereRingAusRelais(const char* grund) {
-    if (!runtime.ring_initialized) {
-        ledRing.begin();
-        ledRing.setBrightness(LED_RING_HELLIGKEIT);
-        ledRing.clear();
-        ledRing.show();
-        runtime.ring_initialized = true;
-    }
-
-    if (runtime.relay_1) {
-        const uint32_t farbe = ledRing.Color(24, 24, 24);
-        for (uint16_t i = 0; i < ledRing.numPixels(); ++i) {
-            ledRing.setPixelColor(i, farbe);
-        }
-        ledRing.show();
-    } else {
-        ledRing.clear();
-        ledRing.show();
-    }
-
-    logf("INFO", "NeoPixel-Ring folgt Relais (%s)", grund ? grund : "unbekannt");
-}
-
-void setzeRelayAusgang(bool an, const char* grund) {
-#if RELAY_1_ACTIVE_HIGH
-    digitalWrite(PIN_RELAY_1, an ? HIGH : LOW);
-#else
-    digitalWrite(PIN_RELAY_1, an ? LOW : HIGH);
-#endif
-
-#if PIN_STATUS_LED >= 0
-    digitalWrite(PIN_STATUS_LED, an ? HIGH : LOW);
-#endif
-
-    runtime.relay_1 = an;
-    aktualisiereRingAusRelais(grund);
-    logf("INFO", "GPIO%d relay_1 -> %s (%s)", PIN_RELAY_1, an ? "HIGH" : "LOW", grund ? grund : "unbekannt");
-}
-
-class NetErlKitchenProvisioningHandler final
-    : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
-  public:
-    const char* pageTitle() const override { return "NET-ERL Kitchen Provisioning"; }
-    const char* pageIntro() const override {
-        return "Node-Basis oben. status_send_interval_s steuert Kitchen-STATE; "
-               "sensor_send_interval_s wird nur als Basisfeld mitgespeichert.";
-    }
-    const char* deviceSectionTitle() const override { return "Kitchen-Spezifisch"; }
-    const char* deviceSectionIntro() const override {
-        return "Nur Lux-Schwelle und Nachlauf lokal provisionieren.";
-    }
-
-    void loadDeviceDefaults() override {
-        runtime.auto_on_lux_threshold = NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD;
-        runtime.auto_off_delay_s = NET_ERL_DEFAULT_AUTO_OFF_DELAY_S;
-    }
-
-    bool loadDeviceSettings(Preferences& prefs) override {
-        KitchenPersistedSetupData data = {};
-        if (prefs.getBytesLength(STORAGE_KEY_KITCHEN_SETUP) != sizeof(KitchenPersistedSetupData)) {
-            return false;
-        }
-
-        if (prefs.getBytes(STORAGE_KEY_KITCHEN_SETUP, &data, sizeof(data)) != sizeof(data)) {
-            return false;
-        }
-
-        if (!kitchenPersistenzdatenGueltig(data)) {
-            return false;
-        }
-
-        wendeKitchenPersistenzdatenAn(data);
-        return true;
-    }
-
-    bool saveDeviceSettings(Preferences& prefs) override {
-        const KitchenPersistedSetupData data = baueKitchenPersistenzdatenAusRuntime();
-        return prefs.putBytes(STORAGE_KEY_KITCHEN_SETUP, &data, sizeof(data)) == sizeof(data);
-    }
-
-    bool clearDeviceSettings(Preferences& prefs) override {
-        prefs.remove(STORAGE_KEY_KITCHEN_SETUP);
-        return true;
-    }
-
-    void captureDeviceSnapshot() override { holeKitchenProvisioningSnapshot(snapshot_); }
-    void restoreDeviceSnapshot() override { wendeKitchenProvisioningSnapshotAn(snapshot_); }
-
-    bool parseDeviceSave(WebServer& server, String& errorText) override {
-        pending_ = {};
-
-        uint32_t autoOnLuxThreshold = 0UL;
-        if (!parseUIntValue(server.arg("auto_on_lux_threshold").c_str(), autoOnLuxThreshold) ||
-            autoOnLuxThreshold > 65535UL) {
-            errorText = F("auto_on_lux_threshold ist ungueltig. Erlaubt sind 0 bis 65535.");
-            return false;
-        }
-
-        uint32_t autoOffDelayS = 0UL;
-        if (!parseUIntValue(server.arg("auto_off_delay_s").c_str(), autoOffDelayS) ||
-            autoOffDelayS > 65535UL) {
-            errorText = F("auto_off_delay_s ist ungueltig. Erlaubt sind 0 bis 65535.");
-            return false;
-        }
-
-        pending_.auto_on_lux_threshold = (uint16_t)autoOnLuxThreshold;
-        pending_.auto_off_delay_s = (uint16_t)autoOffDelayS;
-        pending_.gueltig = true;
-        return true;
-    }
-
-    void applyParsedDeviceSettings() override {
-        if (!pending_.gueltig) return;
-        runtime.auto_on_lux_threshold = pending_.auto_on_lux_threshold;
-        runtime.auto_off_delay_s = pending_.auto_off_delay_s;
-    }
-
-    void discardParsedDeviceSettings() override { pending_ = {}; }
-
-    void appendDeviceFieldsHtml(String& page, WebServer* sourceServer) const override {
-        const String autoOnLuxThresholdText =
-            sourceServer != nullptr && sourceServer->hasArg("auto_on_lux_threshold")
-                ? sourceServer->arg("auto_on_lux_threshold")
-                : String(runtime.auto_on_lux_threshold);
-        const String autoOffDelayText =
-            sourceServer != nullptr && sourceServer->hasArg("auto_off_delay_s")
-                ? sourceServer->arg("auto_off_delay_s")
-                : String(runtime.auto_off_delay_s);
-
-        page += F("<div class=\"field\"><label for=\"auto_on_lux_threshold\">auto_on_lux_threshold</label>");
-        page += F("<input id=\"auto_on_lux_threshold\" name=\"auto_on_lux_threshold\" type=\"number\" min=\"0\" max=\"65535\" step=\"1\" inputmode=\"numeric\" value=\"");
-        page += htmlEscapeLocal(autoOnLuxThresholdText);
-        page += F("\"><div class=\"hint\">Lux-Schwelle fuer automatisches Einschalten.</div></div>");
-
-        page += F("<div class=\"field\"><label for=\"auto_off_delay_s\">auto_off_delay_s</label>");
-        page += F("<input id=\"auto_off_delay_s\" name=\"auto_off_delay_s\" type=\"number\" min=\"0\" max=\"65535\" step=\"1\" inputmode=\"numeric\" value=\"");
-        page += htmlEscapeLocal(autoOffDelayText);
-        page += F("\"><div class=\"hint\">Nachlaufzeit nach letzter Bewegung in Sekunden.</div></div>");
-    }
-
-  private:
-    struct PendingValues {
-        bool gueltig;
-        uint16_t auto_on_lux_threshold;
-        uint16_t auto_off_delay_s;
-    };
-
-    PendingValues pending_ = {};
-    KitchenProvisioningSnapshot snapshot_ = {};
+private:
+    struct P { bool g = false; uint16_t auto_on_lux_threshold = 0; uint16_t auto_off_delay_s = 0; } p_{};
+    KitchenSnapshot s_{};
 };
 
 SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
-NetErlKitchenProvisioningHandler netErlKitchenProvisioningHandler;
+KitchenProvisioningHandler kitchenProvisioningHandler;
 
-void holeSetupSnapshot(
-    SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
-    KitchenProvisioningSnapshot& deviceSnapshot) {
-    nodeProvisioning.captureBasisSnapshot(basisSnapshot);
-    holeKitchenProvisioningSnapshot(deviceSnapshot);
+// =============================================================================
+// ESP-NOW INFRASTRUKTUR (identisch zu hall_light)
+// =============================================================================
+
+bool ensurePeer(const uint8_t* m) {
+    if (!runtime.funk_bereit || !m) return false;
+    if (!isBroadcast(m) && !SmartHome::isValidMac(m)) return false;
+    if (esp_now_is_peer_exist(m)) return true;
+    esp_now_peer_info_t p = {}; memcpy(p.peer_addr, m, 6); p.channel = WLAN_KANAL; p.encrypt = false;
+    return esp_now_add_peer(&p) == ESP_OK;
 }
 
-void wendeSetupSnapshotAn(
-    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
-    const KitchenProvisioningSnapshot& deviceSnapshot) {
-    nodeProvisioning.restoreBasisSnapshot(basisSnapshot);
-    wendeKitchenProvisioningSnapshotAn(deviceSnapshot);
-    wendeReportIntervalAn(runtime.report_interval_s);
+bool sendPacketOpt(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const char* lb, uint8_t fl, uint8_t* seq) {
+    if (!runtime.funk_bereit || !z || plen > SH_MAX_PAYLOAD_BYTES) return false;
+    if (!ensurePeer(z)) return false;
+    uint8_t buf[SH_ESPNOW_MAX_BYTES] = {}; SmartHome::MsgHeader h = {};
+    uint8_t s = runtime.naechste_seq++; SmartHome::fillHeader(h, mt, s, fl, plen);
+    if (plen && pl) memcpy(buf + SH_HEADER_SIZE, pl, plen);
+    SmartHome::finalizePacketCrc(h, buf + SH_HEADER_SIZE); memcpy(buf, &h, sizeof(h));
+    if (esp_now_send(z, buf, SH_HEADER_SIZE + plen) != ESP_OK) { logf("WARN", "%s send fail", lb ? lb : "?"); return false; }
+    if (seq) *seq = s; return true;
+}
+bool sendPacket(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const char* lb) { return sendPacketOpt(z, mt, pl, plen, lb, 0, nullptr); }
+bool sendAck(const uint8_t* z, uint8_t s, uint8_t mt, uint8_t st) { SmartHome::AckPayload p = {}; p.ack_seq = s; p.ack_msg_type = mt; p.status = st; return sendPacket(z, SH_MSG_ACK, &p, sizeof(p), "ACK"); }
+
+uint8_t autoFlags() {
+    uint8_t f = 0;
+    if (runtime.motion_aktiv) f |= SH_RELAY_COMFORT_FLAG_PRESENCE_SOURCE_AVAILABLE;
+    if (runtime.lux_ok) f |= SH_RELAY_COMFORT_FLAG_LIGHT_VALUE_AVAILABLE;
+    f |= SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED;
+    if (runtime.relay_auto_owned) f |= SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED;
+    if (runtime.blocked_by_lux) f |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_LUX;
+    return f;
 }
 
-bool speicherePersistenzMitRollback(
-    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
-    const KitchenProvisioningSnapshot& deviceSnapshot) {
-    if (nodeProvisioning.saveCurrentState()) {
-        return true;
-    }
+// =============================================================================
+// PROTOKOLL-NACHRICHTEN
+// =============================================================================
 
-    wendeSetupSnapshotAn(basisSnapshot, deviceSnapshot);
-    return false;
-}
-
-bool stellePeerSicher(const uint8_t* mac) {
-    if (!runtime.funk_bereit || mac == nullptr) return false;
-    if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
-    if (esp_now_is_peer_exist(mac)) return true;
-
-    esp_now_peer_info_t peerInfo = {};
-    memcpy(peerInfo.peer_addr, mac, 6);
-    peerInfo.channel = (uint8_t)WLAN_KANAL;
-    peerInfo.encrypt = false;
-
-    const esp_err_t err = esp_now_add_peer(&peerInfo);
-    if (err != ESP_OK) {
-        logf("WARN", "Peer konnte nicht angelegt werden (err=%d)", (int)err);
-        return false;
-    }
-    return true;
-}
-
-bool sendePaketMitOptionen(
-    const uint8_t* zielMac,
-    uint8_t msgType,
-    const void* payload,
-    size_t payloadLen,
-    const char* label,
-    uint8_t flags,
-    uint8_t* verwendeteSeq)
-{
-    if (!runtime.funk_bereit || zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
-    if (!stellePeerSicher(zielMac)) return false;
-
-    uint8_t packet[SH_ESPNOW_MAX_BYTES] = {0};
-    SmartHome::MsgHeader header = {};
-    const uint8_t seq = runtime.naechste_seq++;
-    SmartHome::fillHeader(header, msgType, seq, flags, (uint16_t)payloadLen);
-
-    uint8_t* payloadBuffer = packet + SH_HEADER_SIZE;
-    if (payloadLen > 0U && payload != nullptr) {
-        memcpy(payloadBuffer, payload, payloadLen);
-    }
-
-    SmartHome::finalizePacketCrc(header, payloadBuffer);
-    memcpy(packet, &header, sizeof(header));
-
-    const esp_err_t err = esp_now_send(zielMac, packet, SH_HEADER_SIZE + payloadLen);
-    if (err != ESP_OK) {
-        logf("WARN", "%s konnte nicht gesendet werden (err=%d)", label, (int)err);
-        return false;
-    }
-
-    if (verwendeteSeq != nullptr) {
-        *verwendeteSeq = seq;
-    }
-    return true;
-}
-
-bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
-    return sendePaketMitOptionen(zielMac, msgType, payload, payloadLen, label, 0U, nullptr);
-}
-
-bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
-    SmartHome::AckPayload payload = {};
-    payload.ack_seq = ackSeq;
-    payload.ack_msg_type = ackMsgType;
-    payload.status = status;
-    return sendePaket(zielMac, SH_MSG_ACK, &payload, sizeof(payload), "ACK");
-}
-
-uint8_t holeAutoFlags() {
-    uint8_t flags = 0U;
-    if (runtime.motion_aktiv) flags |= SH_RELAY_COMFORT_FLAG_PRESENCE_SOURCE_AVAILABLE;
-    if (runtime.lux_ok) flags |= SH_RELAY_COMFORT_FLAG_LIGHT_VALUE_AVAILABLE;
-    flags |= SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED;
-    if (runtime.relay_auto_owned) flags |= SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED;
-    if (runtime.blocked_by_lux) flags |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_LUX;
-    return flags;
-}
-
-bool sendeHello() {
-    SmartHome::HelloPayload payload = {};
-    copyText(payload.device_id, sizeof(payload.device_id), DEVICE_ID);
-    copyText(payload.device_name, sizeof(payload.device_name), DEVICE_NAME);
-    payload.device_class = SH_CLASS_NET_ERL;
-    payload.caps_hi = (uint8_t)((DEVICE_CAPS >> 8) & 0xFFU);
-    payload.caps_lo = (uint8_t)(DEVICE_CAPS & 0xFFU);
-    payload.power_type = SH_POWER_MAINS;
-    payload.fw_version = 1U;
-    payload.boot_counter = BOOT_COUNTER_PROTOCOL_PLACEHOLDER;
-    payload.meta_schema_version = DEVICE_META_SCHEMA_VERSION;
-    payload.control_mode = DEVICE_CONTROL_MODE;
-    payload.config_profile = DEVICE_CONFIG_PROFILE;
-    payload.reporting_mode = DEVICE_REPORTING_MODE;
-    copyText(payload.sensor_mask, sizeof(payload.sensor_mask), "THLPGAMXXX");
-    copyText(payload.input_mask, sizeof(payload.input_mask), "BXXXX");
-
+bool sendHello() {
+    SmartHome::HelloPayload p = {};
+    cpy(p.device_id, sizeof(p.device_id), DEVICE_ID); cpy(p.device_name, sizeof(p.device_name), DEVICE_NAME);
+    p.device_class = SH_CLASS_NET_ERL; p.caps_hi = (DEVICE_CAPS >> 8) & 0xFF; p.caps_lo = DEVICE_CAPS & 0xFF;
+    p.power_type = SH_POWER_MAINS; p.fw_version = 1; p.boot_counter = BOOT_COUNTER;
+    p.meta_schema_version = DEVICE_META_SCHEMA_VERSION; p.control_mode = DEVICE_CONTROL_MODE;
+    p.config_profile = DEVICE_CONFIG_PROFILE; p.reporting_mode = DEVICE_REPORTING_MODE;
+    cpy(p.sensor_mask, sizeof(p.sensor_mask), "THLPGAMXXX");
+    cpy(p.input_mask, sizeof(p.input_mask), "BXXXX");
     runtime.letztes_hello_ms = millis();
-    return sendePaket(holeHelloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
+    return sendPacket(helloDst(), SH_MSG_HELLO, &p, sizeof(p), "HELLO");
 }
 
-bool sendeHeartbeat() {
+bool sendHeartbeat() {
     if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
-
-    SmartHome::HeartbeatPayload payload = {};
-    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
-    payload.uptime_s = millis() / 1000UL;
-
-    if (!sendePaket(runtime.master_mac, SH_MSG_HEARTBEAT, &payload, sizeof(payload), "HEARTBEAT")) {
-        return false;
-    }
-
-    runtime.letzter_heartbeat_ms = millis();
-    return true;
+    SmartHome::HeartbeatPayload p = {}; cpy(p.node_id, sizeof(p.node_id), DEVICE_ID); p.uptime_s = millis() / 1000UL;
+    if (!sendPacket(runtime.master_mac, SH_MSG_HEARTBEAT, &p, sizeof(p), "HEARTBEAT")) return false;
+    runtime.letzter_heartbeat_ms = millis(); return true;
 }
 
-bool sendeState() {
+bool sendState() {
     if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
-
-    SmartHome::ExtendedRelayComfortGasConfigStateReportPayload payload = {};
-    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
-
-    // Kitchen meldet die fachlich gewollten Umwelt- und Luftwerte direkt im STATE.
-    payload.relay_1 = runtime.relay_1 ? 1U : 0U;
-    payload.temp_01c = runtime.sensor.temp_01c;
-    payload.hum_01pct = runtime.sensor.hum_01pct;
-    payload.lux = runtime.sensor.lux;
-    payload.pressure_pa = runtime.sensor.pressure_pa;
-    payload.gas_ohm = runtime.sensor.gas_ohm;
-    payload.aqi = runtime.sensor.aqi;
-    payload.tvoc_ppb = runtime.sensor.tvoc_ppb;
-    payload.eco2_ppm = runtime.sensor.eco2_ppm;
-    payload.motion = runtime.motion_aktiv ? 1U : 0U;
-    payload.auto_flags = holeAutoFlags();
-    payload.fault = runtime.fault ? 1U : 0U;
-    payload.report_interval_s = (uint16_t)runtime.report_interval_s;
-    payload.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
-
-    if (!sendePaket(runtime.master_mac, SH_MSG_STATE, &payload, sizeof(payload), "STATE_EXT_GAS")) {
-        return false;
-    }
-
-    runtime.state_report_offen = false;
-    runtime.letzter_state_ms = millis();
-    return true;
+    SmartHome::ExtendedRelayComfortGasConfigStateReportPayload p = {};
+    cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
+    p.relay_1 = runtime.relay_1 ? 1U : 0U; p.temp_01c = runtime.sensor.temp_01c;
+    p.hum_01pct = runtime.sensor.hum_01pct; p.lux = runtime.sensor.lux;
+    p.pressure_pa = runtime.sensor.pressure_pa; p.gas_ohm = runtime.sensor.gas_ohm;
+    p.aqi = runtime.sensor.aqi; p.tvoc_ppb = runtime.sensor.tvoc_ppb; p.eco2_ppm = runtime.sensor.eco2_ppm;
+    p.motion = runtime.motion_aktiv ? 1U : 0U; p.auto_flags = autoFlags();
+    p.fault = runtime.fault ? 1U : 0U; p.report_interval_s = (uint16_t)runtime.report_interval_s;
+    p.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
+    if (!sendPacket(runtime.master_mac, SH_MSG_STATE, &p, sizeof(p), "STATE")) return false;
+    runtime.state_report_offen = false; runtime.letzter_state_ms = millis(); return true;
 }
 
-bool sendeMotionEvent(bool motionState) {
+bool sendMotionEvent(bool s) {
     if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
-
-    SmartHome::EventReportPayload payload = {};
-    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
-    payload.event_type = SH_EVENT_MOTION_DETECTED;
-    payload.trigger = SH_TRIGGER_AUTO;
-    payload.param1 = motionState ? 1U : 0U;
-    payload.param2 = 0U;
-
-    return sendePaket(runtime.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), motionState ? "EVENT_MOTION_TRUE" : "EVENT_MOTION_FALSE");
+    SmartHome::EventReportPayload p = {}; cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
+    p.event_type = SH_EVENT_MOTION_DETECTED; p.trigger = SH_TRIGGER_AUTO; p.param1 = s ? 1U : 0U;
+    return sendPacket(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), s ? "EVT_M_ON" : "EVT_M_OFF");
 }
 
-void sendeAusstehendesMotionEvent() {
-    if (!runtime.master_bekannt || !runtime.master_mac_gueltig || runtime.pending_motion_event_state == 0U) return;
-
-    const bool motionState = (runtime.pending_motion_event_state == 1U);
-    if (sendeMotionEvent(motionState)) {
-        runtime.pending_motion_event_state = 0U;
-    }
-}
-
-bool sendeRelayEvent(uint8_t trigger) {
+bool sendRelayEvent(uint8_t tr) {
     if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
-
-    SmartHome::EventReportPayload payload = {};
-    copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
-    payload.event_type = SH_EVENT_RELAY_CHANGED;
-    payload.trigger = trigger;
-    payload.param1 = runtime.relay_1 ? 1U : 0U;
-    payload.param2 = 0U;
-
-    return sendePaket(runtime.master_mac, SH_MSG_EVENT, &payload, sizeof(payload), "EVENT_RELAY_CHANGED");
+    SmartHome::EventReportPayload p = {}; cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
+    p.event_type = SH_EVENT_RELAY_CHANGED; p.trigger = tr; p.param1 = runtime.relay_1 ? 1U : 0U;
+    return sendPacket(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), "EVT_RELAY");
 }
 
-void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
-    if (payload.ack_status != SH_ACK_OK) {
-        logf("WARN", "HELLO_ACK abgelehnt");
-        return;
-    }
+// =============================================================================
+// PROTOKOLL-VERARBEITUNG (vereinfacht – analog hall_light)
+// =============================================================================
 
-    if (!runtime.master_mac_gueltig) {
-        logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
-        return;
+void handleHelloAck(const uint8_t* s, const SmartHome::HelloAckPayload& p) {
+    if (p.ack_status != SH_ACK_OK || !runtime.master_mac_gueltig || !isMaster(s)) { logf("WARN", "HELLO_ACK fail"); return; }
+    runtime.master_bekannt = true; runtime.state_report_offen = true; ensurePeer(runtime.master_mac);
+}
+void handleCmd(const uint8_t* s, const SmartHome::MsgHeader& h, const SmartHome::CmdPayload& p) {
+    if (!isMaster(s)) return;
+    if (p.cmd_type == SH_CMD_STATE_REQUEST) { runtime.state_report_offen = true; return; }
+    if (p.cmd_type == SH_CMD_SET_RELAY) {
+        if (p.param1 != 0U) { if (h.flags & SH_FLAG_ACK_REQUEST) sendAck(s, h.seq, h.msg_type, SH_ACK_REJECTED); return; }
+        runtime.relay_auto_owned = false; runtime.pending_auto_on_decision = false; runtime.blocked_by_lux = false;
+        setRelay(p.param2 != 0U, "master"); runtime.state_report_offen = true; sendRelayEvent(SH_TRIGGER_MASTER_CMD);
+        if (h.flags & SH_FLAG_ACK_REQUEST) sendAck(s, h.seq, h.msg_type, SH_ACK_OK); return;
     }
-
-    if (!senderIstBekannterMaster(senderMac)) {
-        logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
-        return;
-    }
-
-    runtime.master_bekannt = true;
-    runtime.state_report_offen = true;
-    stellePeerSicher(runtime.master_mac);
-    sendeAusstehendesMotionEvent();
-    logf("INFO", "HELLO_ACK empfangen");
+    if (h.flags & SH_FLAG_ACK_REQUEST) sendAck(s, h.seq, h.msg_type, SH_ACK_REJECTED);
 }
 
-bool speichereReportIntervalAusCfg(uint32_t valueS) {
-    if (!nodeProvisioning.isSendIntervalValid(valueS)) return false;
-
-    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
-    KitchenProvisioningSnapshot deviceSnapshot = {};
-    holeSetupSnapshot(basisSnapshot, deviceSnapshot);
-
-    wendeReportIntervalAn(valueS);
-    runtime.state_report_offen = true;
-    if (!speicherePersistenzMitRollback(basisSnapshot, deviceSnapshot)) {
-        logf("WARN", "report_interval_s konnte nicht persistiert werden");
-        return false;
-    }
-
-    return true;
+bool saveReportIntCfg(uint32_t v) {
+    if (!nodeProvisioning.isSendIntervalValid(v)) return false;
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot bs = {}; KitchenSnapshot ds = {};
+    snapBasis(bs, ds); setReportInt(v); runtime.state_report_offen = true;
+    if (nodeProvisioning.saveCurrentState()) return true;
+    restBasis(bs, ds); return false;
 }
 
-bool speichereAutoOnLuxThresholdAusCfg(uint16_t value) {
-    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
-    KitchenProvisioningSnapshot deviceSnapshot = {};
-    holeSetupSnapshot(basisSnapshot, deviceSnapshot);
-
-    runtime.auto_on_lux_threshold = value;
-    runtime.state_report_offen = true;
-    if (!speicherePersistenzMitRollback(basisSnapshot, deviceSnapshot)) {
-        logf("WARN", "auto_on_lux_threshold konnte nicht persistiert werden");
-        return false;
-    }
-
-    return true;
-}
-
-bool speichereAutoOffDelayAusCfg(uint16_t value) {
-    SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
-    KitchenProvisioningSnapshot deviceSnapshot = {};
-    holeSetupSnapshot(basisSnapshot, deviceSnapshot);
-
-    runtime.auto_off_delay_s = value;
-    runtime.state_report_offen = true;
-    if (!speicherePersistenzMitRollback(basisSnapshot, deviceSnapshot)) {
-        logf("WARN", "auto_off_delay_s konnte nicht persistiert werden");
-        return false;
-    }
-
-    return true;
-}
-
-bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
-    switch (payload.param_id) {
-        case SH_CFG_REPORT_INTERVAL_S:
-            if (!speichereReportIntervalAusCfg(payload.value)) return false;
-            logf("INFO", "report_interval_s -> %u", (unsigned)runtime.report_interval_s);
-            return true;
-
-        case SH_CFG_LIGHT_THRESHOLD_ON:
-            if (!speichereAutoOnLuxThresholdAusCfg(payload.value)) return false;
-            logf("INFO", "auto_on_lux_threshold -> %u", (unsigned)runtime.auto_on_lux_threshold);
-            return true;
-
-        case SH_CFG_AUTO_OFF_DELAY_S:
-            if (!speichereAutoOffDelayAusCfg(payload.value)) return false;
-            logf("INFO", "auto_off_delay_s -> %u", (unsigned)runtime.auto_off_delay_s);
-            return true;
-
-        default:
-            return false;
-    }
-}
-
-void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
-    if (!senderIstBekannterMaster(senderMac)) {
-        logf("WARN", "CFG ignoriert: Sender ist nicht der bekannte Master");
-        return;
-    }
-
-    const bool ok = uebernehmeCfg(payload);
-    if (header.flags & SH_FLAG_ACK_REQUEST) {
-        sendeAck(senderMac, header.seq, header.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
-    }
-}
-
-void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
-    if (!senderIstBekannterMaster(senderMac)) {
-        logf("WARN", "CMD ignoriert: Sender ist nicht der bekannte Master");
-        return;
-    }
-
-    if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
-        runtime.state_report_offen = true;
-        return;
-    }
-
-    if (payload.cmd_type == SH_CMD_SET_RELAY) {
-        const bool gueltigerIndex = (payload.param1 == 0U);
-        const bool neuerZustand = (payload.param2 != 0U);
-
-        if (!gueltigerIndex) {
-            if (header.flags & SH_FLAG_ACK_REQUEST) {
-                sendeAck(senderMac, header.seq, header.msg_type, SH_ACK_REJECTED);
-            }
-            logf("WARN", "SET_RELAY verworfen: relay_index=%u", (unsigned)payload.param1);
-            return;
+bool handleCfg(const SmartHome::CfgPayload& p) {
+    switch (p.param_id) {
+        case SH_CFG_REPORT_INTERVAL_S: return saveReportIntCfg(p.value);
+        case SH_CFG_LIGHT_THRESHOLD_ON: {
+            SmartHome::ShNodeProvisioning::NodeBasisSnapshot bs = {}; KitchenSnapshot ds = {};
+            snapBasis(bs, ds); runtime.auto_on_lux_threshold = (uint16_t)p.value; runtime.state_report_offen = true;
+            if (nodeProvisioning.saveCurrentState()) return true; restBasis(bs, ds); return false;
         }
-
-        runtime.relay_auto_owned = false;
-        runtime.pending_auto_on_decision = false;
-        runtime.blocked_by_lux = false;
-        setzeRelayAusgang(neuerZustand, "master_cmd");
-        runtime.state_report_offen = true;
-        sendeRelayEvent(SH_TRIGGER_MASTER_CMD);
-
-        if (header.flags & SH_FLAG_ACK_REQUEST) {
-            sendeAck(senderMac, header.seq, header.msg_type, SH_ACK_OK);
+        case SH_CFG_AUTO_OFF_DELAY_S: {
+            SmartHome::ShNodeProvisioning::NodeBasisSnapshot bs = {}; KitchenSnapshot ds = {};
+            snapBasis(bs, ds); runtime.auto_off_delay_s = (uint16_t)p.value; runtime.state_report_offen = true;
+            if (nodeProvisioning.saveCurrentState()) return true; restBasis(bs, ds); return false;
         }
-        return;
-    }
-
-    if (header.flags & SH_FLAG_ACK_REQUEST) {
-        sendeAck(senderMac, header.seq, header.msg_type, SH_ACK_REJECTED);
+        default: return false;
     }
 }
 
-void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int len) {
-    if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
-    if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) return;
+void handleCfgMsg(const uint8_t* s, const SmartHome::MsgHeader& h, const SmartHome::CfgPayload& p) {
+    if (!isMaster(s)) return;
+    bool ok = handleCfg(p);
+    if (h.flags & SH_FLAG_ACK_REQUEST) sendAck(s, h.seq, h.msg_type, ok ? SH_ACK_OK : SH_ACK_ERROR);
+}
 
-    // ESP-NOW-Callback und loop() teilen runtime; Handler deshalb kurz halten.
-    const SmartHome::MsgHeader* header = reinterpret_cast<const SmartHome::MsgHeader*>(data);
-    const uint8_t* payload = data + SH_HEADER_SIZE;
-
-    switch (header->msg_type) {
-        case SH_MSG_HELLO_ACK:
-            if (header->payload_len == sizeof(SmartHome::HelloAckPayload)) {
-                verarbeiteHelloAck(senderMac, *reinterpret_cast<const SmartHome::HelloAckPayload*>(payload));
-            }
-            break;
-
-        case SH_MSG_CMD:
-            if (header->payload_len == sizeof(SmartHome::CmdPayload)) {
-                verarbeiteCmd(senderMac, *header, *reinterpret_cast<const SmartHome::CmdPayload*>(payload));
-            }
-            break;
-
-        case SH_MSG_CFG:
-            if (header->payload_len == sizeof(SmartHome::CfgPayload)) {
-                verarbeiteCfg(senderMac, *header, *reinterpret_cast<const SmartHome::CfgPayload*>(payload));
-            }
-            break;
-
-        default:
-            break;
+void handleEspNow(const uint8_t* s, const uint8_t* d, int len) {
+    if (!s || !d || len < (int)sizeof(SmartHome::MsgHeader)) return;
+    if (!SmartHome::hasValidPacketCrc(d, (size_t)len)) return;
+    auto h = reinterpret_cast<const SmartHome::MsgHeader*>(d);
+    const uint8_t* pl = d + SH_HEADER_SIZE;
+    switch (h->msg_type) {
+        case SH_MSG_HELLO_ACK: if (h->payload_len == sizeof(SmartHome::HelloAckPayload)) handleHelloAck(s, *reinterpret_cast<const SmartHome::HelloAckPayload*>(pl)); break;
+        case SH_MSG_CMD: if (h->payload_len == sizeof(SmartHome::CmdPayload)) handleCmd(s, *h, *reinterpret_cast<const SmartHome::CmdPayload*>(pl)); break;
+        case SH_MSG_CFG: if (h->payload_len == sizeof(SmartHome::CfgPayload)) handleCfgMsg(s, *h, *reinterpret_cast<const SmartHome::CfgPayload*>(pl)); break;
+        default: break;
     }
 }
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
-void onEspNowReceive(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
-    if (!info) return;
-    verarbeiteEspNowPaket(info->src_addr, data, len);
-}
+void onEspNowRcv(const esp_now_recv_info_t* i, const uint8_t* d, int l) { if (i) handleEspNow(i->src_addr, d, l); }
 #else
-void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
-    verarbeiteEspNowPaket(senderMac, data, len);
-}
+void onEspNowRcv(const uint8_t* s, const uint8_t* d, int l) { handleEspNow(s, d, l); }
 #endif
+void onEspNowSent(const uint8_t*, esp_now_send_status_t s) { if (s != ESP_NOW_SEND_SUCCESS) logf("WARN", "ESP-NOW send fail"); }
 
-void logEspNowSendStatus(esp_now_send_status_t status) {
-    if (status != ESP_NOW_SEND_SUCCESS) {
-        logf("WARN", "ESP-NOW Versand fehlgeschlagen");
-    }
-}
-
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
-void onEspNowSend(const esp_now_send_info_t* /*info*/, esp_now_send_status_t status) {
-    logEspNowSendStatus(status);
-}
-#else
-void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
-    logEspNowSendStatus(status);
-}
-#endif
-
-void initialisiereFunk() {
+void initFunk() {
     if (runtime.funk_bereit || runtime.setup_mode) return;
-
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    WiFi.setSleep(false);
-
-    const esp_err_t kanalErr = esp_wifi_set_channel((uint8_t)WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
-    if (kanalErr != ESP_OK) {
-        logf("WARN", "WLAN-Kanal %d konnte nicht gesetzt werden (err=%d)", WLAN_KANAL, (int)kanalErr);
-    }
-
-    if (esp_now_init() != ESP_OK) {
-        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen");
-        return;
-    }
-
-    esp_now_register_send_cb(onEspNowSend);
-    esp_now_register_recv_cb(onEspNowReceive);
-    runtime.funk_bereit = true;
-    stellePeerSicher(BROADCAST_MAC);
-    if (runtime.master_mac_gueltig) {
-        stellePeerSicher(runtime.master_mac);
-    }
+    WiFi.mode(WIFI_STA); WiFi.disconnect(); WiFi.setSleep(false);
+    esp_wifi_set_channel(WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
+    if (esp_now_init() != ESP_OK) { logf("WARN", "ESP-NOW init fail"); return; }
+    esp_now_register_send_cb(onEspNowSent); esp_now_register_recv_cb(onEspNowRcv);
+    runtime.funk_bereit = true; ensurePeer(BROADCAST_MAC);
+    if (runtime.master_mac_gueltig) ensurePeer(runtime.master_mac);
 }
 
-void konfiguriereVeml7700() {
-    veml.setGain(VEML7700_GAIN_1);
-    veml.setIntegrationTime(VEML7700_IT_400MS);
-}
+// =============================================================================
+// SENSOR-INIT + SENSOR-LOGIK
+// =============================================================================
 
-bool initialisiereBme680() {
-    const uint8_t adressen[] = {
-        (uint8_t)NET_ERL_BME680_PRIMARY_ADDRESS,
-        (uint8_t)NET_ERL_BME680_FALLBACK_ADDRESS};
-
-    for (uint8_t adresse : adressen) {
-        if (!bme680.begin(adresse, &Wire)) continue;
-
-        bme680.setTemperatureOversampling(BME680_OS_8X);
-        bme680.setHumidityOversampling(BME680_OS_2X);
-        bme680.setPressureOversampling(BME680_OS_4X);
-        bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
-        bme680.setGasHeater(320U, 150U);
-        runtime.bme680_adresse = adresse;
-        logf("INFO", "BME680 bereit auf 0x%02X", adresse);
-        return true;
+void konfVeml() { veml.setGain(VEML7700_GAIN_1); veml.setIntegrationTime(VEML7700_IT_400MS); }
+bool initBme() {
+    uint8_t addrs[] = {(uint8_t)NET_ERL_BME680_PRIMARY_ADDRESS, (uint8_t)NET_ERL_BME680_FALLBACK_ADDRESS};
+    for (uint8_t a : addrs) {
+        if (!bme680.begin(a, &Wire)) continue;
+        bme680.setTemperatureOversampling(BME680_OS_8X); bme680.setHumidityOversampling(BME680_OS_2X);
+        bme680.setPressureOversampling(BME680_OS_4X); bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
+        bme680.setGasHeater(320U, 150U); runtime.bme680_adresse = a; return true;
     }
-
     return false;
 }
-
-bool initialisiereEns160() {
-    ens160 = &ens160Addr52;
-    if (ens160->begin()) {
-        runtime.ens160_adresse = NET_ERL_ENS160_PRIMARY_ADDRESS;
-    } else {
-        ens160 = &ens160Addr53;
-        if (!ens160->begin()) {
-            ens160 = nullptr;
-            runtime.ens160_adresse = 0U;
-            return false;
-        }
-        runtime.ens160_adresse = NET_ERL_ENS160_FALLBACK_ADDRESS;
-    }
-
-    if (!ens160->setMode(ENS160_OPMODE_STD)) {
-        ens160 = nullptr;
-        runtime.ens160_adresse = 0U;
-        return false;
-    }
-
-    logf("INFO", "ENS160 bereit auf 0x%02X", runtime.ens160_adresse);
-    return true;
+bool initEns() {
+    ens160 = &ens160Addr52; if (ens160->begin()) return true;
+    ens160 = &ens160Addr53; if (ens160->begin()) return true;
+    ens160 = nullptr; return false;
 }
 
-void initialisiereSensorik() {
-    Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
-    Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
-    Wire.setTimeOut(I2C_TIMEOUT_MS);
-
-    runtime.bme_ok = initialisiereBme680();
-    if (!runtime.bme_ok) {
-        logf("WARN", "BME680 Init fehlgeschlagen (0x%02X/0x%02X)",
-             NET_ERL_BME680_PRIMARY_ADDRESS,
-             NET_ERL_BME680_FALLBACK_ADDRESS);
-    }
-
-    if (!veml.begin()) {
-        runtime.lux_ok = false;
-        logf("WARN", "VEML7700 Init fehlgeschlagen");
-    } else {
-        runtime.lux_ok = true;
-        konfiguriereVeml7700();
-        logf("INFO", "VEML7700 bereit");
-    }
-
-    runtime.ens_ok = initialisiereEns160();
-    if (!runtime.ens_ok) {
-        logf("WARN", "ENS160 Init fehlgeschlagen (0x%02X/0x%02X)",
-             NET_ERL_ENS160_PRIMARY_ADDRESS,
-             NET_ERL_ENS160_FALLBACK_ADDRESS);
-    }
-
+void initSensor() {
+    Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL); Wire.setClock(NET_ERL_I2C_CLOCK_HZ); Wire.setTimeOut(I2C_TIMEOUT_MS);
+    runtime.bme_ok = initBme(); if (!runtime.bme_ok) logf("WARN", "BME680 init fail");
+    if (!veml.begin()) { runtime.lux_ok = false; logf("WARN", "VEML7700 init fail"); }
+    else { runtime.lux_ok = true; konfVeml(); }
+    runtime.ens_ok = initEns(); if (!runtime.ens_ok) { logf("WARN", "ENS160 init fail"); }
+    else if (!ens160->setMode(ENS160_OPMODE_STD)) { runtime.ens_ok = false; logf("WARN", "ENS160 mode fail"); }
     pinMode(PIN_LD2410_OUT, INPUT);
 }
 
-void setzeSensorDefaults() {
-    runtime.sensor.temp_01c = INT16_MIN;
-    runtime.sensor.hum_01pct = 0xFFFFU;
-    runtime.sensor.lux = 0xFFFFU;
-    runtime.sensor.pressure_pa = PRESSURE_UNGUELTIG;
-    runtime.sensor.gas_ohm = GAS_OHM_UNGUELTIG;
-    runtime.sensor.aqi = AIR_METRIC_UNGUELTIG;
-    runtime.sensor.tvoc_ppb = AIR_METRIC_UNGUELTIG;
-    runtime.sensor.eco2_ppm = AIR_METRIC_UNGUELTIG;
-    runtime.sensor.motion = false;
-    runtime.sensor.fault = false;
+void defSensor() {
+    runtime.sensor.temp_01c = INT16_MIN; runtime.sensor.hum_01pct = 0xFFFFU; runtime.sensor.lux = 0xFFFFU;
+    runtime.sensor.pressure_pa = PRESSURE_UNGUELTIG; runtime.sensor.gas_ohm = GAS_OHM_UNGUELTIG;
+    runtime.sensor.aqi = AIR_METRIC_UNGUELTIG; runtime.sensor.tvoc_ppb = AIR_METRIC_UNGUELTIG; runtime.sensor.eco2_ppm = AIR_METRIC_UNGUELTIG;
+    runtime.sensor.motion = false; runtime.sensor.fault = false;
 }
 
-bool sensorRecoveryFaellig(unsigned long letzterVersuchMs, unsigned long jetzt) {
-    return letzterVersuchMs == 0UL ||
-           (jetzt - letzterVersuchMs) >= SENSOR_RECOVERY_RETRY_INTERVAL_MS;
+bool recovDue(unsigned long l, unsigned long j) { return l == 0 || (j - l) >= SENSOR_RECOVERY_RETRY_INTERVAL_MS; }
+void bmeRecov(unsigned long j) { if (runtime.bme_ok || !recovDue(runtime.letzter_bme_recovery_ms, j)) return; runtime.letzter_bme_recovery_ms = j; runtime.bme_ok = initBme(); }
+void luxRecov(unsigned long j) { if (runtime.lux_ok || !recovDue(runtime.letzter_lux_recovery_ms, j)) return; runtime.letzter_lux_recovery_ms = j; runtime.lux_ok = veml.begin(); if (runtime.lux_ok) konfVeml(); }
+void ensRecov(unsigned long j) { if (runtime.ens_ok || !recovDue(runtime.letzter_ens_recovery_ms, j)) return; runtime.letzter_ens_recovery_ms = j; runtime.ens_ok = initEns(); if (runtime.ens_ok) ens160->setMode(ENS160_OPMODE_STD); }
+
+bool gasWarmupOk(unsigned long j) { return (j - runtime.boot_ms) >= NET_ERL_BME680_GAS_WARMUP_MS && runtime.bme680_gueltige_messungen >= NET_ERL_BME680_GAS_WARMUP_MIN_READS; }
+bool ensStale(unsigned long j) {
+    if (!runtime.ens_ok || !ens160) return true;
+    return runtime.letzter_ens_gueltig_ms > 0 && (j - runtime.letzter_ens_gueltig_ms) > NET_ERL_ENS160_STALE_TIMEOUT_MS;
 }
 
-void versucheBmeRecovery(unsigned long jetzt) {
-    if (runtime.bme_ok || !sensorRecoveryFaellig(runtime.letzter_bme_recovery_ms, jetzt)) return;
+void readEnv(unsigned long j) {
+    if ((j - runtime.letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
+    runtime.letztes_env_sample_ms = j;
+    bmeRecov(j); luxRecov(j); ensRecov(j);
 
-    runtime.letzter_bme_recovery_ms = jetzt;
-    runtime.bme_ok = initialisiereBme680();
-    logf(runtime.bme_ok ? "INFO" : "WARN",
-         runtime.bme_ok ? "BME680 Recovery erfolgreich" : "BME680 Recovery fehlgeschlagen");
-}
-
-void versucheLuxRecovery(unsigned long jetzt) {
-    if (runtime.lux_ok || !sensorRecoveryFaellig(runtime.letzter_lux_recovery_ms, jetzt)) return;
-
-    runtime.letzter_lux_recovery_ms = jetzt;
-    runtime.lux_ok = veml.begin();
-    if (runtime.lux_ok) {
-        konfiguriereVeml7700();
-    }
-    logf(runtime.lux_ok ? "INFO" : "WARN",
-         runtime.lux_ok ? "VEML7700 Recovery erfolgreich" : "VEML7700 Recovery fehlgeschlagen");
-}
-
-void versucheEnsRecovery(unsigned long jetzt) {
-    if (runtime.ens_ok || !sensorRecoveryFaellig(runtime.letzter_ens_recovery_ms, jetzt)) return;
-
-    runtime.letzter_ens_recovery_ms = jetzt;
-    runtime.ens_ok = initialisiereEns160();
-    logf(runtime.ens_ok ? "INFO" : "WARN",
-         runtime.ens_ok ? "ENS160 Recovery erfolgreich" : "ENS160 Recovery fehlgeschlagen");
-}
-
-void leseUmweltsensoren(unsigned long jetzt) {
-    if ((jetzt - runtime.letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
-    runtime.letztes_env_sample_ms = jetzt;
-
-    versucheBmeRecovery(jetzt);
-    versucheLuxRecovery(jetzt);
-    versucheEnsRecovery(jetzt);
-
-    bool bmeMesswertOk = runtime.bme_ok;
-    float bmeTempC = NAN;
-    float bmeHumPct = NAN;
-    if (!runtime.bme_ok) {
-        bmeMesswertOk = false;
-    } else {
-        if (!bme680.performReading()) {
-            bmeMesswertOk = false;
-            runtime.bme_ok = false;
-            logf("WARN", "BME680 Read fehlgeschlagen");
-        } else {
-            bmeTempC = bme680.temperature;
-            bmeHumPct = bme680.humidity;
-            const float pressurePa = bme680.pressure;
-            const uint32_t gasOhm = (uint32_t)bme680.gas_resistance;
-            const bool plausibel =
-                isfinite(bmeTempC) &&
-                isfinite(bmeHumPct) &&
-                isfinite(pressurePa) &&
-                bmeHumPct >= 0.0f &&
-                bmeHumPct <= 100.0f &&
-                pressurePa >= 30000.0f &&
-                pressurePa <= 110000.0f;
-
-            if (plausibel) {
-                runtime.sensor.temp_01c = (int16_t)lroundf(bmeTempC * 10.0f);
-                runtime.sensor.hum_01pct = clampHum01pct((long)lroundf(bmeHumPct * 10.0f));
-                runtime.sensor.pressure_pa = (uint32_t)lroundf(pressurePa);
-                if (runtime.bme680_gueltige_messungen < 255U) {
-                    runtime.bme680_gueltige_messungen++;
-                }
-                runtime.sensor.gas_ohm =
-                    (bme680GasWarmupAbgeschlossen(jetzt) && gasOhm > 0UL)
-                        ? gasOhm
-                        : GAS_OHM_UNGUELTIG;
-            } else {
-                bmeMesswertOk = false;
-                logf("WARN", "BME680 Messwerte unplausibel");
-            }
-        }
+    if (runtime.bme_ok && bme680.performReading()) {
+        float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
+        uint32_t g = bme680.gas_resistance;
+        if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
+            runtime.sensor.temp_01c = (int16_t)lroundf(t * 10.0f); runtime.sensor.hum_01pct = cH((long)lroundf(h * 10.0f));
+            runtime.sensor.pressure_pa = (uint32_t)lroundf(p);
+            if (runtime.bme680_gueltige_messungen < 255) runtime.bme680_gueltige_messungen++;
+            runtime.sensor.gas_ohm = (gasWarmupOk(j) && g > 0) ? g : GAS_OHM_UNGUELTIG;
+        } else { runtime.bme_ok = false; logf("WARN", "BME680 unplausibel"); }
     }
 
     if (runtime.lux_ok) {
-        const float lux = veml.readLux();
-        if (!isnan(lux) && lux >= 0.0f) {
-            runtime.sensor.lux = clampToU16((long)lroundf(lux));
-        } else {
-            runtime.lux_ok = false;
-            logf("WARN", "VEML7700 Read fehlgeschlagen");
-        }
+        float l = veml.readLux(); if (!isnan(l) && l >= 0) runtime.sensor.lux = c16((long)lroundf(l));
+        else { runtime.lux_ok = false; logf("WARN", "VEML7700 read fail"); }
     }
 
-    if (runtime.ens_ok && ens160 != nullptr && bmeMesswertOk) {
-        const int compResult = schreibeEns160EnvData(runtime.ens160_adresse, bmeTempC, bmeHumPct);
-        if (compResult != 0) {
-            logf("WARN", "ENS160 Kompensation fehlgeschlagen (err=%d)", compResult);
-        }
+    if (runtime.ens_ok && ens160 && runtime.bme_ok) {
+        int r = writeEnsEnv(runtime.ens160_adresse, bme680.temperature, bme680.humidity);
+        if (r != 0) logf("WARN", "ENS160 comp fail err=%d", r);
     }
 
-    bool ensMesswertOk = false;
-    if (runtime.ens_ok && ens160 != nullptr) {
-        if (ens160->measure(false)) {
-            const uint16_t rawAqi500 = ens160->getAQI500();
-            const uint16_t rawAqi = ens160->getAQI();
-            const uint16_t mappedAqi =
-                (rawAqi500 > 0U && rawAqi500 <= 500U) ? rawAqi500 : mapEns160AqiZu500(rawAqi);
-
-            if (mappedAqi > 0U) {
-                runtime.sensor.aqi = mappedAqi;
-                runtime.sensor.tvoc_ppb = ens160->getTVOC();
-                runtime.sensor.eco2_ppm = ens160->geteCO2();
-                runtime.letzter_ens_gueltig_ms = jetzt;
-                ensMesswertOk = true;
-            }
-        }
+    if (runtime.ens_ok && ens160 && ens160->measure(false)) {
+        uint16_t aq5 = ens160->getAQI500(), aq = ens160->getAQI();
+        uint16_t maq = (aq5 > 0 && aq5 <= 500) ? aq5 : mapAqi500(aq);
+        if (maq > 0) { runtime.sensor.aqi = maq; runtime.sensor.tvoc_ppb = ens160->getTVOC(); runtime.sensor.eco2_ppm = ens160->geteCO2(); runtime.letzter_ens_gueltig_ms = j; }
     }
 
-    if (!ensMesswertOk && ens160FehltZuLange(jetzt)) {
-        runtime.sensor.aqi = AIR_METRIC_UNGUELTIG;
-        runtime.sensor.tvoc_ppb = AIR_METRIC_UNGUELTIG;
-        runtime.sensor.eco2_ppm = AIR_METRIC_UNGUELTIG;
-    }
-
-    runtime.fault = !(bmeMesswertOk && runtime.lux_ok) || ens160FehltZuLange(jetzt);
+    if (ensStale(j)) { runtime.sensor.aqi = AIR_METRIC_UNGUELTIG; runtime.sensor.tvoc_ppb = AIR_METRIC_UNGUELTIG; runtime.sensor.eco2_ppm = AIR_METRIC_UNGUELTIG; }
+    runtime.fault = !(runtime.bme_ok && runtime.lux_ok) || !runtime.ens_ok;
     runtime.sensor.fault = runtime.fault;
 
-    if (runtime.motion_aktiv &&
-        runtime.pending_auto_on_decision &&
-        !runtime.relay_1 &&
-        runtime.sensor.lux != 0xFFFFU) {
+    if (runtime.motion_aktiv && runtime.pending_auto_on_decision && !runtime.relay_1 && runtime.sensor.lux != 0xFFFFU) {
         runtime.pending_auto_on_decision = false;
-        if (runtime.sensor.lux <= runtime.auto_on_lux_threshold) {
-            runtime.relay_auto_owned = true;
-            runtime.blocked_by_lux = false;
-            setzeRelayAusgang(true, "auto_on_motion_late_lux");
-            sendeRelayEvent(SH_TRIGGER_AUTO);
-            runtime.state_report_offen = true;
-            logf("INFO", "motion weiter aktiv, auto_on nach erstem lux=%u <= schwelle=%u", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
-        } else {
-            runtime.blocked_by_lux = true;
-            runtime.state_report_offen = true;
-            logf("INFO", "motion weiter aktiv, auto_on nach erstem lux blockiert (lux=%u schwelle=%u)", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
-        }
+        if (runtime.sensor.lux <= runtime.auto_on_lux_threshold) { runtime.relay_auto_owned = true; runtime.blocked_by_lux = false; setRelay(true, "auto_on_late_lux"); sendRelayEvent(SH_TRIGGER_AUTO); runtime.state_report_offen = true; }
+        else { runtime.blocked_by_lux = true; runtime.state_report_offen = true; }
     }
 }
 
-void loggeSnapshot(unsigned long jetzt) {
-    if ((jetzt - runtime.letztes_snapshot_log_ms) < NET_ERL_SNAPSHOT_LOG_INTERVAL_MS) return;
-    runtime.letztes_snapshot_log_ms = jetzt;
+// =============================================================================
+// PRAESENZ (LD2410) + BUTTON
+// =============================================================================
 
-    logf("INFO",
-         "snapshot temp_01c=%d hum_01pct=%u lux=%u pressure_pa=%lu gas_ohm=%lu aqi=%u tvoc_ppb=%u eco2_ppm=%u motion=%s relay_1=%s auto_owned=%s pending_auto_on=%s fault=%s ld2410_out=%s",
-         (int)runtime.sensor.temp_01c,
-         (unsigned)runtime.sensor.hum_01pct,
-         (unsigned)runtime.sensor.lux,
-         (unsigned long)runtime.sensor.pressure_pa,
-         (unsigned long)runtime.sensor.gas_ohm,
-         (unsigned)runtime.sensor.aqi,
-         (unsigned)runtime.sensor.tvoc_ppb,
-         (unsigned)runtime.sensor.eco2_ppm,
-         runtime.motion_aktiv ? "true" : "false",
-         runtime.relay_1 ? "true" : "false",
-         runtime.relay_auto_owned ? "true" : "false",
-         runtime.pending_auto_on_decision ? "true" : "false",
-         runtime.fault ? "true" : "false",
-         runtime.ld2410_raw ? "true" : "false");
-}
-
-void motionAktivWerden(unsigned long jetzt) {
-    runtime.motion_aktiv = true;
-    runtime.sensor.motion = true;
-    runtime.letzte_motion_ms = jetzt;
-    runtime.state_report_offen = true;
+void motionOn(unsigned long j) {
+    runtime.motion_aktiv = true; runtime.sensor.motion = true;
+    runtime.letzte_motion_ms = j; runtime.state_report_offen = true;
     runtime.pending_motion_event_state = 1U;
-    sendeAusstehendesMotionEvent();
-
-    runtime.blocked_by_lux = false;
-    runtime.pending_auto_on_decision = false;
+    runtime.blocked_by_lux = false; runtime.pending_auto_on_decision = false;
     if (!runtime.relay_1) {
-        if (runtime.sensor.lux == 0xFFFFU) {
-            runtime.pending_auto_on_decision = true;
-            logf("INFO", "motion erkannt, warte auf ersten gueltigen lux-wert vor auto_on");
-        } else if (runtime.sensor.lux <= runtime.auto_on_lux_threshold) {
-            runtime.relay_auto_owned = true;
-            setzeRelayAusgang(true, "auto_on_motion");
-            sendeRelayEvent(SH_TRIGGER_AUTO);
-            logf("INFO", "motion erkannt, lux=%u <= schwelle=%u, timer gestartet", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
-        } else {
-            // Sinkende Lux waehrend laufender Praesenz schaltet nicht automatisch nach.
-            runtime.blocked_by_lux = true;
-            logf("INFO", "motion erkannt, auto_on durch lux blockiert (lux=%u schwelle=%u)", (unsigned)runtime.sensor.lux, (unsigned)runtime.auto_on_lux_threshold);
-        }
-    } else {
-        logf("INFO", "motion erkannt, timer gestartet");
+        if (runtime.sensor.lux == 0xFFFFU) runtime.pending_auto_on_decision = true;
+        else if (runtime.sensor.lux <= runtime.auto_on_lux_threshold) { runtime.relay_auto_owned = true; setRelay(true, "auto_on_motion"); sendRelayEvent(SH_TRIGGER_AUTO); }
+        else runtime.blocked_by_lux = true;
     }
 }
 
-void motionTimerReset(unsigned long jetzt) {
-    runtime.letzte_motion_ms = jetzt;
-}
-
-void motionInaktivWerden() {
-    runtime.motion_aktiv = false;
-    runtime.sensor.motion = false;
-    runtime.letzte_motion_ms = 0UL;
-    runtime.blocked_by_lux = false;
-    runtime.pending_auto_on_decision = false;
-    runtime.state_report_offen = true;
-    runtime.pending_motion_event_state = 2U;
-    sendeAusstehendesMotionEvent();
-    logf("INFO", "motion false nach timerablauf");
-
-    if (runtime.relay_1 && runtime.relay_auto_owned) {
-        setzeRelayAusgang(false, "auto_off_timer");
-        sendeRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER);
-        runtime.relay_auto_owned = false;
-        logf("INFO", "lampe aus nach timerablauf");
+void pollPresence(unsigned long j) {
+    if ((j - runtime.letztes_sensor_poll_ms) < NET_ERL_SENSOR_POLL_INTERVAL_MS) return;
+    runtime.letztes_sensor_poll_ms = j;
+    bool high = digitalRead(PIN_LD2410_OUT) == HIGH; runtime.ld2410_raw = high;
+    if (high) { if (!runtime.motion_aktiv) motionOn(j); else runtime.letzte_motion_ms = j; return; }
+    unsigned long offMs = (unsigned long)runtime.auto_off_delay_s * 1000UL;
+    if (runtime.motion_aktiv && runtime.letzte_motion_ms > 0 && (j - runtime.letzte_motion_ms) >= offMs) {
+        runtime.motion_aktiv = false; runtime.sensor.motion = false; runtime.blocked_by_lux = false;
+        runtime.pending_auto_on_decision = false; runtime.state_report_offen = true;
+        runtime.pending_motion_event_state = 2U;
+        if (runtime.relay_1 && runtime.relay_auto_owned) { setRelay(false, "auto_off"); sendRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER); runtime.relay_auto_owned = false; }
     }
 }
 
-void pollPresence(unsigned long jetzt) {
-    if ((jetzt - runtime.letztes_sensor_poll_ms) < NET_ERL_SENSOR_POLL_INTERVAL_MS) return;
-    runtime.letztes_sensor_poll_ms = jetzt;
-
-    const bool presenceHigh = (digitalRead(PIN_LD2410_OUT) == HIGH);
-    runtime.ld2410_raw = presenceHigh;
-
-    if (presenceHigh) {
-        if (!runtime.motion_aktiv) {
-            motionAktivWerden(jetzt);
-        } else {
-            motionTimerReset(jetzt);
-        }
-        return;
-    }
-
-    const unsigned long autoOffDelayMs = (unsigned long)runtime.auto_off_delay_s * 1000UL;
-    if (runtime.motion_aktiv &&
-        runtime.letzte_motion_ms > 0UL &&
-        (jetzt - runtime.letzte_motion_ms) >= autoOffDelayMs) {
-        motionInaktivWerden();
-    }
-}
-
-bool leseButtonAktiv() {
+bool readBtn() {
 #if BUTTON_1_ACTIVE_LOW
     return digitalRead(PIN_BUTTON_1) == LOW;
 #else
@@ -1313,169 +574,87 @@ bool leseButtonAktiv() {
 #endif
 }
 
-void verarbeiteLokalenButton(unsigned long jetzt) {
-    const bool rawActive = leseButtonAktiv();
-    if (rawActive != runtime.button_raw_active) {
-        runtime.button_raw_active = rawActive;
-        runtime.button_changed_at_ms = jetzt;
-    }
-
-    if ((jetzt - runtime.button_changed_at_ms) < BUTTON_DEBOUNCE_MS) return;
-    if (rawActive == runtime.button_stable_active) return;
-
-    runtime.button_stable_active = rawActive;
-    if (runtime.button_stable_active) {
-        runtime.button_pressed_at_ms = jetzt;
-        return;
-    }
-
-    const unsigned long heldMs = runtime.button_pressed_at_ms > 0UL ? (jetzt - runtime.button_pressed_at_ms) : 0UL;
-    runtime.button_pressed_at_ms = 0UL;
-    if (heldMs >= SETUP_BUTTON_HOLD_MS) {
-        logf("INFO", "Button kurzlogik ignoriert: Setup-Hold wurde benutzt");
-        return;
-    }
-
-    runtime.relay_auto_owned = false;
-    runtime.pending_auto_on_decision = false;
-    runtime.blocked_by_lux = false;
-    setzeRelayAusgang(!runtime.relay_1, "local_button");
-    sendeRelayEvent(SH_TRIGGER_MANUAL_BUTTON);
-    runtime.state_report_offen = true;
-    logf("INFO", "Lokaler Button toggelt Licht");
+void processBtn(unsigned long j) {
+    bool raw = readBtn();
+    if (raw != runtime.button_raw_active) { runtime.button_raw_active = raw; runtime.button_changed_at_ms = j; }
+    if ((j - runtime.button_changed_at_ms) < BUTTON_DEBOUNCE_MS) return;
+    if (raw == runtime.button_stable_active) return;
+    runtime.button_stable_active = raw;
+    if (raw) { runtime.button_pressed_at_ms = j; return; }
+    unsigned long held = runtime.button_pressed_at_ms > 0 ? (j - runtime.button_pressed_at_ms) : 0;
+    runtime.button_pressed_at_ms = 0;
+    if (held >= SETUP_BUTTON_HOLD_MS) return;
+    runtime.relay_auto_owned = false; runtime.pending_auto_on_decision = false; runtime.blocked_by_lux = false;
+    setRelay(!runtime.relay_1, "button"); sendRelayEvent(SH_TRIGGER_MANUAL_BUTTON); runtime.state_report_offen = true;
 }
 
+// =============================================================================
+// ARDUINO – setup() und loop()
+// =============================================================================
+
 void setup() {
-    if (DEBUG_LOKAL_AKTIV) {
-        Serial.begin(115200);
-        delay(150);
-    }
-
-    initialisiereTaskWatchdog();
-
+    if (DEBUG_LOKAL_AKTIV) { Serial.begin(115200); delay(150); }
+    initWdt();
     runtime = {};
     runtime.report_interval_s = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
-    runtime.stored_sensor_send_interval_s = DEFAULT_STORED_SENSOR_SEND_INTERVAL_S;
+    runtime.stored_sensor_send_interval_s = NET_ERL_DEFAULT_REPORT_INTERVAL_S;
     runtime.auto_on_lux_threshold = NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD;
     runtime.auto_off_delay_s = NET_ERL_DEFAULT_AUTO_OFF_DELAY_S;
-    runtime.state_report_offen = true;
-    runtime.boot_ms = millis();
+    runtime.state_report_offen = true; runtime.boot_ms = millis(); runtime.sensor.motion = false;
+    defSensor();
+    pinMode(PIN_RELAY_1, OUTPUT); setRelay(false, "boot"); pinMode(PIN_BUTTON_1, INPUT_PULLUP);
 
-    setzeSensorDefaults();
+    auto cfg = SmartHome::NetErlProvisioning::makeConfig(DEVICE_ID, STORAGE_NS,
+        NET_ERL_DEFAULT_REPORT_INTERVAL_S, NET_ERL_DEFAULT_REPORT_INTERVAL_S,
+        MIN_REPORT_INTERVAL_S, MAX_REPORT_INTERVAL_S);
+    cfg.setupButtonPin = SETUP_BUTTON_PIN; cfg.setupButtonActiveLow = SETUP_BUTTON_ACTIVE_LOW != 0;
+    cfg.setupButtonHoldMs = SETUP_BUTTON_HOLD_MS; cfg.setupIndicatorLedPin = SETUP_INDICATOR_LED_PIN;
+    cfg.setupIndicatorLedActiveHigh = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0; cfg.setupIndicatorBlinkMs = SETUP_INDICATOR_BLINK_MS;
 
-    pinMode(PIN_RELAY_1, OUTPUT);
-    setzeRelayAusgang(false, "boot_default_off");
-    pinMode(PIN_BUTTON_1, BUTTON_1_ACTIVE_LOW ? INPUT_PULLUP : INPUT);
+    runtime.provisioning_bereit = nodeProvisioning.begin(cfg,
+        &runtime.master_mac_gueltig, runtime.master_mac,
+        &runtime.report_interval_s, &runtime.stored_sensor_send_interval_s,
+        &runtime.setup_mode, &runtime.setup_ap_aktiv, &runtime.restart_pending,
+        &runtime.restart_requested_at_ms, runtime.setup_ap_ssid, sizeof(runtime.setup_ap_ssid),
+        &kitchenProvisioningHandler, provLog);
+    if (!runtime.provisioning_bereit) { logf("WARN", "Prov init fail"); return; }
 
-#if PIN_STATUS_LED >= 0
-    pinMode(PIN_STATUS_LED, OUTPUT);
-    digitalWrite(PIN_STATUS_LED, LOW);
-#endif
+    setReportInt(nodeProvisioning.sanitizeStatusSendInterval(runtime.report_interval_s));
+    runtime.stored_sensor_send_interval_s = nodeProvisioning.sanitizeSensorSendInterval(runtime.stored_sensor_send_interval_s);
+    logf("INFO", "%s v%s (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
+    logf("INFO", "%s %s %s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
 
-    SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
-        SmartHome::NetErlProvisioning::makeConfig(
-            DEVICE_ID,
-            NET_ERL_KITCHEN_STORAGE_NAMESPACE,
-            NET_ERL_DEFAULT_REPORT_INTERVAL_S,
-            DEFAULT_STORED_SENSOR_SEND_INTERVAL_S,
-            MIN_REPORT_INTERVAL_S,
-            MAX_REPORT_INTERVAL_S);
-    provisioningConfig.setupButtonPin = SETUP_BUTTON_PIN;
-    provisioningConfig.setupButtonActiveLow = SETUP_BUTTON_ACTIVE_LOW != 0;
-    provisioningConfig.setupButtonHoldMs = SETUP_BUTTON_HOLD_MS;
-    provisioningConfig.setupIndicatorLedPin = SETUP_INDICATOR_LED_PIN;
-    provisioningConfig.setupIndicatorLedActiveHigh = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0;
-    provisioningConfig.setupIndicatorBlinkMs = SETUP_INDICATOR_BLINK_MS;
-
-    runtime.provisioning_bereit = nodeProvisioning.begin(
-        provisioningConfig,
-        &runtime.master_mac_gueltig,
-        runtime.master_mac,
-        &runtime.report_interval_s,
-        &runtime.stored_sensor_send_interval_s,
-        &runtime.setup_mode,
-        &runtime.setup_ap_aktiv,
-        &runtime.restart_pending,
-        &runtime.restart_requested_at_ms,
-        runtime.setup_ap_ssid,
-        sizeof(runtime.setup_ap_ssid),
-        &netErlKitchenProvisioningHandler,
-        provisioningLog);
-
-    if (!runtime.provisioning_bereit) {
-        logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
-        return;
-    }
-
-    wendeReportIntervalAn(nodeProvisioning.sanitizeStatusSendInterval(runtime.report_interval_s));
-    runtime.stored_sensor_send_interval_s =
-        nodeProvisioning.sanitizeSensorSendInterval(runtime.stored_sensor_send_interval_s);
-
-    logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
-    logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
-    logf("INFO", "config report_interval_s=%u stored_sensor_send_interval_s=%u auto_off_delay_s=%u lux_threshold=%u",
-         (unsigned)runtime.report_interval_s,
-         (unsigned)runtime.stored_sensor_send_interval_s,
-         (unsigned)runtime.auto_off_delay_s,
-         (unsigned)runtime.auto_on_lux_threshold);
-
-    // Ohne persistierte Master-Bindung geht der Geraetepfad direkt
-    // in den projektweiten Provisioning-Modus statt blind normal weiterzulaufen.
-    if (!nodeProvisioning.hasStoredMasterMac()) {
-        logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
-        nodeProvisioning.enterSetupMode();
-        return;
-    }
-
-    initialisiereSensorik();
-    initialisiereFunk();
-    sendeHello();
+    if (!nodeProvisioning.hasStoredMasterMac()) { nodeProvisioning.enterSetupMode(); return; }
+    initSensor(); initFunk(); sendHello();
 }
 
 void loop() {
-    esp_task_wdt_reset();
-    nodeProvisioning.update();
+    esp_task_wdt_reset(); nodeProvisioning.update();
+    if (!runtime.provisioning_bereit || runtime.setup_mode) { delay(LOOP_INTERVAL_MS); return; }
+    if (!runtime.funk_bereit) initFunk();
 
-    if (!runtime.provisioning_bereit || runtime.setup_mode) {
-        delay(LOOP_INTERVAL_MS);
-        return;
+    unsigned long j = millis();
+    pollPresence(j); processBtn(j); readEnv(j);
+
+    if (runtime.pending_motion_event_state != 0U && runtime.master_bekannt && runtime.master_mac_gueltig) {
+        if (sendMotionEvent(runtime.pending_motion_event_state == 1U)) runtime.pending_motion_event_state = 0U;
     }
 
-    if (!runtime.funk_bereit) {
-        initialisiereFunk();
+    if (!runtime.master_bekannt && (j - runtime.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) sendHello();
+    if (runtime.master_bekannt && (j - runtime.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS) sendHeartbeat();
+
+    bool sf = runtime.master_bekannt && runtime.master_mac_gueltig &&
+        (runtime.state_report_offen || runtime.letzter_state_ms == 0 ||
+         (runtime.state_interval_ms > 0 && (j - runtime.letzter_state_ms) >= runtime.state_interval_ms));
+    if (sf) sendState();
+
+    if ((j - runtime.letztes_snapshot_log_ms) >= NET_ERL_SNAPSHOT_LOG_INTERVAL_MS && DEBUG_LOKAL_AKTIV) {
+        logf("INFO", "snap t=%d h=%u l=%u p=%lu g=%lu a=%u tv=%u ec=%u m=%s r=%s",
+            (int)runtime.sensor.temp_01c, runtime.sensor.hum_01pct, runtime.sensor.lux,
+            (unsigned long)runtime.sensor.pressure_pa, (unsigned long)runtime.sensor.gas_ohm,
+            runtime.sensor.aqi, runtime.sensor.tvoc_ppb, runtime.sensor.eco2_ppm,
+            runtime.motion_aktiv ? "1" : "0", runtime.relay_1 ? "1" : "0");
+        runtime.letztes_snapshot_log_ms = j;
     }
-
-    const unsigned long jetzt = millis();
-
-    leseUmweltsensoren(jetzt);
-    pollPresence(jetzt);
-    verarbeiteLokalenButton(jetzt);
-    loggeSnapshot(jetzt);
-    sendeAusstehendesMotionEvent();
-
-    if (!runtime.master_bekannt &&
-        (runtime.letztes_hello_ms == 0UL ||
-         (jetzt - runtime.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS)) {
-        sendeHello();
-    }
-
-    if (runtime.master_bekannt &&
-        (runtime.letzter_heartbeat_ms == 0UL ||
-         (jetzt - runtime.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS)) {
-        sendeHeartbeat();
-    }
-
-    const bool stateFaellig =
-        runtime.master_bekannt &&
-        runtime.master_mac_gueltig &&
-        (runtime.state_report_offen ||
-         runtime.letzter_state_ms == 0UL ||
-         (runtime.state_interval_ms > 0UL &&
-          (jetzt - runtime.letzter_state_ms) >= runtime.state_interval_ms));
-
-    if (stateFaellig) {
-        sendeState();
-    }
-
     delay(LOOP_INTERVAL_MS);
 }
