@@ -37,6 +37,13 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "MathUtils.h"
+
+using SmartHome::clampToU16;
+using SmartHome::clampHum01pct;
+using SmartHome::absDiffU16;
+using SmartHome::absDiffI16;
+using SmartHome::valueChangedSignificantU32;
 
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS 1
@@ -93,30 +100,9 @@ ErweiterterState erweiterterState = {
     NET_SEN_AIR_METRIC_UNGUELTIG};
 bool erweiterterStateGeaendert = true;
 
-// -- Hilfsfunktionen --
-// clampToU16 – Wert auf uint16-Bereich begrenzen (0-65535)
-uint16_t clampToU16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
-// clampHum01pct – Wert auf 0.1%-Feuchtebereich begrenzen (0-1000)
-uint16_t clampHum01pct(long v) { return v < 0L ? 0U : v > 1000L ? 1000U : (uint16_t)v; }
-// absDiffU16 – Absolute Differenz zweier uint16-Werte (vorzeichenlos)
-uint16_t absDiffU16(uint16_t a, uint16_t b) { return a > b ? (uint16_t)(a - b) : (uint16_t)(b - a); }
-// absDiffI16 – Absolute Differenz zweier int16-Werte (immer positiv, uint16-Rueckgabe)
-uint16_t absDiffI16(int16_t a, int16_t b) {
-    const int32_t d = (int32_t)a - (int32_t)b;
-    const uint32_t ad = d < 0 ? (uint32_t)(-d) : (uint32_t)d;
-    return ad > 65535UL ? 65535U : (uint16_t)ad;
-}
-
-// wertAendertU32 – Prueft ob sich Wert n gegenueber alt a signifikant geaendert hat (>= delta)
-bool wertAendertU32(uint32_t alt, uint32_t neu, uint32_t invalid, uint32_t delta) {
-    if (alt == neu) return false;
-    if (alt == invalid || neu == invalid) return true;
-    return (alt > neu ? alt - neu : neu - alt) >= delta;
-}
-
 bool uebernehmeWertU32(uint32_t* z, uint32_t n, uint32_t inv, uint32_t d) {
     if (!z) return false;
-    const bool c = wertAendertU32(*z, n, inv, d);
+    const bool c = valueChangedSignificantU32(*z, n, inv, d);
     *z = n; return c;
 }
 
