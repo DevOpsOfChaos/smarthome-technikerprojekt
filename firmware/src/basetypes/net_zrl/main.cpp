@@ -54,6 +54,9 @@
 #include "../../../include/ProjectVersion.h"
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 #include "../../../lib/sh_protocol/src/Protocol.h"
+#include "../../../include/MathUtils.h"
+using SmartHome::clampToU16;
+using SmartHome::absDiffU32;
 
 // Alle Konstanten, Typen und Hilfsfunktionen liegen im anonymen Namespace
 // (interne Kapselung, kein externer Linker-Zugriff).
@@ -354,6 +357,7 @@ RuntimeState runtime = {};
 // =============================================================================
 
 // logf – Formatiertes Logging (nur bei aktiviertem Debug)
+void logf(const char* level, const char* format, ...) {
     if (!DEBUG_AKTIV) return;
 
     char message[240];
@@ -535,6 +539,7 @@ const uint8_t* holeHelloZielMac() {
 // =============================================================================
 
 // stellePeerSicher – Registriert eine MAC als ESP-NOW-Peer
+bool stellePeerSicher(const uint8_t* mac) {
     if (mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
@@ -748,6 +753,7 @@ bool activeHighFuerRichtung(CoverDirection direction) {
 // =============================================================================
 
 // berechneKalibrierstatus – Aktualisiert isCalibrated (beide Fahrzeiten gueltig)
+void berechneKalibrierstatus() {
     runtime.isCalibrated =
         isTravelTimeValid(runtime.travelTimeUpMs) && isTravelTimeValid(runtime.travelTimeDownMs);
     if (!runtime.isCalibrated) {
@@ -1207,6 +1213,7 @@ bool sendeCoverEvent(uint8_t eventType, uint8_t trigger, uint8_t param1, uint16_
 // =============================================================================
 
 // setzeRelaisNeutral – Schaltet beide Relais aus (sichere Ruhestellung)
+void setzeRelaisNeutral(const char* grund) {
     schreibePin(PIN_RELAY_A, false, RELAY_A_ACTIVE_HIGH);
     schreibePin(PIN_RELAY_B, false, RELAY_B_ACTIVE_HIGH);
     runtime.relayAActive = false;
@@ -1453,6 +1460,7 @@ void fuehreFactoryResetAus() {
 // =============================================================================
 
 // starteKalibriermodus – Startet Kalibrierungs-State-Machine (faehrt zuerst nach oben)
+void starteKalibriermodus() {
     if (runtime.coverState == CoverState::Moving || runtime.setupMode || hatAusstehendeAktion()) return;
 
     runtime.calibrationMode = true;
