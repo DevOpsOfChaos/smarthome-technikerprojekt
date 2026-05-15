@@ -283,7 +283,7 @@ void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     SmartHome::ExtendedRelayComfortGasConfigStateReportPayload* p =
         static_cast<SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
     if (p != nullptr && size && *size >= sizeof(*p)) {
-        cpy(p->node_id, sizeof(p->node_id), DEVICE_ID);
+        safeStrCopy(p->node_id, sizeof(p->node_id), DEVICE_ID);
         p->relay_1 = runtime.relay_1 ? 1U : 0U;
         p->temp_01c = temp_01c;
         p->hum_01pct = hum_01pct;

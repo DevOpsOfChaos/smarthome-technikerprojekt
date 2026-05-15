@@ -265,8 +265,20 @@ struct NetZrlSetupSnapshot {
     bool relayUpUsesRelayA;
 };
 
-// RuntimeState – Zentraler Geraetezustand (alle Laufzeitdaten, ~70 Felder)
-// =============================================================================
+/**
+ * RuntimeState – Zentraler Geraetezustand (~70 Felder).
+ *
+ * GRUPPIERUNG (Reihenfolge ist bewusst gewaehlt):
+ *   1. Bewegung: coverState, coverDirection, Relais-Zustaende, Dead-Time
+ *   2. Kalibrierung: isCalibrated, Fahrzeiten, Kandidaten-Werte
+ *   3. Kommunikation: Master-MAC, Funk-Status, Sequenznummern
+ *   4. Taster: Entprellung, Hold-Erkennung, consumed-Flags
+ *   5. LEDs: Modus, Blink-Zustaende, ACK-Anzeige
+ *   6. Setup/Provisioning: AP-Status, serieller Puffer
+ *
+ * WICHTIG: Alle Felder werden in setup() mit {} initialisiert.
+ * Aenderungen an dieser Struktur erfordern Anpassung der Persistenz.
+ */
 struct RuntimeState {
     // ---- Bewegung ----
     CoverState coverState;                // Bewegungszustand (stopped/moving)
@@ -602,7 +614,21 @@ bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, si
     return sendePaketMitOptionen(zielMac, msgType, payload, payloadLen, label, 0U, nullptr);
 }
 
-// sendePaketMitRetry – Sendet mit bis zu 2 Wiederholungen bei Fehler
+// =============================================================================
+// sendePaketMitRetry – ESP-NOW-Paket mit Wiederholung bei Fehler senden.
+//
+// WAS: Sendet ein Paket und wiederholt es bis zu NET_ZRL_ESPNOW_RETRY_COUNT
+//      mal bei Misserfolg (Standard: 2 Retries, 50ms Pause).
+//
+// WARUM: ESP-NOW ist unzuverlaessig (kein ACK auf MAC-Layer). Retry
+//        erhoeht die Zustellwahrscheinlichkeit fuer kritische Nachrichten.
+//
+// SEQUENZ-NUMMER: Wird VOR dem Senden dekrementiert (nicht inkrementiert),
+//                 weil sendePaket() die Sequenz beim Aufruf hochzaehlt.
+//                 Bei Wiederholungen muss dieselbe Sequenznummer gesendet
+//                 werden, damit der Master Duplikate erkennen kann.
+//                 Bei 0 → 255 (uint8_t Wrap-Around).
+// =============================================================================
 #ifndef NET_ZRL_ESPNOW_RETRY_COUNT
 #define NET_ZRL_ESPNOW_RETRY_COUNT 2
 #endif
@@ -611,11 +637,21 @@ bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, si
 #endif
 
 bool sendePaketMitRetry(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
-    if (runtime.naechsteSeq == 0) runtime.naechsteSeq = 255;
-    else runtime.naechsteSeq--;
+    // Sequenznummer zuruecksetzen: Wiederholungen muessen dieselbe Seq-Nummer
+    // verwenden wie der erste Versuch (fuer Duplikat-Erkennung am Master).
+    // Da sendePaket() die Sequenz beim Aufruf erhoeht, gehen wir hier einen
+    // Schritt zurueck. Bei 0 → 255 (uint8_t Wrap).
+    if (runtime.naechsteSeq == 0) {
+        runtime.naechsteSeq = 255;
+    } else {
+        runtime.naechsteSeq--;
+    }
 
     for (int attempt = 0; attempt <= NET_ZRL_ESPNOW_RETRY_COUNT; attempt++) {
-        if (sendePaket(zielMac, msgType, payload, payloadLen, label)) return true;
+        if (sendePaket(zielMac, msgType, payload, payloadLen, label)) {
+            return true;  // Erfolgreich gesendet
+        }
+        // Nicht beim letzten Versuch noch einmal warten
         if (attempt < NET_ZRL_ESPNOW_RETRY_COUNT) {
             logf("WARN", "%s Retry %d/%d", label, attempt + 1, NET_ZRL_ESPNOW_RETRY_COUNT);
             delay(NET_ZRL_ESPNOW_RETRY_DELAY_MS);
@@ -677,16 +713,16 @@ bool entprelleButton(
     bool rawActive,
     bool& lastRawActive,
     unsigned long& changedAtMs,
-    bool stableActive,
+    bool previousStableActive,  // Vorheriger stabiler Zustand (nicht Referenz)
     unsigned long jetztMs) {
     if (rawActive != lastRawActive) {
         lastRawActive = rawActive;
         changedAtMs = jetztMs;
     }
-    if (stableActive != rawActive && (jetztMs - changedAtMs) >= BUTTON_DEBOUNCE_MS) {
+    if (previousStableActive != rawActive && (jetztMs - changedAtMs) >= BUTTON_DEBOUNCE_MS) {
         return rawActive;
     }
-    return stableActive;
+    return previousStableActive;
 }
 
 void schreibePin(int pin, bool active, bool activeHigh) {
@@ -1248,13 +1284,35 @@ void setzeRelaisNeutral(const char* grund) {
     logf("INFO", "Relais neutral (%s)", grund ? grund : "ohne grund");
 }
 
+/**
+ * setzeRelaisFuerRichtung -- Schaltet das Relais fuer eine Fahrtrichtung ein.
+ *
+ * SICHERHEIT: Diese Funktion steuert die physischen Relais des Motors.
+ * Ein falscher Schaltvorgang kann zu Motor-Kurzschluessen fuehren.
+ *
+ * SCHALTREIHENFOLGE (Break-Before-Make):
+ *   1. Dead-Time abwarten (mindestens 300ms seit letztem Wechsel)
+ *   2. BEIDE Relais ausschalten (sicherer Zustand)
+ *   3. Ziel-Relais einschalten
+ *
+ * WARUM Dead-Time? Der Motor benoetigt eine Mindestpause zwischen
+ * Richtungswechseln, um mechanischen Stress und elektrische Ueberlastung
+ * zu vermeiden.
+ *
+ * PARAMETER:
+ *   direction -- Fahrtrichtung (Up/Down), None schaltet beide aus
+ *   grund     -- Beschreibungstext fuer Logging (z.B. "kalibrierung")
+ */
 void setzeRelaisFuerRichtung(CoverDirection direction, const char* grund) {
+    // Guard: Ungueltige Richtung -> beide Relais aus
     if (direction == CoverDirection::None) {
         setzeRelaisNeutral("ungueltige richtung");
         return;
     }
 
-    // Dead-Time: Verhindere schnellen Richtungswechsel (Schutz vor Motor-Kurzschluss)
+    // Schritt 1: Dead-Time einhalten (Schutz vor Motor-Kurzschluss)
+    //   - letzteRelaisWechselMs == 0 bedeutet: noch kein Wechsel seit Boot
+    //   - Delta-Vergleich ist millis()-wrap-sicher
     const unsigned long jetzt = millis();
     const unsigned long seitLetztemWechsel = jetzt - runtime.letzteRelaisWechselMs;
     if (runtime.letzteRelaisWechselMs > 0 && seitLetztemWechsel < RELAY_DEAD_TIME_MS) {
@@ -1263,11 +1321,13 @@ void setzeRelaisFuerRichtung(CoverDirection direction, const char* grund) {
         delay(restMs);
     }
 
+    // Schritt 2: Break-Before-Make -- ZUERST beide Relais AUS
     schreibePin(PIN_RELAY_A, false, RELAY_A_ACTIVE_HIGH);
     schreibePin(PIN_RELAY_B, false, RELAY_B_ACTIVE_HIGH);
     runtime.relayAActive = false;
     runtime.relayBActive = false;
 
+    // Schritt 3: ZIEL-Relais EIN (nach sicherer Pause)
     const int pin = pinFuerRichtung(direction);
     schreibePin(pin, true, activeHighFuerRichtung(direction));
     runtime.relayAActive = pin == PIN_RELAY_A;
@@ -1301,13 +1361,35 @@ void aktualisierePositionsschaetzung(unsigned long jetztMs) {
     runtime.coverPosition = (int16_t)nextPosition;
 }
 
+/**
+ * stoppeFahrt -- Stoppt eine aktive Fahrt und setzt alle Bewegungsfelder zurueck.
+ *
+ * WAS:   Schaltet Relais aus, aktualisiert Position, setzt Zustand auf "stopped".
+ *
+ * PARAMETER:
+ *   grund                    -- Beschreibungstext fuer Logging
+ *   unkalibrierteEndlageBestaetigt -- Wenn true UND nicht kalibriert: die aktuelle
+ *                                Position wird als gueltig uebernommen (z.B. nach
+ *                                Auto-Stop bei Endlagen-Erreichung). Wenn false:
+ *                                Position wird auf "unbekannt" gesetzt.
+ *
+ * WARUM unkalibrierteEndlageBestaetigt? Ohne Kalibrierung wissen wir nicht,
+ * wo der Rollladen steht. NUR wenn die Fahrt bis zur berechneten Endzeit
+ * lief (Auto-Stop), koennen wir 0 oder 100 als sicher annehmen.
+ */
 void stoppeFahrt(const char* grund, bool unkalibrierteEndlageBestaetigt = false) {
+    // Position zum Stop-Zeitpunkt berechnen
     aktualisierePositionsschaetzung(millis());
+
+    // Ohne Kalibrierung: Position ist unbekannt (ausser Endlage wurde bestaetigt)
     if (!runtime.isCalibrated && !unkalibrierteEndlageBestaetigt) {
-        // Nach manuellem Stop oder unklarem Abbruch bleibt die unkalibrierte Lage unbekannt.
         setzeCoverPositionUnbekannt();
     }
+
+    // Hardware: Relais ausschalten
     setzeRelaisNeutral(grund);
+
+    // Alle Bewegungsfelder zuruecksetzen (Zustandsmaschine auf "stopped")
     runtime.coverState = CoverState::Stopped;
     runtime.coverDirection = CoverDirection::None;
     runtime.movementStartedAtMs = 0UL;
@@ -1316,6 +1398,8 @@ void stoppeFahrt(const char* grund, bool unkalibrierteEndlageBestaetigt = false)
     runtime.movementTargetsEndPosition = false;
     runtime.movementTargetsIntermediatePosition = false;
     runtime.movementTargetPosition = runtime.coverPosition;
+
+    // STATE-Report ausloesen (Master muss neuen Zustand erfahren)
     setzeStateReportOffen();
 }
 
@@ -1346,6 +1430,21 @@ bool starteFahrt(CoverDirection direction, const char* grund, unsigned long auto
     return true;
 }
 
+/**
+ * startePositionsfahrt -- Faehrt den Rollladen zu einer Zielposition (0-100%).
+ *
+ * VORAUSSETZUNG: Kalibrierung muss abgeschlossen sein (isCalibrated).
+ *
+ * BERECHNUNG: Die Fahrzeit wird proportional zur Distanz berechnet.
+ *   Beispiel: 50% Distanz = 50% der kalibrierten Gesamt-Fahrzeit.
+ *   Mindestens 1ms wird immer gesetzt (vermeidet sofortigen Stop).
+ *
+ * PARAMETER:
+ *   zielPosition -- Ziel in Prozent (0=ganz unten, 100=ganz oben)
+ *   grund        -- Beschreibungstext fuer Logging
+ *
+ * RUECKGABE: true wenn Fahrt gestartet wurde, false bei Fehler
+ */
 bool startePositionsfahrt(int16_t zielPosition, const char* grund) {
     if (!runtime.isCalibrated) return false;
     if (runtime.coverState == CoverState::Moving) return false;
@@ -1364,9 +1463,13 @@ bool startePositionsfahrt(int16_t zielPosition, const char* grund) {
     const uint32_t fahrzeitMs = fahrzeitFuerRichtung(richtung);
     if (!isTravelTimeValid(fahrzeitMs)) return false;
 
-    const uint32_t deltaProzent = (uint32_t)abs((int)(gekapptesZiel - aktuellePosition));
+    // Distanz in Prozent berechnen (immer positiv)
+    const int32_t deltaProzent32 = abs((int32_t)gekapptesZiel - (int32_t)aktuellePosition);
+    const uint32_t deltaProzent = (uint32_t)deltaProzent32;
+
+    // Fahrzeit proportional zur Distanz: (Gesamtzeit * Distanz%) / 100
     unsigned long segmentMs = (unsigned long)((fahrzeitMs * deltaProzent) / 100UL);
-    if (segmentMs == 0UL) segmentMs = 1UL;
+    if (segmentMs == 0UL) segmentMs = 1UL;  // Mindestens 1ms verhindern
 
     if (!starteFahrt(richtung, grund, segmentMs, false)) return false;
 
@@ -1550,12 +1653,23 @@ void uebernehmeKalibrierMessung(CoverDirection direction) {
 // LED-TICK – Blinken, ACK-Bestaetigung, Pending Actions, Success-Blink
 // =============================================================================
 
-// tickLeds – Aktualisiert LED-Zustand (jeder Loop-Aufruf)
+/**
+ * tickLeds -- Aktualisiert LED-Zustand (muss jeden Loop-Aufruf erfolgen).
+ *
+ * PRIORITAETEN (wichtigste zuerst, fruehes return):
+ *   1. ACK-LED (beide LEDs an, ~180ms Bestaetigung)
+ *   2. Pending Action (FactoryReset/Setup Blink-Sequenz)
+ *   3. Calibration Success Blink (3 Pulse nach erfolgreicher Kalibrierung)
+ *   4. Normaler LED-Modus (BothBlink/UpBlink/DownBlink/UpOn/DownOn/Off)
+ *
+ * Wenn eine hoehere Prio aktiv ist, wird die Funktion frueh beendet
+ * (early return) und niedrigere Prio-Modi werden ignoriert.
+ */
 void tickLeds() {
     const unsigned long jetztMs = millis();
 
+    // Prio 1: ACK-LED (kurze Bestaetigungsphase nach Tastendruck)
     if (runtime.ledAckActive) {
-        // Delta-Vergleich bleibt auch nach millis()-Wrap korrekt und verhindert haengende ACK-Phasen.
         if (!istZeitfensterAbgelaufen(runtime.ledAckStartedAtMs, LED_ACK_DURATION_MS, jetztMs)) {
             setzeLedPins(true, true);
             return;
@@ -1564,6 +1678,7 @@ void tickLeds() {
         setzeLedMode(runtime.ledModeAfterAck);
     }
 
+    // Prio 2: Ausstehende Aktion (FactoryReset/Setup) -- Blink-Sequenz abwarten
     if (hatAusstehendeAktion()) {
         if (runtime.pendingActionBlinkToggleCount == 0U) {
             const PendingAction action = runtime.pendingAction;
@@ -1588,6 +1703,7 @@ void tickLeds() {
         return;
     }
 
+    // Prio 3: Kalibrierung erfolgreich -- Blink-Bestaetigung
     if (runtime.calibrationPhase == CalibrationPhase::SuccessBlink) {
         if (runtime.successBlinkToggleCount == 0U) {
             setzeLedPins(false, false);
@@ -1604,6 +1720,7 @@ void tickLeds() {
         return;
     }
 
+    // Prio 4: Normaler LED-Modus
     if ((runtime.ledMode == LedMode::BothBlink || runtime.ledMode == LedMode::UpBlink ||
          runtime.ledMode == LedMode::DownBlink) &&
         ((jetztMs - runtime.ledLastTickMs) >= LED_BLINK_INTERVAL_MS)) {
@@ -2263,12 +2380,100 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     logf("INFO", "HELLO_ACK empfangen");
 }
 
+// Extrahiert: Verarbeitet SET_POSITION und sendet ggf. Cover-Event
+static uint8_t verarbeitePositionCmd(int16_t zielPosition) {
+    if (!runtime.isCalibrated) {
+        // Ohne Kalibrierung: Endlagenfahrt mit geschaetzter Zeit
+        return starteEndlagenfahrtOhneKalibrierung(zielPosition, "master set_position", SH_TRIGGER_MASTER_CMD)
+            ? SH_ACK_OK : SH_ACK_REJECTED;
+    }
+
+    // Mit Kalibrierung: Praezise Positionsfahrt
+    if (!startePositionsfahrt(zielPosition, "master set_position")) {
+        return SH_ACK_REJECTED;
+    }
+
+    // Cover-Event senden wenn Fahrt gestartet wurde
+    if (runtime.coverState == CoverState::Moving) {
+        const uint8_t eventType = (runtime.coverDirection == CoverDirection::Up)
+            ? SH_EVENT_COVER_UP : SH_EVENT_COVER_DOWN;
+        sendeCoverEvent(
+            eventType,
+            SH_TRIGGER_MASTER_CMD,
+            coverPositionFuerPayload(),
+            (uint16_t)zielPosition);
+    }
+    return SH_ACK_OK;
+}
+
+// Extrahiert: Verarbeitet den Kommando-Typ und Rueckgabe des ACK-Status
+static uint8_t verarbeiteCmdTyp(const SmartHome::CmdPayload& payload) {
+    // --- STATE ANFORDERUNG ---
+    if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
+        setzeStateReportOffen();
+        sendeState();
+        return SH_ACK_OK;
+    }
+
+    // --- COVER-KOMMANDO ---
+    if (payload.cmd_type != SH_CMD_COVER) {
+        return SH_ACK_REJECTED;  // Unbekannter Kommando-Typ
+    }
+
+    // Blockiert wenn Setup/Kalibrierung/Aktion aktiv
+    if (runtime.setupMode || runtime.calibrationMode || hatAusstehendeAktion()) {
+        return SH_ACK_REJECTED;
+    }
+
+    // Cover-Befehl ausfuehren
+    switch (payload.param1) {
+        case SH_COVER_CMD_OPEN:
+            return starteNormaleFahrtNachOben("master open", SH_TRIGGER_MASTER_CMD)
+                ? SH_ACK_OK : SH_ACK_REJECTED;
+
+        case SH_COVER_CMD_CLOSE:
+            return starteNormaleFahrtNachUnten("master close", SH_TRIGGER_MASTER_CMD)
+                ? SH_ACK_OK : SH_ACK_REJECTED;
+
+        case SH_COVER_CMD_STOP:
+            stoppeFahrtMitEvent("master stop", SH_TRIGGER_MASTER_CMD);
+            setzeLedNachNormalemStop();
+            return SH_ACK_OK;
+
+        case SH_COVER_CMD_SET_POSITION:
+            return verarbeitePositionCmd((int16_t)payload.param2);
+
+        default:
+            return SH_ACK_REJECTED;
+    }
+}
+
+/**
+ * verarbeiteCmd -- Verarbeitet ein eingehendes CMD-Kommando vom Master.
+ *
+ * WAS:   Prueft ob der Sender der bekannte Master ist, verarbeitet dann
+ *        das Kommando (STATE_REQUEST oder COVER) und sendet optional ACK.
+ *
+ * WARUM: Dies ist der zentrale Einstiegspunkt fuer alle ferngesteuerten
+ *        Aktionen (Auf/Ab/Stop/Position). Sicherheitskritisch: Nur der
+ *        provisionierte Master darf Kommandos senden.
+ *
+ * PARAMETER:
+ *   senderMac -- MAC-Adresse des Senders (ESP-NOW)
+ *   header    -- Protokoll-Header mit Sequenznummer und Flags
+ *   payload   -- CMD-Nutzlast mit cmd_type, param1, param2
+ *
+ * RUECKGABE: void (ACK wird intern gesendet wenn angefordert)
+ */
 void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
+    // Guard 1: Nur der provisionierte Master darf Kommandos senden
     if (!senderIstBekannterMaster(senderMac)) {
         logf("WARN", "CMD ignoriert: Sender ist nicht der bekannte Master");
         return;
     }
 
+    // Guard 2: Duplikat-Erkennung -- wenn gleiche Sequenz bereits beantwortet,
+    //            ACK wiederholen (Master hat evtl. erstes ACK nicht erhalten)
     if ((header.flags & SH_FLAG_ACK_REQUEST) &&
         runtime.lastCmdAckValid &&
         header.seq == runtime.lastCmdSeq) {
@@ -2276,62 +2481,10 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
         return;
     }
 
-    uint8_t ackStatus = SH_ACK_REJECTED;
+    // Kommando verarbeiten und ACK-Status bestimmen
+    uint8_t ackStatus = verarbeiteCmdTyp(payload);
 
-    if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
-        setzeStateReportOffen();
-        sendeState();
-        ackStatus = SH_ACK_OK;
-    } else if (payload.cmd_type == SH_CMD_COVER) {
-        if (runtime.setupMode || runtime.calibrationMode || hatAusstehendeAktion()) {
-            ackStatus = SH_ACK_REJECTED;
-        } else {
-            switch (payload.param1) {
-                case SH_COVER_CMD_OPEN:
-                    ackStatus = starteNormaleFahrtNachOben("master open", SH_TRIGGER_MASTER_CMD)
-                                    ? SH_ACK_OK
-                                    : SH_ACK_REJECTED;
-                    break;
-
-                case SH_COVER_CMD_CLOSE:
-                    ackStatus = starteNormaleFahrtNachUnten("master close", SH_TRIGGER_MASTER_CMD)
-                                    ? SH_ACK_OK
-                                    : SH_ACK_REJECTED;
-                    break;
-
-                case SH_COVER_CMD_STOP:
-                    stoppeFahrtMitEvent("master stop", SH_TRIGGER_MASTER_CMD);
-                    setzeLedNachNormalemStop();
-                    ackStatus = SH_ACK_OK;
-                    break;
-
-                case SH_COVER_CMD_SET_POSITION:
-                    if (!runtime.isCalibrated) {
-                        ackStatus =
-                            starteEndlagenfahrtOhneKalibrierung((int16_t)payload.param2, "master set_position", SH_TRIGGER_MASTER_CMD)
-                                ? SH_ACK_OK
-                                : SH_ACK_REJECTED;
-                    } else if (startePositionsfahrt((int16_t)payload.param2, "master set_position")) {
-                        if (runtime.coverState == CoverState::Moving) {
-                            sendeCoverEvent(
-                                runtime.coverDirection == CoverDirection::Up ? SH_EVENT_COVER_UP : SH_EVENT_COVER_DOWN,
-                                SH_TRIGGER_MASTER_CMD,
-                                coverPositionFuerPayload(),
-                                (uint16_t)payload.param2);
-                        }
-                        ackStatus = SH_ACK_OK;
-                    } else {
-                        ackStatus = SH_ACK_REJECTED;
-                    }
-                    break;
-
-                default:
-                    ackStatus = SH_ACK_REJECTED;
-                    break;
-            }
-        }
-    }
-
+    // ACK senden wenn angefordert
     if (header.flags & SH_FLAG_ACK_REQUEST) {
         sendeAck(senderMac, header.seq, header.msg_type, ackStatus);
         merkeCmdAck(header.seq, ackStatus);

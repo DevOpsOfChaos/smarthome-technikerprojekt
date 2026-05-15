@@ -273,38 +273,125 @@ extern bool netErlDeviceReadButton();
 // HILFSFUNKTIONEN
 // =============================================================================
 
-bool parseUInt(const char* t, uint32_t& v) {
-    if (!t || !*t) return false; v = 0;
-    for (const char* c = t; *c; ++c) {
-        if (*c < '0' || *c > '9') return false;
-        uint32_t d = *c - '0';
-        if (v > (0xFFFFFFFFUL - d) / 10UL) return false;
-        v = v * 10 + d;
+// =============================================================================
+// parseUInt – Parse einen vorzeichenlosen Integer aus einem C-String.
+//
+// WAS: Konvertiert einen String aus Ziffern ('0'-'9') in uint32_t.
+//      - Lehnt negative Zahlen, Leerzeichen, und nicht-numerische Zeichen ab
+//      - Erkennt Overflow und returniert false
+//
+// PARAM text:  Eingabestring (nur Ziffern erlaubt)
+// PARAM out:   Ergebnisvariable (wird nur bei Erfolg geschrieben)
+// RETURN:      true wenn erfolgreich, false bei ungültiger Eingabe oder Overflow
+// =============================================================================
+bool parseUInt(const char* text, uint32_t& out) {
+    if (!text || !*text) {
+        return false;
+    }
+
+    out = 0;
+    for (const char* c = text; *c; ++c) {
+        // Nur Ziffern '0'-'9' erlaubt
+        if (*c < '0' || *c > '9') {
+            return false;
+        }
+
+        uint32_t digit = *c - '0';
+
+        // Overflow-Pruefung: wuerde (out * 10 + digit) > UINT32_MAX?
+        // Umgestellt: out > (UINT32_MAX - digit) / 10
+        constexpr uint32_t UINT32_MAX_VAL = 0xFFFFFFFFUL;
+        if (out > (UINT32_MAX_VAL - digit) / 10UL) {
+            return false;  // Overflow
+        }
+
+        out = out * 10 + digit;
     }
     return true;
 }
 
+// =============================================================================
+// htmlEscape – Ersetzt HTML-Sonderzeichen durch Entity-Codes.
+//
+// WAS: Schuetzt vor XSS in Provisioning-Web-UI Feldern.
+//      Ersetzt: & < > " ' durch &amp; &lt; &gt; &quot; &#39;
+//
+// PARAM s: Eingabestring
+// RETURN:  Escapter String
+// =============================================================================
 String htmlEscape(const String& s) {
-    String e; e.reserve(s.length() + 16);
-    for (size_t i = 0; i < s.length(); ++i) { char c = s[i];
-        switch (c) { case '&': e += "&amp;"; break; case '<': e += "&lt;"; break; case '>': e += "&gt;"; break; case '"': e += "&quot;"; break; case '\'': e += "&#39;"; break; default: e += c; }
-    } return e;
+    // +16 als Sicherheitspuffer fuer worst-case Escaping
+    String escaped;
+    escaped.reserve(s.length() + 16);
+
+    for (size_t i = 0; i < s.length(); ++i) {
+        char c = s[i];
+        switch (c) {
+            case '&':  escaped += "&amp;";  break;
+            case '<':  escaped += "&lt;";   break;
+            case '>':  escaped += "&gt;";   break;
+            case '"':  escaped += "&quot;"; break;
+            case '\'': escaped += "&#39;";  break;
+            default:   escaped += c;        break;
+        }
+    }
+    return escaped;
 }
 
-void logMsg(const char* l, const char* f, ...) {
-    if (!DEBUG_LOKAL_AKTIV) return;
-    char m[224]; va_list a; va_start(a, f); vsnprintf(m, sizeof(m), f, a); va_end(a);
-    Serial.print("["); Serial.print(l); Serial.print("] "); Serial.println(m);
+// =============================================================================
+// logMsg – Debug-Log-Ausgabe auf Serial (nur wenn DEBUG_LOKAL_AKTIV).
+//
+// FORMAT: "[LEVEL] Nachricht"
+//
+// PARAM level:   Log-Level-String (z.B. "INFO", "WARN", "ERROR")
+// PARAM format:  printf-Formatstring
+// PARAM ...:     Format-Argumente
+// =============================================================================
+void logMsg(const char* level, const char* format, ...) {
+    if (!DEBUG_LOKAL_AKTIV) {
+        return;
+    }
+
+    constexpr size_t LOG_BUFFER_SIZE = 224;
+    char message[LOG_BUFFER_SIZE];
+
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    Serial.print("[");
+    Serial.print(level);
+    Serial.print("] ");
+    Serial.println(message);
 }
 
+// =============================================================================
+// initWdt – Task-Watchdog initialisieren.
+//
+// WAS: Konfiguriert den ESP32 Task-Watchdog mit NET_ERL_WDT_TIMEOUT_S
+//      Sekunden. Bei Timeout wird ein Panic-Reset ausgeloest.
+//
+// WARUM: Verhindert haengende Loops. loop() muss regelmaessig
+//        esp_task_wdt_reset() aufrufen (geschieht in loop() Zeile 1).
+// =============================================================================
 void initWdt() {
+    constexpr uint32_t MS_PER_SECOND = 1000UL;
+
     esp_task_wdt_config_t wdtConfig = {};
-    wdtConfig.timeout_ms = NET_ERL_WDT_TIMEOUT_S * 1000;
+    wdtConfig.timeout_ms = NET_ERL_WDT_TIMEOUT_S * MS_PER_SECOND;
     wdtConfig.trigger_panic = true;
-    esp_err_t e = esp_task_wdt_init(&wdtConfig);
-    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) { logMsg("WARN", "WDT init err=%d", (int)e); return; }
-    e = esp_task_wdt_add(nullptr);
-    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) logMsg("WARN", "WDT add err=%d", (int)e);
+
+    esp_err_t err = esp_task_wdt_init(&wdtConfig);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        logMsg("WARN", "WDT init err=%d", (int)err);
+        return;
+    }
+
+    err = esp_task_wdt_add(nullptr);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        logMsg("WARN", "WDT add err=%d", (int)err);
+    }
 }
 
 void provLog(const char* l, const char* m) {
@@ -312,9 +399,28 @@ void provLog(const char* l, const char* m) {
     Serial.print("["); Serial.print(l); Serial.print("] "); Serial.println(m);
 }
 
-void cpy(char* t, size_t s, const char* src) {
-    if (!t || !s) return; if (!src) { t[0] = '\0'; return; }
-    strncpy(t, src, s - 1); t[s - 1] = '\0';
+// =============================================================================
+// safeStrCopy – Sicheres Kopieren eines C-Strings mit Puffergroessen-Pruefung.
+//
+// WAS: Kopiert src nach dest, garantiert Null-Terminierung.
+//      - Wenn dest oder size ungültig: kein-op
+//      - Wenn src NULL: schreibt leeren String ""
+//      - Sonst: strncpy mit expliziter Null-Terminierung
+//
+// PARAM dest:       Zielpuffer
+// PARAM destSize:   Groesse des Zielpuffers in Bytes (inkl. Platz fuer '\0')
+// PARAM src:        Quellstring (darf NULL sein)
+// =============================================================================
+void safeStrCopy(char* dest, size_t destSize, const char* src) {
+    if (!dest || destSize == 0) {
+        return;
+    }
+    if (!src) {
+        dest[0] = '\0';
+        return;
+    }
+    strncpy(dest, src, destSize - 1);
+    dest[destSize - 1] = '\0';  // Garantierte Null-Terminierung
 }
 
 bool isBroadcast(const uint8_t* m) { return m && memcmp(m, BROADCAST_MAC, 6) == 0; }
@@ -335,19 +441,46 @@ void setRelay(bool an, const char* g) {
 // =============================================================================
 // PERSISTENZ-HILFEN
 // =============================================================================
-void snapK(NetErlSnapshot& s) {
-    s.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
-    s.auto_off_delay_s = runtime.auto_off_delay_s;
+// =============================================================================
+// snapshotDeviceConfig – Speichert die aktuellen Auto-Light-Werte in ein
+//                        NetErlSnapshot (fuer Rollback bei Save-Fehler).
+// =============================================================================
+void snapshotDeviceConfig(NetErlSnapshot& outSnapshot) {
+    outSnapshot.auto_on_lux_threshold = runtime.auto_on_lux_threshold;
+    outSnapshot.auto_off_delay_s = runtime.auto_off_delay_s;
 }
-void restK(const NetErlSnapshot& s) {
-    runtime.auto_on_lux_threshold = s.auto_on_lux_threshold;
-    runtime.auto_off_delay_s = s.auto_off_delay_s;
+
+// =============================================================================
+// restoreDeviceConfig – Stellt die Auto-Light-Werte aus einem Snapshot wieder
+//                       her (Rollback nach fehlgeschlagenem NVS-Speichern).
+// =============================================================================
+void restoreDeviceConfig(const NetErlSnapshot& snapshot) {
+    runtime.auto_on_lux_threshold = snapshot.auto_on_lux_threshold;
+    runtime.auto_off_delay_s = snapshot.auto_off_delay_s;
 }
-void snapBasis(SmartHome::ShNodeProvisioning::NodeBasisSnapshot& b, NetErlSnapshot& d) {
-    nodeProvisioning.captureBasisSnapshot(b); snapK(d);
+
+// =============================================================================
+// snapshotBasisAndDevice – Speichert sowohl Provisioning-Basis als auch
+//                          Device-Konfiguration (kombinierter Snapshot).
+// =============================================================================
+void snapshotBasisAndDevice(
+    SmartHome::ShNodeProvisioning::NodeBasisSnapshot& outBasis,
+    NetErlSnapshot& outDevice
+) {
+    nodeProvisioning.captureBasisSnapshot(outBasis);
+    snapshotDeviceConfig(outDevice);
 }
-void restBasis(const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& b, const NetErlSnapshot& d) {
-    nodeProvisioning.restoreBasisSnapshot(b); restK(d);
+
+// =============================================================================
+// restoreBasisAndDevice – Stellt Basis + Device aus Snapshots wieder her.
+//                         Setzt danach das Report-Intervall neu.
+// =============================================================================
+void restoreBasisAndDevice(
+    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basis,
+    const NetErlSnapshot& device
+) {
+    nodeProvisioning.restoreBasisSnapshot(basis);
+    restoreDeviceConfig(device);
     setReportInt(runtime.report_interval_s);
 }
 
@@ -386,8 +519,8 @@ public:
     }
 
     bool clearDeviceSettings(Preferences& p) override { p.remove(NET_ERL_PERSISTED_KEY); return true; }
-    void captureDeviceSnapshot() override { snapK(s_); }
-    void restoreDeviceSnapshot() override { restK(s_); }
+    void captureDeviceSnapshot() override { snapshotDeviceConfig(s_); }
+    void restoreDeviceSnapshot() override { restoreDeviceConfig(s_); }
 
     bool parseDeviceSave(WebServer& srv, String& err) override {
         p_ = {}; uint32_t v;
@@ -433,27 +566,104 @@ bool ensurePeer(const uint8_t* m) {
     return esp_now_add_peer(&p) == ESP_OK;
 }
 
-bool sendPacketOpt(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const char* lb, uint8_t fl, uint8_t* seq) {
-    if (!runtime.funk_bereit || !z || plen > SH_MAX_PAYLOAD_BYTES) return false;
-    if (!ensurePeer(z)) return false;
-    uint8_t buf[SH_ESPNOW_MAX_BYTES] = {};
-    SmartHome::MsgHeader h = {};
-    uint8_t s = runtime.naechste_seq++;
-    SmartHome::fillHeader(h, mt, s, fl, plen);
-    if (plen && pl) memcpy(buf + SH_HEADER_SIZE, pl, plen);
-    SmartHome::finalizePacketCrc(h, buf + SH_HEADER_SIZE);
-    memcpy(buf, &h, sizeof(h));
-    if (esp_now_send(z, buf, SH_HEADER_SIZE + plen) != ESP_OK) {
-        logMsg("WARN", "%s send fail", lb ? lb : "?"); return false;
+// =============================================================================
+// sendPacketOpt – ESP-NOW-Paket bauen und senden (volle Kontrolle).
+//
+// WAS: Baut ein komplettes ESP-NOW-Paket aus Header + Payload + CRC
+//      und sendet es an die Ziel-MAC.
+//
+// PAKET-AUFBAU:
+//   [ MsgHeader (SH_HEADER_SIZE Bytes) | Payload (plen Bytes) ]
+//   - Header wird NACH Payload+CRC kopiert, weil finalizePacketCrc()
+//     den Header modifiziert (CRC-Wert).
+//
+// PARAM targetMac:   Ziel-MAC-Adresse (6 Bytes)
+// PARAM msgType:     Message-Typ (SH_MSG_*)
+// PARAM payload:     Zeiger auf Payload-Daten (kann NULL sein wenn plen==0)
+// PARAM payloadLen:  Laenge des Payload in Bytes
+// PARAM label:       Bezeichnung fuer Log-Ausgabe
+// PARAM flags:       Header-Flags (z.B. SH_FLAG_ACK_REQUEST)
+// PARAM outSeq:      Optional: Rueckgabe der verwendeten Sequenz-Nummer
+// RETURN:            true wenn erfolgreich gesendet
+// =============================================================================
+bool sendPacketOpt(
+    const uint8_t* targetMac,
+    uint8_t msgType,
+    const void* payload,
+    size_t payloadLen,
+    const char* label,
+    uint8_t flags,
+    uint8_t* outSeq
+) {
+    // Guard: Funk nicht bereit, ungültige Zieladresse, oder Payload zu gross
+    if (!runtime.funk_bereit || !targetMac || payloadLen > SH_MAX_PAYLOAD_BYTES) {
+        return false;
     }
-    if (seq) *seq = s; return true;
+
+    // Peer muss registriert sein
+    if (!ensurePeer(targetMac)) {
+        return false;
+    }
+
+    // Puffer und Header vorbereiten
+    uint8_t packetBuf[SH_ESPNOW_MAX_BYTES] = {};
+    SmartHome::MsgHeader header = {};
+
+    // Sequenz-Nummer holen und hochzaehlen
+    uint8_t seqNum = runtime.naechste_seq++;
+
+    // Header fuellen
+    SmartHome::fillHeader(header, msgType, seqNum, flags, payloadLen);
+
+    // Payload in Puffer kopieren (hinter den Header-Bereich)
+    if (payloadLen > 0 && payload) {
+        memcpy(packetBuf + SH_HEADER_SIZE, payload, payloadLen);
+    }
+
+    // CRC berechnen (schreibt in den Header)
+    SmartHome::finalizePacketCrc(header, packetBuf + SH_HEADER_SIZE);
+
+    // Header an den Anfang des Puffers kopieren
+    memcpy(packetBuf, &header, sizeof(header));
+
+    // Senden
+    esp_err_t sendResult = esp_now_send(targetMac, packetBuf, SH_HEADER_SIZE + payloadLen);
+    if (sendResult != ESP_OK) {
+        logMsg("WARN", "%s send fail", label ? label : "?");
+        return false;
+    }
+
+    // Optional: Sequenz-Nummer an Aufrufer zurueckgeben
+    if (outSeq) {
+        *outSeq = seqNum;
+    }
+    return true;
 }
 
-bool sendPacket(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const char* lb) {
-    return sendPacketOpt(z, mt, pl, plen, lb, 0, nullptr);
+// sendPacket – ESP-NOW-Paket senden (Standard-Parameter)
+bool sendPacket(
+    const uint8_t* targetMac,
+    uint8_t msgType,
+    const void* payload,
+    size_t payloadLen,
+    const char* label
+) {
+    return sendPacketOpt(targetMac, msgType, payload, payloadLen, label, 0, nullptr);
 }
 
-// sendPacketWithRetry – Sendet mit bis zu 2 Wiederholungen bei Fehler
+// =============================================================================
+// sendPacketWithRetry – ESP-NOW-Paket mit Wiederholung bei Fehler senden.
+//
+// WAS: Sendet ein Paket und wiederholt es bis zu NET_ERL_ESPNOW_RETRY_COUNT
+//      mal bei Misserfolg (Standard: 2 Retries, 50ms Pause).
+//
+// WARUM: ESP-NOW ist unzuverlaessig (kein ACK auf MAC-Layer). Retry
+//        erhoeht die Zustellwahrscheinlichkeit fuer kritische Nachrichten.
+//
+// SEQUENZ-NUMMER: Wird VOR dem Senden dekrementiert (nicht inkrementiert),
+//                 weil sendPacketOpt() sie danach wieder hochzaehlt.
+//                 Bei 0 → 255 (uint8_t Wrap-Around).
+// =============================================================================
 #ifndef NET_ERL_ESPNOW_RETRY_COUNT
 #define NET_ERL_ESPNOW_RETRY_COUNT 2
 #endif
@@ -461,24 +671,52 @@ bool sendPacket(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const
 #define NET_ERL_ESPNOW_RETRY_DELAY_MS 50UL
 #endif
 
-bool sendPacketWithRetry(const uint8_t* z, uint8_t mt, const void* pl, size_t plen, const char* lb) {
-    if (runtime.naechste_seq == 0) runtime.naechste_seq = 255;
-    else runtime.naechste_seq--;
+bool sendPacketWithRetry(
+    const uint8_t* targetMac,
+    uint8_t msgType,
+    const void* payload,
+    size_t payloadLen,
+    const char* label
+) {
+    // Sequenz-Nummer vorbereiten:
+    // sendPacketOpt() inkrementiert naechste_seq NACH dem Lesen.
+    // Wir dekrementieren VORHER, sodass das gesendete Paket die
+    // erwartete Sequenz hat. Bei 0 → 255 (uint8_t Wrap).
+    constexpr uint8_t UINT8_MAX_VAL = 255;
+    if (runtime.naechste_seq == 0) {
+        runtime.naechste_seq = UINT8_MAX_VAL;
+    } else {
+        runtime.naechste_seq--;
+    }
 
     for (int attempt = 0; attempt <= NET_ERL_ESPNOW_RETRY_COUNT; attempt++) {
-        if (sendPacket(z, mt, pl, plen, lb)) return true;
+        if (sendPacket(targetMac, msgType, payload, payloadLen, label)) {
+            return true;  // Erfolgreich gesendet
+        }
+
+        // Nicht beim letzten Versuch noch einmal warten
         if (attempt < NET_ERL_ESPNOW_RETRY_COUNT) {
-            logMsg("WARN", "%s retry %d/%d", lb ? lb : "?", attempt + 1, NET_ERL_ESPNOW_RETRY_COUNT);
+            logMsg("WARN", "%s retry %d/%d",
+                   label ? label : "?",
+                   attempt + 1,
+                   NET_ERL_ESPNOW_RETRY_COUNT);
             delay(NET_ERL_ESPNOW_RETRY_DELAY_MS);
         }
     }
-    logMsg("ERROR", "%s failed after %d attempts", lb ? lb : "?", NET_ERL_ESPNOW_RETRY_COUNT + 1);
+
+    logMsg("ERROR", "%s failed after %d attempts",
+           label ? label : "?",
+           NET_ERL_ESPNOW_RETRY_COUNT + 1);
     return false;
 }
 
-bool sendAck(const uint8_t* z, uint8_t s, uint8_t mt, uint8_t st) {
-    SmartHome::AckPayload p = {}; p.ack_seq = s; p.ack_msg_type = mt; p.status = st;
-    return sendPacket(z, SH_MSG_ACK, &p, sizeof(p), "ACK");
+// sendAck – ACK-Bestaetigung an Sender
+bool sendAck(const uint8_t* targetMac, uint8_t seq, uint8_t msgType, uint8_t status) {
+    SmartHome::AckPayload payload = {};
+    payload.ack_seq = seq;
+    payload.ack_msg_type = msgType;
+    payload.status = status;
+    return sendPacket(targetMac, SH_MSG_ACK, &payload, sizeof(payload), "ACK");
 }
 
 // =============================================================================
@@ -487,16 +725,16 @@ bool sendAck(const uint8_t* z, uint8_t s, uint8_t mt, uint8_t st) {
 
 bool sendHello() {
     SmartHome::HelloPayload p = {};
-    cpy(p.device_id, sizeof(p.device_id), DEVICE_ID);
-    cpy(p.device_name, sizeof(p.device_name), DEVICE_NAME);
+    safeStrCopy(p.device_id, sizeof(p.device_id), DEVICE_ID);
+    safeStrCopy(p.device_name, sizeof(p.device_name), DEVICE_NAME);
     p.device_class = SH_CLASS_NET_ERL;
     p.caps_hi = (DEVICE_CAPS >> 8) & 0xFF; p.caps_lo = DEVICE_CAPS & 0xFF;
     p.power_type = SH_POWER_MAINS; p.fw_version = 1; p.boot_counter = BOOT_COUNTER;
     p.meta_schema_version = DEVICE_META_SCHEMA_VERSION;
     p.control_mode = DEVICE_CONTROL_MODE;
     p.config_profile = DEVICE_CONFIG_PROFILE; p.reporting_mode = DEVICE_REPORTING_MODE;
-    cpy(p.sensor_mask, sizeof(p.sensor_mask), NET_ERL_SENSOR_MASK);
-    cpy(p.input_mask, sizeof(p.input_mask), NET_ERL_INPUT_MASK);
+    safeStrCopy(p.sensor_mask, sizeof(p.sensor_mask), NET_ERL_SENSOR_MASK);
+    safeStrCopy(p.input_mask, sizeof(p.input_mask), NET_ERL_INPUT_MASK);
     runtime.letztes_hello_ms = millis();
     return sendPacketWithRetry(helloDst(), SH_MSG_HELLO, &p, sizeof(p), "HELLO");
 }
@@ -504,7 +742,7 @@ bool sendHello() {
 bool sendHeartbeat() {
     if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
     SmartHome::HeartbeatPayload p = {};
-    cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
+    safeStrCopy(p.node_id, sizeof(p.node_id), DEVICE_ID);
     p.uptime_s = millis() / 1000UL;
     if (!sendPacketWithRetry(runtime.master_mac, SH_MSG_HEARTBEAT, &p, sizeof(p), "HEARTBEAT")) return false;
     runtime.letzter_heartbeat_ms = millis(); return true;
@@ -525,7 +763,7 @@ bool sendState() {
 bool sendMotionEvent(bool s) {
     if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
     SmartHome::EventReportPayload p = {};
-    cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
+    safeStrCopy(p.node_id, sizeof(p.node_id), DEVICE_ID);
     p.event_type = SH_EVENT_MOTION_DETECTED; p.trigger = SH_TRIGGER_AUTO;
     p.param1 = s ? 1U : 0U; p.param2 = 0U;
     return sendPacketWithRetry(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), s ? "EVT_M_ON" : "EVT_M_OFF");
@@ -534,7 +772,7 @@ bool sendMotionEvent(bool s) {
 bool sendRelayEvent(uint8_t tr) {
     if (!runtime.master_bekannt || !runtime.master_mac_gueltig) return false;
     SmartHome::EventReportPayload p = {};
-    cpy(p.node_id, sizeof(p.node_id), DEVICE_ID);
+    safeStrCopy(p.node_id, sizeof(p.node_id), DEVICE_ID);
     p.event_type = SH_EVENT_RELAY_CHANGED; p.trigger = tr;
     p.param1 = runtime.relay_1 ? 1U : 0U; p.param2 = 0U;
     return sendPacketWithRetry(runtime.master_mac, SH_MSG_EVENT, &p, sizeof(p), "EVT_RELAY");
@@ -552,69 +790,171 @@ void handleHelloAck(const uint8_t* s, const SmartHome::HelloAckPayload& p) {
     ensurePeer(runtime.master_mac);
 }
 
-void handleCmd(const uint8_t* s, const SmartHome::MsgHeader& h, const SmartHome::CmdPayload& p) {
-    if (!isMaster(s)) return;
-    if (p.cmd_type == SH_CMD_STATE_REQUEST) { runtime.state_report_offen = true; return; }
-    if (p.cmd_type == SH_CMD_SET_RELAY) {
-        if (p.param1 != 0U) {  // Subcommand ungleich 0 → nicht unterstützt
-            if (h.flags & SH_FLAG_ACK_REQUEST) sendAck(s, h.seq, h.msg_type, SH_ACK_REJECTED);
-            return;
-        }
-        runtime.relay_auto_owned = false; runtime.pending_auto_on_decision = false;
-        runtime.blocked_by_lux = false;
-        setRelay(p.param2 != 0U, "master");
-        runtime.state_report_offen = true;
-        sendRelayEvent(SH_TRIGGER_MASTER_CMD);
-        if (h.flags & SH_FLAG_ACK_REQUEST) sendAck(s, h.seq, h.msg_type, SH_ACK_OK);
+// =============================================================================
+// handleCmd – ESP-NOW CMD-Nachricht vom Master verarbeiten.
+//
+// WAS: Verarbeitet zwei Befehlstypen:
+//      - SH_CMD_STATE_REQUEST: Master fordert STATE-Update an
+//      - SH_CMD_SET_RELAY:     Master schaltet Relais manuell
+//
+// WARUM: Ermöglicht dem Master, Geraet fernzusteuern.
+//
+// PARAM senderMac: MAC-Adresse des Senders (6 Bytes)
+// PARAM header:    ESP-NOW Message-Header (Seq-Nummer, Flags, Typ)
+// PARAM payload:   CMD-Payload (cmd_type, param1, param2)
+//
+// param1 bei SET_RELAY: Subcommand (0 = ein/ausschalten, !=0 = abgelehnt)
+// param2 bei SET_RELAY: 0 = Relais AUS, !=0 = Relais AN
+// =============================================================================
+void handleCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
+    // Nur Befehle vom Master akzeptieren
+    if (!isMaster(senderMac)) {
         return;
     }
-    if (h.flags & SH_FLAG_ACK_REQUEST) sendAck(s, h.seq, h.msg_type, SH_ACK_REJECTED);
+
+    // --- STATE ANFORDERUNG ---
+    if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
+        runtime.state_report_offen = true;
+        return;
+    }
+
+    // --- RELAIS SCHALTEN ---
+    if (payload.cmd_type == SH_CMD_SET_RELAY) {
+        // Subcommand != 0 ist nicht unterstuetzt → ablehnen
+        if (payload.param1 != 0U) {
+            if (header.flags & SH_FLAG_ACK_REQUEST) {
+                sendAck(senderMac, header.seq, header.msg_type, SH_ACK_REJECTED);
+            }
+            return;
+        }
+
+        // Auto-Light-Steuerung deaktivieren – Master uebernimmt manuell
+        runtime.relay_auto_owned = false;
+        runtime.pending_auto_on_decision = false;
+        runtime.blocked_by_lux = false;
+
+        // Relais schalten (param2 != 0 → AN, sonst AUS)
+        bool relayOn = (payload.param2 != 0U);
+        setRelay(relayOn, "master");
+
+        runtime.state_report_offen = true;
+        sendRelayEvent(SH_TRIGGER_MASTER_CMD);
+
+        if (header.flags & SH_FLAG_ACK_REQUEST) {
+            sendAck(senderMac, header.seq, header.msg_type, SH_ACK_OK);
+        }
+        return;
+    }
+
+    // Unbekannter Befehl → ablehnen
+    if (header.flags & SH_FLAG_ACK_REQUEST) {
+        sendAck(senderMac, header.seq, header.msg_type, SH_ACK_REJECTED);
+    }
 }
 
 bool saveReportIntCfg(uint32_t v) {
     if (!nodeProvisioning.isSendIntervalValid(v)) return false;
     SmartHome::ShNodeProvisioning::NodeBasisSnapshot bs = {}; NetErlSnapshot ds = {};
-    snapBasis(bs, ds); setReportInt(v); runtime.state_report_offen = true;
+    snapshotBasisAndDevice(bs, ds); setReportInt(v); runtime.state_report_offen = true;
     if (nodeProvisioning.saveCurrentState()) return true;
-    restBasis(bs, ds); return false;
+    restoreBasisAndDevice(bs, ds); return false;
 }
 
-bool handleCfg(const SmartHome::CfgPayload& p) {
-    switch (p.param_id) {
-        case SH_CFG_REPORT_INTERVAL_S: return saveReportIntCfg(p.value);
+// =============================================================================
+// handleCfg – ESP-NOW CFG-Nachricht verarbeiten (Konfigurationsaenderung).
+//
+// WAS: Aendert eine Konfiguration und speichert sie persistent in NVS.
+//      Verwendet Snapshot-Rollback: Bei Save-Fehler wird der alte
+//      Zustand wiederhergestellt.
+//
+// PARAM payload: CFG-Payload mit param_id und neuem Wert
+// RETURN:        true wenn erfolgreich gespeichert, false bei Fehler
+// =============================================================================
+bool handleCfg(const SmartHome::CfgPayload& payload) {
+    switch (payload.param_id) {
+
+        // --- Report-Intervall aendern ---
+        case SH_CFG_REPORT_INTERVAL_S:
+            return saveReportIntCfg(payload.value);
+
+        // --- Lux-Schwelle fuer Auto-ON aendern ---
         case SH_CFG_LIGHT_THRESHOLD_ON: {
-            SmartHome::ShNodeProvisioning::NodeBasisSnapshot bs = {}; NetErlSnapshot ds = {};
-            snapBasis(bs, ds); runtime.auto_on_lux_threshold = (uint16_t)p.value; runtime.state_report_offen = true;
-            if (nodeProvisioning.saveCurrentState()) return true; restBasis(bs, ds); return false;
+            // Alten Zustand sichern (fuer Rollback bei Fehler)
+            SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+            NetErlSnapshot deviceSnapshot = {};
+            snapshotBasisAndDevice(basisSnapshot, deviceSnapshot);
+
+            // Neuen Wert setzen
+            runtime.auto_on_lux_threshold = (uint16_t)payload.value;
+            runtime.state_report_offen = true;
+
+            // Persistent speichern – bei Fehler Rollback
+            if (nodeProvisioning.saveCurrentState()) {
+                return true;
+            }
+            restoreBasisAndDevice(basisSnapshot, deviceSnapshot);
+            return false;
         }
+
+        // --- Auto-OFF-Nachlaufzeit aendern ---
         case SH_CFG_AUTO_OFF_DELAY_S: {
-            SmartHome::ShNodeProvisioning::NodeBasisSnapshot bs = {}; NetErlSnapshot ds = {};
-            snapBasis(bs, ds); runtime.auto_off_delay_s = (uint16_t)p.value; runtime.state_report_offen = true;
-            if (nodeProvisioning.saveCurrentState()) return true; restBasis(bs, ds); return false;
+            SmartHome::ShNodeProvisioning::NodeBasisSnapshot basisSnapshot = {};
+            NetErlSnapshot deviceSnapshot = {};
+            snapshotBasisAndDevice(basisSnapshot, deviceSnapshot);
+
+            runtime.auto_off_delay_s = (uint16_t)payload.value;
+            runtime.state_report_offen = true;
+
+            if (nodeProvisioning.saveCurrentState()) {
+                return true;
+            }
+            restoreBasisAndDevice(basisSnapshot, deviceSnapshot);
+            return false;
         }
-        default: return false;
+
+        default:
+            return false;  // Unbekannte param_id
     }
 }
 
 #if NET_ERL_USE_ISR_CMD_QUEUE
-// ISR-safe Pending-Queue (Hall-Stil)
-void merkePendingCmd(const uint8_t* src, const SmartHome::MsgHeader& h, const SmartHome::CmdPayload& p) {
+// =============================================================================
+// merkePendingCmd – CMD im ISR-safe Puffer speichern (Hall-Geraet).
+//
+// WARUM: ESP-NOW-Callback laeuft im Interrupt-Kontext. handleCmd() darf
+//        dort NICHT aufgerufen werden (nutzt Serial, NVS, delay).
+//        Stattdessen: CMD in Puffer kopieren, in loop() verarbeiten.
+// =============================================================================
+void merkePendingCmd(const uint8_t* srcMac, const SmartHome::MsgHeader& header, const SmartHome::CmdPayload& payload) {
     portENTER_CRITICAL(&runtime.runtimeMux);
-    memcpy(runtime.pendingCmdSrc, src, 6);
-    runtime.pendingCmdHeader = h;
-    runtime.pendingCmd = p;
+    memcpy(runtime.pendingCmdSrc, srcMac, 6);
+    runtime.pendingCmdHeader = header;
+    runtime.pendingCmd = payload;
     runtime.pendingCmdReady = true;
     portEXIT_CRITICAL(&runtime.runtimeMux);
 }
+
+// =============================================================================
+// verarbeiteAusstehende – Gespeicherte CMDs aus ISR-Puffer in loop()
+//                         verarbeiten. Kopiert Daten AUS dem Critical
+//                         Section, dann aufruf von handleCmd() im
+//                         sicheren Loop-Kontext.
+// =============================================================================
 void verarbeiteAusstehende() {
+    // Daten atomar aus dem ISR-Puffer lesen
     portENTER_CRITICAL(&runtime.runtimeMux);
-    bool cmd = runtime.pendingCmdReady;
-    SmartHome::CmdPayload cp = runtime.pendingCmd;
-    SmartHome::MsgHeader ch = runtime.pendingCmdHeader;
-    uint8_t cs[6]; memcpy(cs, runtime.pendingCmdSrc, 6);
+    bool hasPendingCmd = runtime.pendingCmdReady;
+    SmartHome::CmdPayload cmdCopy = runtime.pendingCmd;
+    SmartHome::MsgHeader headerCopy = runtime.pendingCmdHeader;
+    uint8_t srcMacCopy[6];
+    memcpy(srcMacCopy, runtime.pendingCmdSrc, 6);
     runtime.pendingCmdReady = false;
     portEXIT_CRITICAL(&runtime.runtimeMux);
-    if (cmd) handleCmd(cs, ch, cp);
+
+    // Verarbeitung im sicheren Loop-Kontext
+    if (hasPendingCmd) {
+        handleCmd(srcMacCopy, headerCopy, cmdCopy);
+    }
 }
 #endif
 
@@ -688,62 +1028,158 @@ void initFunk() {
 // PRÄSENZ + AUTO-LIGHT
 // =============================================================================
 
-void motionOn(unsigned long j) {
-    runtime.motion_aktiv = true;
-    runtime.letzte_motion_ms = j;
-    runtime.state_report_offen = true;
-    runtime.pending_motion_event_state = 1U;
-    runtime.blocked_by_lux = false;
-    runtime.pending_auto_on_decision = false;
+// =============================================================================
+// motionOn – Wird aufgerufen wenn Bewegung erkannt wird.
+//
+// WAS: Setzt den Runtime-Zustand auf "Praesenz erkannt".
+// WARUM: Zentrales Update aller Praesenz-Flags fuer Auto-Light-Logik.
+//
+// PARAM nowMs:  Aktuelle Zeit in Millisekunden (millis()).
+//
+// NEBENEFFEKT: Wenn das Relais noch AUS ist, wird pending_auto_on_decision
+//              gesetzt. Der eigentliche Lux-Schwellen-Check erfolgt erst
+//              im naechsten Sensor-Poll (pollPresence), weil dort die
+//              aktuellen Lux-Werte verfuegbar sind.
+// =============================================================================
+void motionOn(unsigned long nowMs) {
+    runtime.motion_aktiv = true;                    // Bewegung ist jetzt aktiv
+    runtime.letzte_motion_ms = nowMs;               // Zeitstempel fuer Nachlauf-Timer
+    runtime.state_report_offen = true;              // STATE-Nachricht beim Master anfordern
+    runtime.pending_motion_event_state = 1U;        // 1 = Motion-ON Event steht aus
+    runtime.blocked_by_lux = false;                 // Lux-Sperre zuruecksetzen
+    runtime.pending_auto_on_decision = false;       // Vorherige Auto-ON-Entscheidung loeschen
+
+    // Wenn Relais AUS: Lux-Check im naechsten Sensor-Poll nachholen
+    // (dort sind aktuelle Lux-Sensorwerte verfuegbar)
     if (!runtime.relay_1) {
-        runtime.pending_auto_on_decision = true;  // Lux-check im Sensor-Poll
+        runtime.pending_auto_on_decision = true;
     }
 }
 
-void pollPresence(unsigned long j) {
-    if (intervalElapsed(runtime.letztes_sensor_poll_ms, j, NET_ERL_SENSOR_POLL_INTERVAL_MS)) {
-        runtime.letztes_sensor_poll_ms = j;
-        bool high = netErlDeviceReadPresence();
-        if (high) {
-            if (!runtime.motion_aktiv) {
-                motionOn(j);
-            } else {
+// =============================================================================
+// pollPresence – Praesenzsensor abfragen und Auto-Light-Nachlauf steuern.
+//
+// WAS: Liest den Bewegungssensor (via Device-Hook) und entscheidet:
+//      - Bei neuer Bewegung: motionOn() ausloesen
+//      - Bei wiederholter Bewegung: Nachlauf-Timer verlaengern (optional)
+//      - Bei Ablauf der Nachlaufzeit: Motion-Off, Relais ausschalten
+//
+// WARUM: Kern der Auto-Light-Logik. Verbindet Praesenz-Erkennung mit
+//        Relais-Steuerung und ESP-NOW-Event-Meldungen.
+//
+// PARAM nowMs: Aktuelle Zeit in Millisekunden (millis()).
+//
+// KONFIG: NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
+//         1 = "Kitchen-Stil": Jede neue Bewegung setzt Nachlauf zurueck
+//         0 = "Hall-Stil":    Nur die ERSTE Bewegung startet Nachlauf
+// =============================================================================
+void pollPresence(unsigned long nowMs) {
+    // Sensor nur im konfigurierten Intervall abfragen
+    if (!intervalElapsed(runtime.letztes_sensor_poll_ms, nowMs, NET_ERL_SENSOR_POLL_INTERVAL_MS)) {
+        return;
+    }
+    runtime.letztes_sensor_poll_ms = nowMs;
+
+    bool motionDetected = netErlDeviceReadPresence();
+
+    if (motionDetected) {
+        // --- BEWEGUNG ERKANNT ---
+        if (!runtime.motion_aktiv) {
+            // Erste Bewegung seit langer Zeit → Motion-ON ausloesen
+            motionOn(nowMs);
+        } else {
+            // Bewegung dauert noch an
 #if NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
-                runtime.letzte_motion_ms = j;  // Kitchen-Stil: Nachlauf verlängern
+            // Kitchen-Stil: Nachlauf-Timer bei jeder Bewegung verlaengern
+            runtime.letzte_motion_ms = nowMs;
 #endif
-            }
-            return;
         }
-        unsigned long offMs = (unsigned long)runtime.auto_off_delay_s * 1000UL;
-        if (runtime.motion_aktiv && runtime.letzte_motion_ms > 0 && (j - runtime.letzte_motion_ms) >= offMs) {
-            runtime.motion_aktiv = false;
-            runtime.blocked_by_lux = false;
-            runtime.pending_auto_on_decision = false;
-            runtime.state_report_offen = true;
-            runtime.pending_motion_event_state = 2U;
-            if (runtime.relay_1 && runtime.relay_auto_owned) {
-                setRelay(false, "auto_off");
-                sendRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER);
-                runtime.relay_auto_owned = false;
-            }
-        }
+        return;  // Kein Motion-Off-Check waehrend Bewegung
+    }
+
+    // --- KEINE BEWEGUNG → Nachlauf-Timer pruefen ---
+    unsigned long offDelayMs = (unsigned long)runtime.auto_off_delay_s * 1000UL;
+    bool motionTimeoutElapsed = runtime.motion_aktiv
+                             && runtime.letzte_motion_ms > 0
+                             && (nowMs - runtime.letzte_motion_ms) >= offDelayMs;
+
+    if (!motionTimeoutElapsed) {
+        return;  // Nachlauf laeuft noch
+    }
+
+    // Nachlauf abgelaufen → Motion-Off
+    runtime.motion_aktiv = false;                   // Praesenz endet
+    runtime.blocked_by_lux = false;                 // Lux-Sperre aufheben
+    runtime.pending_auto_on_decision = false;       // Ausstehende Entscheidung loeschen
+    runtime.state_report_offen = true;              // STATE-Update beim Master anfordern
+    runtime.pending_motion_event_state = 2U;        // 2 = Motion-OFF Event steht aus
+
+    // Wenn Relais AN und von Auto-Light gesteuert → ausschalten
+    if (runtime.relay_1 && runtime.relay_auto_owned) {
+        setRelay(false, "auto_off");
+        sendRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER);
+        runtime.relay_auto_owned = false;           // Relais nicht mehr unter Auto-Kontrolle
     }
 }
 
 #if defined(NET_ERL_HAS_BUTTON)
-void processBtn(unsigned long j) {
-    bool raw = netErlDeviceReadButton();
-    if (raw != runtime.button_raw_active) { runtime.button_raw_active = raw; runtime.button_changed_at_ms = j; }
-    if ((j - runtime.button_changed_at_ms) < BUTTON_DEBOUNCE_MS) return;
-    if (raw == runtime.button_stable_active) return;
-    runtime.button_stable_active = raw;
-    if (raw) { runtime.button_pressed_at_ms = j; return; }
-    unsigned long held = runtime.button_pressed_at_ms > 0 ? (j - runtime.button_pressed_at_ms) : 0;
+// =============================================================================
+// processBtn – Taster entprellen und Short-Press/Long-Press unterscheiden.
+//
+// WAS: Liest den Taster, entprellt ihn (BUTTON_DEBOUNCE_MS), und unterscheidet:
+//      - Short-Press (< SETUP_BUTTON_HOLD_MS): Relais toggeln
+//      - Long-Press  (>= SETUP_BUTTON_HOLD_MS): Ignorieren (wird vom
+//        Provisioning-Controller fuer Setup-Mode verarbeitet)
+//
+// WARUM: Manuelles Relais-Schalten ohne Master/ESP-NOW.
+//
+// PARAM nowMs: Aktuelle Zeit in Millisekunden (millis()).
+// =============================================================================
+void processBtn(unsigned long nowMs) {
+    bool rawState = netErlDeviceReadButton();
+
+    // Flanken-Erkennung: Wechsel des Raw-Signal speichern
+    if (rawState != runtime.button_raw_active) {
+        runtime.button_raw_active = rawState;
+        runtime.button_changed_at_ms = nowMs;
+    }
+
+    // Entprellung: Ignoriere Wechsel die kuerzer als DEBOUNCE_MS sind
+    unsigned long timeSinceChange = nowMs - runtime.button_changed_at_ms;
+    if (timeSinceChange < BUTTON_DEBOUNCE_MS) {
+        return;
+    }
+
+    // Kein Zustandswechsel im stabilen Signal → nichts tun
+    if (rawState == runtime.button_stable_active) {
+        return;
+    }
+    runtime.button_stable_active = rawState;
+
+    // --- TASTE GEDRUECKT (fallende/flankende Flanke je nach Logik) ---
+    if (rawState) {
+        runtime.button_pressed_at_ms = nowMs;
+        return;  // Warte auf Loslassen
+    }
+
+    // --- TASTE LOSGELASSEN → Haltezeit auswerten ---
+    unsigned long holdDurationMs = (runtime.button_pressed_at_ms > 0)
+                                 ? (nowMs - runtime.button_pressed_at_ms)
+                                 : 0;
     runtime.button_pressed_at_ms = 0;
-    if (held >= SETUP_BUTTON_HOLD_MS) return;  // Langdruck → Setup, nicht toggeln
-    runtime.relay_auto_owned = false; runtime.pending_auto_on_decision = false;
+
+    // Long-Press → Setup-Mode (wird vom Provisioning-Controller behandelt)
+    if (holdDurationMs >= SETUP_BUTTON_HOLD_MS) {
+        return;
+    }
+
+    // Short-Press → Relais toggeln
+    runtime.relay_auto_owned = false;
+    runtime.pending_auto_on_decision = false;
     runtime.blocked_by_lux = false;
-    setRelay(!runtime.relay_1, "button");
+
+    bool newRelayState = !runtime.relay_1;
+    setRelay(newRelayState, "button");
     sendRelayEvent(SH_TRIGGER_MANUAL_BUTTON);
     runtime.state_report_offen = true;
 }
@@ -808,49 +1244,85 @@ void setup() {
 
 // =============================================================================
 // ARDUINO – loop()
+//
+// ABLAUF JEDER ITERATION:
+//   1. Watchdog zuruecksetzen
+//   2. Provisioning-Controller updaten (Setup-Mode, AP-Verwaltung)
+//   3. Wenn Setup-Mode: nur warten, keine Funk-Aktivitaet
+//   4. ESP-NOW initialisieren (falls noch nicht geschehen)
+//   5. Geraete-spezifische Tasks:
+//      - Praesenzsensor pollen (Auto-Light)
+//      - Taster entprellen (manuelles Schalten)
+//      - Sensoren lesen (Temperatur, Lux, Gas, etc.)
+//      - Ausstehende CMDs verarbeiten (nur Hall mit ISR-Queue)
+//   6. Ausstehende Motion-Events senden
+//   7. Periodische Protokoll-Nachrichten:
+//      - HELLO (wenn Master noch nicht bekannt)
+//      - HEARTBEAT (wenn Master bekannt)
+//      - STATE (wenn angefordert oder Intervall abgelaufen)
+//   8. Debug-Snapshot-Log (wenn aktiv)
+//   9. Warten (LOOP_INTERVAL_MS)
 // =============================================================================
 
 void loop() {
     esp_task_wdt_reset();
     nodeProvisioning.update();
 
+    // Wenn Setup-Mode: nur Provisioning updaten, keine Funk-Aktivitaet
     if (!runtime.provisioning_bereit || runtime.setup_mode) {
-        delay(LOOP_INTERVAL_MS); return;
+        delay(LOOP_INTERVAL_MS);
+        return;
     }
-    if (!runtime.funk_bereit) initFunk();
 
-    unsigned long j = millis();
+    // ESP-NOW initialisieren falls noch nicht geschehen
+    if (!runtime.funk_bereit) {
+        initFunk();
+    }
 
-    // Gerätespezifische Abläufe
-    pollPresence(j);
-    processBtn(j);
-    netErlDevicePollSensors(j);
+    unsigned long nowMs = millis();
+
+    // Geraete-spezifische Tasks
+    pollPresence(nowMs);
+    processBtn(nowMs);
+    netErlDevicePollSensors(nowMs);
 #if NET_ERL_USE_ISR_CMD_QUEUE
     verarbeiteAusstehende();
 #endif
 
     // Ausstehendes Motion-Event senden
     if (runtime.pending_motion_event_state != 0U && runtime.master_bekannt && runtime.master_mac_gueltig) {
-        if (sendMotionEvent(runtime.pending_motion_event_state == 1U))
+        if (sendMotionEvent(runtime.pending_motion_event_state == 1U)) {
             runtime.pending_motion_event_state = 0U;
+        }
     }
 
     // Periodische Protokoll-Nachrichten
-    if (!runtime.master_bekannt && (j - runtime.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS)
+    if (!runtime.master_bekannt && (nowMs - runtime.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) {
         sendHello();
-    if (runtime.master_bekannt && (j - runtime.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS)
+    }
+    if (runtime.master_bekannt && (nowMs - runtime.letzter_heartbeat_ms) >= HEARTBEAT_INTERVAL_MS) {
         sendHeartbeat();
+    }
 
-    // STATE senden wenn nötig
-    bool sf = runtime.master_bekannt && runtime.master_mac_gueltig &&
-        (runtime.state_report_offen || runtime.letzter_state_ms == 0 ||
-         (runtime.state_interval_ms > 0 && (j - runtime.letzter_state_ms) >= runtime.state_interval_ms));
-    if (sf) sendState();
+    // STATE senden wenn: Master bekannt UND (einer der drei Ausloeser):
+    //   1. state_report_offen = Master hat STATE angefordert oder Event steht an
+    //   2. letzter_state_ms == 0 = Noch nie STATE gesendet (nach Boot)
+    //   3. Report-Intervall abgelaufen
+    bool masterReady = runtime.master_bekannt && runtime.master_mac_gueltig;
+    bool stateRequested = runtime.state_report_offen;
+    bool neverSentBefore = (runtime.letzter_state_ms == 0);
+    bool reportIntervalElapsed = (runtime.state_interval_ms > 0)
+                              && ((nowMs - runtime.letzter_state_ms) >= runtime.state_interval_ms);
+
+    bool shouldSendState = masterReady && (stateRequested || neverSentBefore || reportIntervalElapsed);
+    if (shouldSendState) {
+        sendState();
+    }
 
     // Snapshot-Log (Debug)
-    if (intervalElapsed(runtime.letztes_snap_log_ms, j, SNAPSHOT_LOG_INTERVAL_MS) && DEBUG_LOKAL_AKTIV) {
+    if (intervalElapsed(runtime.letztes_snap_log_ms, nowMs, SNAPSHOT_LOG_INTERVAL_MS) && DEBUG_LOKAL_AKTIV) {
         netErlDeviceLogSnapshot();
-        runtime.letztes_snap_log_ms = j;
+        runtime.letztes_snap_log_ms = nowMs;
     }
 
     delay(LOOP_INTERVAL_MS);
