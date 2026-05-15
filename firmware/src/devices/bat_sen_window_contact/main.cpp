@@ -1,28 +1,21 @@
-// =============================================================================
-// main.cpp – BAT-SEN Window Contact: Batterie-Fensterkontakt
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/bat_sen_window_contact/main.cpp
-// Hardware:   ESP32-C3 + Reed-Kontakt an GPIO3
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Pin-Belegung (siehe PinConfig.h fuer Details):
-//   Reed-Kontakt: GPIO3 – INPUT_PULLUP, offen=HIGH
-//   Batterie:      CR2032 (2200-3000mV)
-//   Setup-Button:  GPIO2 (active-LOW)
-//   Setup-LED:     GPIO7 (active-HIGH)
-//
-// Funktionsweise:
-//   GPIO-Wake bei Pegelwechsel (Fenster auf/zu) + Timer-Wake alle 15 Min.
-//   Entprellung 35ms. Event bei Statuswechsel (SH_EVENT_WINDOW_OPENED/CLOSED).
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief BAT-SEN Window Contact: Batterie-Fensterkontakt mit Reed-Kontakt
+ *
+ * @details GPIO-Wake bei Pegelwechsel (Fenster auf/zu) + Timer-Wake alle 15 Min.
+ *          Entprellung via BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS.
+ *          Event bei Statuswechsel: SH_EVENT_WINDOW_OPENED / SH_EVENT_WINDOW_CLOSED.
+ *
+ * Hardware:   ESP32-C3 + Reed-Kontakt an GPIO3
+ * Batterie:   CR2032 (2200-3000mV)
+ * Pin-Belegung:
+ *   - Reed-Kontakt: GPIO3 (INPUT_PULLUP, offen=HIGH)
+ *   - Setup-Button: GPIO2 (active-LOW)
+ *   - Setup-LED:    GPIO7 (active-HIGH)
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 
@@ -44,7 +37,12 @@ int last_raw_level = LOW;           // Letzter Rohwert (entprellt)
 int stable_level = LOW;             // Stabiler Pegel nach Entprellung
 unsigned long last_edge_ms = 0UL;   // Zeitstempel letzter Flankenwechsel
 
-// levelIstOffen – Prueft ob ein GPIO-Pegel "Fenster offen" bedeutet
+/**
+ * @brief Prueft ob ein GPIO-Pegel "Fenster offen" bedeutet.
+ * @param level digitalRead-Ergebnis (HIGH oder LOW)
+ * @return true wenn der Pegel als "offen" interpretiert wird
+ * @note Die Richtung wird via BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH konfiguriert.
+ */
 bool levelIstOffen(int level) {
 #if BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH
     return level == HIGH;
@@ -58,7 +56,10 @@ bool levelIstOffen(int level) {
 // CUSTOM-DEVICE-HOOKS
 // =============================================================================
 
-// device_init_io – GPIO-Initialisierung: Pullup, erster Zustand, Log
+/**
+ * @brief Initialisiert den Reed-Kontakt-Pin mit Pullup und liest den ersten Zustand.
+ * Wird einmalig von BatSenRuntime beim Boot aufgerufen.
+ */
 void device_init_io() {
 #if BAT_SEN_WINDOW_CONTACT_USE_INPUT_PULLUP
     pinMode(BAT_SEN_WINDOW_CONTACT_PIN, INPUT_PULLUP);
@@ -78,10 +79,14 @@ void device_init_io() {
          kontakt_offen ? "open" : "closed");
 }
 
-// device_poll_inputs – Entprellte Kontakt-Abfrage
-//   Wartet BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS (35ms) nach letztem Flankenwechsel.
-//   Erst dann wird der Pegel als stabil uebernommen.
-//   Rueckgabe: true = Status geaendert
+/**
+ * @brief Entprellte Kontakt-Abfrage mit Statuswechsel-Erkennung.
+ *
+ * Wartet BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS nach letztem Flankenwechsel,
+ * bevor der Pegel als stabil uebernommen wird. Setzt event_pending bei Wechsel.
+ *
+ * @return true wenn sich der Status geaendert hat
+ */
 bool device_poll_inputs() {
     if (!kontakt_init_ok) return false;
 
@@ -119,8 +124,13 @@ bool device_poll_inputs() {
     return true;
 }
 
-// device_build_state_channels – Baut generischen Zustand aus Kontakt-Daten
-//   channelBool1 = kontakt_offen (1=offen, 0=geschlossen)
+/**
+ * @brief Befuellt die generischen Zustands-Channel aus den Fensterkontakt-Daten.
+ * @param[out] channelBool1  kontakt_offen (1=offen, 0=geschlossen)
+ * @param[out] channelU16_1  immer 0
+ * @param[out] channelMask1  immer 0
+ * @param[out] fault         true wenn kontakt_init_ok == false
+ */
 void device_build_state_channels(
     uint8_t* channelBool1, uint16_t* channelU16_1,
     uint8_t* channelMask1, bool* fault)
@@ -131,8 +141,15 @@ void device_build_state_channels(
     if (fault != nullptr) *fault = !kontakt_init_ok;
 }
 
-// device_map_event – Erzeugt Window-Event bei Statuswechsel
-//   SH_EVENT_WINDOW_OPENED bei "offen", SH_EVENT_WINDOW_CLOSED bei "zu"
+/**
+ * @brief Erzeugt ein Fenster-Event bei Statuswechsel.
+ *
+ * @param[out] eventType  SH_EVENT_WINDOW_OPENED oder SH_EVENT_WINDOW_CLOSED
+ * @param[out] trigger    SH_TRIGGER_AUTO
+ * @param[out] param1     1 bei "offen", 0 bei "geschlossen"
+ * @param[out] param2     1 wenn stable_level == HIGH, sonst 0
+ * @return true wenn ein Event bereitsteht (event_pending war true)
+ */
 bool device_map_event(
     uint8_t* eventType, uint8_t* trigger,
     uint8_t* param1, uint16_t* param2)
@@ -149,8 +166,10 @@ bool device_map_event(
     return true;
 }
 
-// device_wake_candidates – GPIO3 als Wake-Quelle registrieren
-//   wakeHigh = true (HIGH-Pegel weckt auf)
+/**
+ * @brief Registriert den Reed-Kontakt-Pin als GPIO-Wake-Quelle.
+ * @return Bitmaske mit Bit BAT_SEN_WINDOW_CONTACT_PIN gesetzt
+ */
 uint64_t device_wake_candidates() {
     if (BAT_SEN_WINDOW_CONTACT_PIN < 0 || BAT_SEN_WINDOW_CONTACT_PIN >= 64) {
         return 0ULL;
