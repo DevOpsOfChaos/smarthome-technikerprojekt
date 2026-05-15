@@ -1,3 +1,29 @@
+// =============================================================================
+// BatSenRuntime.h – BAT-SEN Basistyp: Batterie-Sensor (ESP-NOW Runtime)
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/basetypes/bat_sen/BatSenRuntime.h
+//
+// Datei-Funktion:
+//   ESP-NOW-Sensor-Implementierung fuer batteriebetriebene Geraete.
+//   Header-only (wie NetSenRuntime). Nutzt Deep-Sleep fuer
+//   Energiesparmodus, periodischen Timer-Wake und optionalen GPIO-Wake.
+//   Bietet Custom-Hooks fuer konkrete Devices (Init, Poll, State,
+//   Events, Wake-Konfiguration). Unterstuetzt Batterie-ADC-Messung
+//   mit konfigurierbaren Profilen (CR2032, AA, AAA, LiIon).
+//
+// Protokoll-Nachrichten:
+//   Senden:   HELLO, STATE (BatteryConfigStateReport), EVENT, ACK
+//   Empfangen: HELLO_ACK, CMD (STATE_REQUEST), CFG (wake_interval, rx_window)
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+//
+// Aenderungshistorie:
+//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch, Doxygen-Stil)
+// =============================================================================
+
 #pragma once
 
 #include <Arduino.h>
@@ -25,6 +51,10 @@
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 #include "../../../lib/sh_protocol/src/Protocol.h"
 
+// =============================================================================
+// KONSTANTEN – Debug, Version, RTC-Speicher, Broadcast, Custom-Hooks
+// =============================================================================
+
 constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "BAT-SEN";
 constexpr char DATEI_VERSION[] = "0.1.0";
@@ -34,61 +64,74 @@ static_assert(
     sizeof(DEVICE_ID) <= SETUP_AP_SSID_BUFFER_SIZE,
     "BAT_SEN_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
 
+// Boot-Counter in RTC-Speicher (bleibt ueber Deep-Sleep hinweg erhalten)
 RTC_DATA_ATTR uint32_t RTC_BOOT_COUNTER = 0U;
 
+// Custom-Hook-Flags (koennen von Devices gesetzt werden)
 #ifndef BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS
 #define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 0
 #endif
 
 #ifndef BAT_SEN_GPIO_WAKE_LEVEL_HIGH
-#define BAT_SEN_GPIO_WAKE_LEVEL_HIGH 1
+#define BAT_SEN_GPIO_WAKE_LEVEL_HIGH 1  // Default: Wake bei HIGH-Pegel
 #endif
 
+// =============================================================================
+// STRUKTUREN – GenericStateChannels, GenericEventData, NodeState
+// =============================================================================
+
+// GenericStateChannels – Neutrale Zustandskanaele (device-agnostisch)
 struct GenericStateChannels {
-    uint8_t channel_bool_1;
-    uint16_t channel_u16_1;
-    uint8_t channel_mask_1;
-    bool fault;
+    uint8_t channel_bool_1;  // Bool-Kanal (z.B. Fensterkontakt)
+    uint16_t channel_u16_1;  // U16-Kanal (z.B. ADC-Rohwert)
+    uint8_t channel_mask_1;  // Mask-Kanal (z.B. Tastenflags)
+    bool fault;              // Fehlerstatus
 };
 
+// GenericEventData – Austehrendes Device-Event
 struct GenericEventData {
-    bool vorhanden;
-    uint8_t event_type;
-    uint8_t trigger;
-    uint8_t param1;
-    uint16_t param2;
+    bool vorhanden;          // true = Event liegt an
+    uint8_t event_type;      // Event-Typ (SH_EVENT_*)
+    uint8_t trigger;         // Ausloeser (SH_TRIGGER_*)
+    uint8_t param1;          // Parameter 1
+    uint16_t param2;         // Parameter 2
 };
 
+// NodeState – Zentraler Geraetezustand (Batterie-spezifisch)
 struct NodeState {
-    bool provisioning_bereit;
-    bool setup_mode;
-    bool setup_ap_aktiv;
-    bool restart_pending;
-    bool master_bekannt;
-    bool master_mac_gueltig;
-    bool state_report_offen;
-    bool event_report_offen;
-    unsigned long boot_ms;
-    unsigned long letztes_hello_ms;
-    unsigned long letzter_state_ms;
-    unsigned long letzte_batterie_probe_ms;
-    unsigned long schlaf_ab_ms;
-    unsigned long restart_requested_at_ms;
-    uint32_t wake_interval_s;
-    uint32_t rx_window_ms;
-    uint8_t master_mac[6];
-    uint8_t naechste_seq;
-    uint8_t battery_pct;
-    uint16_t battery_mv;
-    bool battery_fault;
-    uint8_t wake_reason;
-    uint32_t boot_counter;
-    GenericStateChannels kanaele;
-    GenericEventData event;
-    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE];
+    bool provisioning_bereit;       // NodeProvisioning initialisiert
+    bool setup_mode;                // Setup-Modus aktiv
+    bool setup_ap_aktiv;            // Setup-AP laeuft
+    bool restart_pending;           // Neustart angefordert
+    bool master_bekannt;            // HELLO_ACK empfangen
+    bool master_mac_gueltig;        // Master-MAC provisioniert
+    bool state_report_offen;        // STATE muss gesendet werden
+    bool event_report_offen;        // EVENT muss gesendet werden
+    unsigned long boot_ms;          // Zeitstempel Boot (millis)
+    unsigned long letztes_hello_ms; // Zeitstempel letztes HELLO
+    unsigned long letzter_state_ms; // Zeitstempel letzter STATE
+    unsigned long letzte_batterie_probe_ms; // Zeitstempel letzte ADC-Messung
+    unsigned long schlaf_ab_ms;     // Frueheste Zeit zum Deep-Sleep
+    unsigned long restart_requested_at_ms; // Zeitstempel Restart
+    uint32_t wake_interval_s;       // Wake-Intervall (Sekunden)
+    uint32_t rx_window_ms;          // RX-Fenster nach Wake (ms)
+    uint8_t master_mac[6];          // Provisionierte Master-MAC
+    uint8_t naechste_seq;           // Naechste ESP-NOW-Sequenz
+    uint8_t battery_pct;            // Batterie in Prozent
+    uint16_t battery_mv;            // Batteriespannung in mV
+    bool battery_fault;             // Fehler bei Batteriemessung
+    uint8_t wake_reason;            // Wake-Grund (0=unbekannt, 1=Timer, 2=GPIO)
+    uint32_t boot_counter;          // Boot-Zaehler (RTC-persistent)
+    GenericStateChannels kanaele;   // Device-Kanaele
+    GenericEventData event;         // Ausstehendes Event
+    char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE]; // Setup-AP-SSID
 };
 
 NodeState nodeStatus = {};
+
+// =============================================================================
+// CUSTOM-DEVICE-HOOKS – Werden von konkreten Devices ueberschrieben
+// =============================================================================
 
 #if BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS
 void device_init_io();
@@ -136,6 +179,11 @@ bool device_map_event(
 uint64_t device_wake_candidates() { return 0ULL; }
 #endif
 
+// =============================================================================
+// HILFSFUNKTIONEN – Logging, Strings, Delta, Broadcast, MAC, Wake-Reason
+// =============================================================================
+
+// logf – Formatiertes Logging (nur bei aktiviertem Debug)
 void logf(const char* level, const char* format, ...) {
     if (!DEBUG_LOKAL_AKTIV) return;
 
@@ -151,6 +199,7 @@ void logf(const char* level, const char* format, ...) {
     Serial.println(message);
 }
 
+// provisioningLog – Logging-Callback fuer Provisioning-Framework
 void provisioningLog(const char* level, const char* message) {
     if (!DEBUG_LOKAL_AKTIV || level == nullptr || message == nullptr) return;
 
@@ -160,64 +209,44 @@ void provisioningLog(const char* level, const char* message) {
     Serial.println(message);
 }
 
+// copyText – Sicheres Kopieren eines null-terminierten Strings
 void copyText(char* target, size_t targetSize, const char* source) {
     if (!target || targetSize == 0U) return;
     if (!source) {
         target[0] = '\0';
         return;
     }
-
     strncpy(target, source, targetSize - 1U);
     target[targetSize - 1U] = '\0';
 }
 
-class BatSenProvisioningHandler final
-    : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
-  public:
-    const char* pageTitle() const override { return "BAT-SEN Provisioning"; }
-    const char* pageIntro() const override {
-        return "Master-Bindung, Wake-Takt und RX-Fenster fuer den Batteriepfad.";
-    }
-    const char* deviceSectionTitle() const override { return "BAT-SEN-Spezifisch"; }
-    const char* deviceSectionIntro() const override {
-        return "Batterieprofil und Pins sind Compile-Time-Geraetewerte.";
-    }
-
-    void loadDeviceDefaults() override {}
-    bool loadDeviceSettings(Preferences& /*prefs*/) override { return false; }
-    bool saveDeviceSettings(Preferences& /*prefs*/) override { return true; }
-    bool clearDeviceSettings(Preferences& /*prefs*/) override { return true; }
-    void captureDeviceSnapshot() override {}
-    void restoreDeviceSnapshot() override {}
-    bool parseDeviceSave(WebServer& /*server*/, String& /*errorText*/) override { return true; }
-    void applyParsedDeviceSettings() override {}
-    void discardParsedDeviceSettings() override {}
-    void appendDeviceFieldsHtml(String& /*page*/, WebServer* /*sourceServer*/) const override {}
-};
-
-SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
-BatSenProvisioningHandler batSenProvisioningHandler;
-
+// deltaU16 – Absolute Differenz zwischen zwei uint16-Werten
 uint16_t deltaU16(uint16_t a, uint16_t b) {
     return (a >= b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
 }
 
+// deltaU8 – Absolute Differenz zwischen zwei uint8-Werten
 uint8_t deltaU8(uint8_t a, uint8_t b) {
     return (a >= b) ? (uint8_t)(a - b) : (uint8_t)(b - a);
 }
 
+// istBroadcastMac – Prueft ob MAC die Broadcast-Adresse ist
 bool istBroadcastMac(const uint8_t* mac) {
     return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
 }
 
+// helloZielMac – Ziel-MAC fuer HELLO (Master oder Broadcast)
 const uint8_t* helloZielMac() {
     return nodeStatus.master_mac_gueltig ? nodeStatus.master_mac : BROADCAST_MAC;
 }
 
+// istZeitErreicht – Prueft ob millis()-Zeit erreicht/ueberschritten ist (Wrap-sicher)
 bool istZeitErreicht(unsigned long jetzt, unsigned long ziel) {
     return (long)(jetzt - ziel) >= 0;
 }
 
+// wakeReasonCode – Ermittelt den Wake-Grund des letzten Deep-Sleeps
+//   Rueckgabe: 0=unbekannt/Reset, 1=Timer-Wake, 2=GPIO-Wake
 uint8_t wakeReasonCode() {
     const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_TIMER) return 1U;
@@ -229,6 +258,11 @@ uint8_t wakeReasonCode() {
     return 0U;
 }
 
+// =============================================================================
+// WAKE-KONFIGURATION – GPIO-Wake-Pins validieren und setzen
+// =============================================================================
+
+// validiereWakeMask – Filtert ungueltige Wake-Pins aus einer Bitmaske
 uint64_t validiereWakeMask(uint64_t kandidatMask) {
     if (kandidatMask == 0ULL) return 0ULL;
 
@@ -237,6 +271,7 @@ uint64_t validiereWakeMask(uint64_t kandidatMask) {
         const uint64_t bit = (1ULL << pin);
         if ((kandidatMask & bit) == 0ULL) continue;
 
+        // Prueft ob dieser Pin Deep-Sleep-Wake unterstuetzt
         if (esp_sleep_is_valid_wakeup_gpio((gpio_num_t)pin)) {
             gueltigMask |= bit;
         } else {
@@ -246,6 +281,7 @@ uint64_t validiereWakeMask(uint64_t kandidatMask) {
     return gueltigMask;
 }
 
+// fuegeWakePinHinzu – Fuegt einen Pin zu den Wake-Masken (HIGH/LOW) hinzu
 void fuegeWakePinHinzu(uint64_t* highMask, uint64_t* lowMask, int pin, bool wakeHigh) {
     if (highMask == nullptr || lowMask == nullptr) return;
     if (pin < 0 || pin >= 64) return;
@@ -257,6 +293,11 @@ void fuegeWakePinHinzu(uint64_t* highMask, uint64_t* lowMask, int pin, bool wake
     }
 }
 
+// =============================================================================
+// BATTERIE – Prozentberechnung, ADC-Messung, Zustand aktualisieren
+// =============================================================================
+
+// berechneBatterieProzent – Wandelt Spannung in Prozent (linear zwischen empty/full)
 uint8_t berechneBatterieProzent(uint16_t batteryMv) {
     if (batteryMv <= BATTERY_EMPTY_MV) return 0U;
     if (batteryMv >= BATTERY_FULL_MV) return 100U;
@@ -269,19 +310,22 @@ uint8_t berechneBatterieProzent(uint16_t batteryMv) {
     return (uint8_t)pct;
 }
 
+// leseBatterie – Fuehrt ADC-Messung durch (gemittelt, skaliert)
+//   Gibt Spannung in mV und Prozent zurueck. Nutzt Spannungsteiler-Korrektur.
 bool leseBatterie(uint16_t* batteryMv, uint8_t* batteryPct) {
     if (batteryMv == nullptr || batteryPct == nullptr) return false;
     if (!BATTERY_ADC_AKTIV || PIN_BATTERY_ADC < 0) return false;
 
+    // ADC-Samples mitteln (rauschaerm)
     uint32_t adcSumMv = 0UL;
     for (uint8_t i = 0U; i < BATTERY_ADC_SAMPLE_COUNT; ++i) {
         adcSumMv += (uint32_t)analogReadMilliVolts(PIN_BATTERY_ADC);
     }
-
     const uint32_t adcMv = (adcSumMv + ((uint32_t)BATTERY_ADC_SAMPLE_COUNT / 2UL)) /
                            (uint32_t)BATTERY_ADC_SAMPLE_COUNT;
     if (adcMv == 0UL) return false;
 
+    // Spannungsteiler korrigieren: scaled = adc * num / den
     uint32_t scaledMv = ((adcMv * (uint32_t)BATTERY_DIVIDER_NUM) + ((uint32_t)BATTERY_DIVIDER_DEN / 2UL)) /
                         (uint32_t)BATTERY_DIVIDER_DEN;
     if (scaledMv > 65535UL) scaledMv = 65535UL;
@@ -291,6 +335,8 @@ bool leseBatterie(uint16_t* batteryMv, uint8_t* batteryPct) {
     return true;
 }
 
+// aktualisiereBatterie – Misst Batterie und aktualisiert nodeStatus (mit Hysterese)
+//   Setzt *geaendert=true wenn sich Werte signifikant geaendert haben.
 void aktualisiereBatterie(bool* geaendert) {
     if (geaendert != nullptr) *geaendert = false;
 
@@ -300,6 +346,7 @@ void aktualisiereBatterie(bool* geaendert) {
     const bool neuerFault = !messungOk;
 
     if (messungOk) {
+        // Prueft Hysterese: nur bei ausreichender Aenderung als "geaendert" markieren
         const bool mvDelta = deltaU16(neueMv, nodeStatus.battery_mv) >= BATTERY_STATE_DELTA_MV;
         const bool pctDelta = deltaU8(neuerPct, nodeStatus.battery_pct) >= BATTERY_STATE_DELTA_PCT;
         const bool faultDelta = nodeStatus.battery_fault != neuerFault;
@@ -312,12 +359,18 @@ void aktualisiereBatterie(bool* geaendert) {
         return;
     }
 
+    // Messung fehlgeschlagen
     if (geaendert != nullptr && nodeStatus.battery_fault != neuerFault) {
         *geaendert = true;
     }
     nodeStatus.battery_fault = true;
 }
 
+// =============================================================================
+// DEVICE-KANAELES – Zustandskanaele lesen und auf Aenderungen pruefen
+// =============================================================================
+
+// leseDeviceKanaele – Liest die generischen Kanaele via Custom-Hook
 GenericStateChannels leseDeviceKanaele() {
     GenericStateChannels channels = {};
     device_build_state_channels(
@@ -328,6 +381,7 @@ GenericStateChannels leseDeviceKanaele() {
     return channels;
 }
 
+// sindKanaeleUnterschiedlich – Prueft ob zwei Channel-Zustaende abweichen
 bool sindKanaeleUnterschiedlich(const GenericStateChannels& a, const GenericStateChannels& b) {
     return a.channel_bool_1 != b.channel_bool_1 ||
            a.channel_u16_1 != b.channel_u16_1 ||
@@ -335,6 +389,7 @@ bool sindKanaeleUnterschiedlich(const GenericStateChannels& a, const GenericStat
            a.fault != b.fault;
 }
 
+// pruefeDeviceEvent – Ruft Event-Hook auf und speichert Event falls vorhanden
 void pruefeDeviceEvent() {
     uint8_t eventType = 0U;
     uint8_t trigger = SH_TRIGGER_UNKNOWN;
@@ -352,20 +407,32 @@ void pruefeDeviceEvent() {
     nodeStatus.state_report_offen = true;
 }
 
+// aktualisiereSchlafFenster – Setzt die frueheste Deep-Sleep-Zeit
 void aktualisiereSchlafFenster(unsigned long fensterMs) {
     nodeStatus.schlaf_ab_ms = millis() + fensterMs;
 }
 
+// =============================================================================
+// MASKEN & PEER – Sensor-/Input-Masken bauen, ESP-NOW-Peer registrieren
+// =============================================================================
+
+// buildSensorMask – Baut Sensor-Maske (BAT-SEN: keine festen Sensoren)
 void buildSensorMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
     copyText(target, targetSize, "XXXXXXXXXX");
 }
 
+// buildInputMask – Baut Input-Maske (BAT-SEN: keine festen Eingaenge)
 void buildInputMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
     copyText(target, targetSize, "XXXXX");
 }
 
+// =============================================================================
+// KOMMUNIKATION – ESP-NOW Senden: Peer, Paket, ACK
+// =============================================================================
+
+// stellePeerSicher – Registriert eine MAC als ESP-NOW-Peer
 bool stellePeerSicher(const uint8_t* mac) {
     if (mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
@@ -384,6 +451,7 @@ bool stellePeerSicher(const uint8_t* mac) {
     return true;
 }
 
+// sendePaket – Zentrale ESP-NOW-Sendefunktion (baut Header+CRC, sendet)
 bool sendePaket(
     const uint8_t* zielMac,
     uint8_t msgType,
@@ -414,6 +482,7 @@ bool sendePaket(
     return true;
 }
 
+// sendeAck – Sendet eine ACK-Bestaetigung
 bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
     SmartHome::AckPayload payload = {};
     payload.ack_seq = ackSeq;
@@ -422,6 +491,11 @@ bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_
     return sendePaket(zielMac, SH_MSG_ACK, &payload, sizeof(payload), "ACK");
 }
 
+// =============================================================================
+// PROTOKOLL-NACHRICHTEN – HELLO, STATE, EVENT
+// =============================================================================
+
+// sendeHello – Sendet HELLO mit Batterie-Boot-Counter
 bool sendeHello() {
     SmartHome::HelloPayload payload = {};
     char sensorMask[SH_SENSOR_MASK_LEN] = {0};
@@ -449,6 +523,10 @@ bool sendeHello() {
     return sendePaket(helloZielMac(), SH_MSG_HELLO, &payload, sizeof(payload), "HELLO");
 }
 
+// sendeState – Sendet STATE mit Batterie- und Device-Kanaelen
+//   Nutzt BatteryConfigStateReportPayload (mit report_interval_s).
+//   Die Kanaele window_open/rain_raw/button_flags sind protokoll-historisch
+//   benannt, der Basistyp behandelt sie als neutrale Device-Kanaele.
 bool sendeState() {
     if (!nodeStatus.master_mac_gueltig) return false;
 
@@ -456,9 +534,6 @@ bool sendeState() {
     copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
     payload.battery_pct = nodeStatus.battery_pct;
     payload.battery_mv = nodeStatus.battery_mv;
-
-    // Die Felder sind im Protokoll historisch benannt.
-    // Der Basistyp behandelt sie als neutrale Device-Kanaele.
     payload.window_open = nodeStatus.kanaele.channel_bool_1;
     payload.rain_raw = nodeStatus.kanaele.channel_u16_1;
     payload.button_flags = nodeStatus.kanaele.channel_mask_1;
@@ -474,6 +549,7 @@ bool sendeState() {
     return true;
 }
 
+// sendeEvent – Sendet ein ausstehendes Device-Event
 bool sendeEvent() {
     if (!nodeStatus.master_mac_gueltig || !nodeStatus.event.vorhanden) return false;
 
@@ -493,20 +569,29 @@ bool sendeEvent() {
     return true;
 }
 
+// =============================================================================
+// PERSISTENZ – Konfiguration mit Rollback speichern (wake_interval, rx_window)
+// =============================================================================
+
+// speichereNodeBasisMitRollback – Persistiert und stellt bei Fehler Vorzustand her
 bool speichereNodeBasisMitRollback(
     const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& snapshot,
     uint32_t vorherWakeIntervalS,
     uint32_t vorherRxWindowMs) {
-    if (nodeProvisioning.saveCurrentState()) {
-        return true;
-    }
+    if (nodeProvisioning.saveCurrentState()) return true;
 
+    // Rollback: alte Werte wiederherstellen
     nodeProvisioning.restoreBasisSnapshot(snapshot);
     nodeStatus.wake_interval_s = vorherWakeIntervalS;
     nodeStatus.rx_window_ms = vorherRxWindowMs;
     return false;
 }
 
+// =============================================================================
+// CFG-VERARBEITUNG – Wake-Intervall und RX-Fenster setzen
+// =============================================================================
+
+// uebernehmeWakeInterval – Setzt neues Wake-Intervall (mit Rollback)
 bool uebernehmeWakeInterval(uint32_t valueS) {
     if (valueS < MIN_WAKE_INTERVAL_S || valueS > MAX_WAKE_INTERVAL_S) return false;
 
@@ -521,6 +606,7 @@ bool uebernehmeWakeInterval(uint32_t valueS) {
     return speichereNodeBasisMitRollback(snapshot, vorherWakeIntervalS, vorherRxWindowMs);
 }
 
+// uebernehmeRxWindow – Setzt neues RX-Fenster (mit Rollback)
 bool uebernehmeRxWindow(uint32_t valueMs) {
     if (valueMs < MIN_RX_WINDOW_MS || valueMs > MAX_RX_WINDOW_MS) return false;
 
@@ -535,17 +621,62 @@ bool uebernehmeRxWindow(uint32_t valueMs) {
     return speichereNodeBasisMitRollback(snapshot, vorherWakeIntervalS, vorherRxWindowMs);
 }
 
+// =============================================================================
+// PROVISIONING-HANDLER – Web-Konfiguration (keine zusaetzlichen Felder)
+// =============================================================================
+class BatSenProvisioningHandler final
+    : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
+  public:
+    const char* pageTitle() const override { return "BAT-SEN Provisioning"; }
+    const char* pageIntro() const override {
+        return "Master-Bindung, Wake-Takt und RX-Fenster fuer den Batteriepfad.";
+    }
+    const char* deviceSectionTitle() const override { return "BAT-SEN-Spezifisch"; }
+    const char* deviceSectionIntro() const override {
+        return "Batterieprofil und Pins sind Compile-Time-Geraetewerte.";
+    }
+
+    void loadDeviceDefaults() override {}
+    bool loadDeviceSettings(Preferences& /*prefs*/) override { return false; }
+    bool saveDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    bool clearDeviceSettings(Preferences& /*prefs*/) override { return true; }
+    void captureDeviceSnapshot() override {}
+    void restoreDeviceSnapshot() override {}
+    bool parseDeviceSave(WebServer& /*server*/, String& /*errorText*/) override { return true; }
+    void applyParsedDeviceSettings() override {}
+    void discardParsedDeviceSettings() override {}
+    void appendDeviceFieldsHtml(String& /*page*/, WebServer* /*sourceServer*/) const override {}
+};
+
+SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisioning;
+BatSenProvisioningHandler batSenProvisioningHandler;
+
+// =============================================================================
+// PROTOKOLL-VERARBEITUNG – HELLO_ACK, CMD, CFG, ESP-NOW Dispatch
+// =============================================================================
+
+// senderIstProvisionierterMaster – Prueft ob Sender der provisionierte Master ist
+bool senderIstProvisionierterMaster(const uint8_t* senderMac) {
+    return nodeStatus.master_mac_gueltig &&
+           senderMac != nullptr &&
+           memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) == 0;
+}
+
+// verarbeiteHelloAck – Verarbeitet HELLO_ACK (markiert Master als bekannt)
 void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPayload& payload) {
+    // Prueft ob ACK ok
     if (payload.ack_status != SH_ACK_OK) {
         logf("WARN", "HELLO_ACK abgelehnt");
         return;
     }
 
+    // Prueft ob Master-MAC provisioniert
     if (!nodeStatus.master_mac_gueltig) {
         logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
         return;
     }
 
+    // Prueft ob Sender der provisionierte Master ist
     if (senderMac == nullptr ||
         memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) != 0) {
         logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
@@ -559,12 +690,7 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     logf("INFO", "HELLO_ACK empfangen");
 }
 
-bool senderIstProvisionierterMaster(const uint8_t* senderMac) {
-    return nodeStatus.master_mac_gueltig &&
-           senderMac != nullptr &&
-           memcmp(senderMac, nodeStatus.master_mac, sizeof(nodeStatus.master_mac)) == 0;
-}
-
+// verarbeiteCmd – Verarbeitet CMD (STATE_REQUEST)
 void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::CmdPayload& payload) {
     if (!senderIstProvisionierterMaster(senderMac)) {
         logf("WARN", "CMD ignoriert: Sender ist nicht der provisionierte Master");
@@ -577,6 +703,7 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::CmdPayload& payloa
     }
 }
 
+// uebernehmeCfg – Wendet CFG-Parameter an (wake_interval, rx_window)
 bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
     switch (payload.param_id) {
         case SH_CFG_REPORT_INTERVAL_S:
@@ -591,6 +718,7 @@ bool uebernehmeCfg(const SmartHome::CfgPayload& payload) {
     }
 }
 
+// verarbeiteCfg – Verarbeitet CFG (mit Sender-Prüfung und ACK)
 void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
     if (!senderIstProvisionierterMaster(senderMac)) {
         logf("WARN", "CFG ignoriert: Sender ist nicht der provisionierte Master");
@@ -603,6 +731,7 @@ void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
     }
 }
 
+// verarbeiteEspNowPaket – CRC-Prüfung + Dispatch an Handler (switch/msg_type)
 void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int len) {
     if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
     if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) return;
@@ -634,6 +763,7 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
     }
 }
 
+// ESP-NOW Callbacks (Core v3/v2, Recv+Send)
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 void onEspNowReceive(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
     if (!info) return;
@@ -651,6 +781,11 @@ void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
     }
 }
 
+// =============================================================================
+// INITIALISIERUNG – Funk, IO-GPIOs
+// =============================================================================
+
+// initialisiereFunk – ESP-NOW initialisieren (WLAN, Callbacks, Peers)
 void initialisiereFunk() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -674,6 +809,7 @@ void initialisiereFunk() {
     }
 }
 
+// initialisiereIO – Initialisiert GPIOs (LED, ADC, Wake-Input, Custom-Hooks)
 void initialisiereIO() {
     if (PIN_STATUS_LED >= 0) {
         pinMode(PIN_STATUS_LED, OUTPUT);
@@ -691,6 +827,11 @@ void initialisiereIO() {
     device_init_io();
 }
 
+// =============================================================================
+// LOOP-LOGIK – Polling, Events, Batterie
+// =============================================================================
+
+// pollLokaleHooks – Fragt Device-Hooks ab und aktualisiert Kanaele/Events
 void pollLokaleHooks() {
     const bool hookDelta = device_poll_inputs();
     const GenericStateChannels neueKanaele = leseDeviceKanaele();
@@ -701,23 +842,33 @@ void pollLokaleHooks() {
     pruefeDeviceEvent();
 }
 
+// =============================================================================
+// DEEP-SLEEP – Bedingungen pruefen, Wake-Quellen aktivieren, einschlafen
+// =============================================================================
+
+// darfInDeepSleep – Prueft ob Geraet in Deep-Sleep gehen darf
 bool darfInDeepSleep(unsigned long jetzt) {
     if (!DEEP_SLEEP_AKTIV) return false;
     if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode || !nodeStatus.master_mac_gueltig) return false;
 
+    // Nicht schlafen wenn Nachrichten gesendet werden muessen
     if (nodeStatus.master_mac_gueltig &&
         (nodeStatus.state_report_offen || nodeStatus.event_report_offen || nodeStatus.event.vorhanden)) {
         return false;
     }
 
+    // Waehrend Discovery-Fenster wach bleiben
     if (!nodeStatus.master_bekannt) {
         return (jetzt - nodeStatus.boot_ms) >= DISCOVERY_WINDOW_MS;
     }
 
+    // RX-Fenster abgelaufen?
     return istZeitErreicht(jetzt, nodeStatus.schlaf_ab_ms);
 }
 
+// aktiviereWakeQuellen – Konfiguriert Timer- und GPIO-Wake-Quellen
 void aktiviereWakeQuellen() {
+    // Timer-Wake (periodisch)
     const uint64_t wakeUs = (uint64_t)nodeStatus.wake_interval_s * 1000000ULL;
     esp_sleep_enable_timer_wakeup(wakeUs);
 
@@ -725,6 +876,7 @@ void aktiviereWakeQuellen() {
     uint64_t wakeHighMask = 0ULL;
     uint64_t wakeLowMask = 0ULL;
 
+    // GPIO-Wake von Device-Hooks
 #if BAT_SEN_ENABLE_GPIO_WAKE
     if (BAT_SEN_GPIO_WAKE_LEVEL_HIGH) {
         wakeHighMask |= device_wake_candidates();
@@ -736,6 +888,7 @@ void aktiviereWakeQuellen() {
     }
 #endif
 
+    // Setup-Button als Wake-Quelle
 #if SETUP_BUTTON_PIN >= 0
     fuegeWakePinHinzu(&wakeHighMask, &wakeLowMask, SETUP_BUTTON_PIN, SETUP_BUTTON_ACTIVE_LOW == 0);
 #endif
@@ -748,6 +901,7 @@ void aktiviereWakeQuellen() {
         return;
     }
 
+    // GPIO-Wake aktivieren (plattformabhaengig)
 #if CONFIG_IDF_TARGET_ESP32C3
     esp_err_t wakeErr = ESP_OK;
     if (wakeHighMask != 0ULL) {
@@ -772,6 +926,7 @@ void aktiviereWakeQuellen() {
 #endif
 }
 
+// starteDeepSleep – Aktiviert Wake-Quellen und geht in Deep-Sleep
 void starteDeepSleep() {
     if (!DEEP_SLEEP_AKTIV) return;
     aktiviereWakeQuellen();
@@ -782,6 +937,10 @@ void starteDeepSleep() {
     }
     esp_deep_sleep_start();
 }
+
+// =============================================================================
+// ARDUINO – setup() und loop()
+// =============================================================================
 
 void setup() {
     if (DEBUG_LOKAL_AKTIV) {
@@ -810,6 +969,7 @@ void setup() {
     nodeStatus.letzte_batterie_probe_ms = millis();
     aktualisiereSchlafFenster(DISCOVERY_WINDOW_MS);
 
+    // Provisioning konfigurieren und starten
     SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
         SmartHome::BatSenProvisioning::makeConfig(
             DEVICE_ID,
@@ -859,6 +1019,7 @@ void setup() {
          (unsigned long)nodeStatus.rx_window_ms,
          (unsigned)BAT_SEN_BATTERY_PROFILE);
 
+    // Prueft ob Master-MAC bereits provisioniert
     if (!nodeProvisioning.hasStoredMasterMac()) {
         logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
         nodeProvisioning.enterSetupMode();
@@ -880,6 +1041,7 @@ void loop() {
 
     pollLokaleHooks();
 
+    // Batterie periodisch pruefen (mit Hysterese)
     if ((jetzt - nodeStatus.letzte_batterie_probe_ms) >= BATTERY_SAMPLE_INTERVAL_MS) {
         nodeStatus.letzte_batterie_probe_ms = jetzt;
         bool batteryChanged = false;
@@ -889,17 +1051,20 @@ void loop() {
         }
     }
 
+    // HELLO senden wenn Master nicht bekannt und Retry-Intervall abgelaufen
     if (!nodeStatus.master_bekannt &&
         (jetzt - nodeStatus.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) {
         sendeHello();
     }
 
+    // Ausstehende Events senden (wenn Master gueltig)
     if (nodeStatus.master_mac_gueltig && nodeStatus.event_report_offen) {
         if (sendeEvent()) {
             aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
         }
     }
 
+    // STATE senden wenn faellig (dirty oder Intervall abgelaufen)
     const bool stateFaellig =
         nodeStatus.master_mac_gueltig &&
         (nodeStatus.state_report_offen ||
@@ -913,10 +1078,10 @@ void loop() {
         }
     }
 
+    // Prueft ob Deep-Sleep erlaubt ist
     if (darfInDeepSleep(jetzt)) {
         starteDeepSleep();
     }
 
     delay(LOOP_INTERVAL_MS);
 }
-
