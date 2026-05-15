@@ -48,6 +48,11 @@
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
+#include "MathUtils.h"
+
+using SmartHome::clampToU16;
+using SmartHome::clampHum01pct;
+
 #include "../../basetypes/net_erl/NetErlProvisioning.h"
 #include "../../../include/DebugConfig.h"
 #include "../../../include/ProjectVersion.h"
@@ -156,10 +161,6 @@ String htmlEscape(const String& s) {
         switch (c) { case '&': e += "&amp;"; break; case '<': e += "&lt;"; break; case '>': e += "&gt;"; break; case '"': e += "&quot;"; break; case '\'': e += "&#39;"; break; default: e += c; }
     } return e;
 }
-// c16 – Wert auf uint16-Bereich begrenzen (0-65535)
-uint16_t c16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
-// cH – Wert auf 0.1%-Feuchtebereich begrenzen (0-1000)
-uint16_t cH(long v) { return v < 0L ? 0U : v > 1000L ? 1000U : (uint16_t)v; }
 
 void logf(const char* l, const char* f, ...) {
     if (!DEBUG_LOKAL_AKTIV) return; char m[224]; va_list a; va_start(a, f); vsnprintf(m, sizeof(m), f, a); va_end(a);
@@ -509,7 +510,7 @@ void readEnv(unsigned long j) {
         float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
         uint32_t g = bme680.gas_resistance;
         if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
-            runtime.sensor.temp_01c = (int16_t)lroundf(t * 10.0f); runtime.sensor.hum_01pct = cH((long)lroundf(h * 10.0f));
+            runtime.sensor.temp_01c = (int16_t)lroundf(t * 10.0f); runtime.sensor.hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
             runtime.sensor.pressure_pa = (uint32_t)lroundf(p);
             if (runtime.bme680_gueltige_messungen < 255) runtime.bme680_gueltige_messungen++;
             runtime.sensor.gas_ohm = (gasWarmupOk(j) && g > 0) ? g : GAS_OHM_UNGUELTIG;
@@ -517,7 +518,7 @@ void readEnv(unsigned long j) {
     }
 
     if (runtime.lux_ok) {
-        float l = veml.readLux(); if (!isnan(l) && l >= 0) runtime.sensor.lux = c16((long)lroundf(l));
+        float l = veml.readLux(); if (!isnan(l) && l >= 0) runtime.sensor.lux = clampToU16((long)lroundf(l));
         else { runtime.lux_ok = false; logf("WARN", "VEML7700 read fail"); }
     }
 
