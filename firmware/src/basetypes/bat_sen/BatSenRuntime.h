@@ -339,6 +339,8 @@ bool leseBatterie(uint16_t* batteryMv, uint8_t* batteryPct) {
     // Spannungsteiler korrigieren: scaled = adc * num / den
     uint32_t scaledMv = ((adcMv * (uint32_t)BATTERY_DIVIDER_NUM) + ((uint32_t)BATTERY_DIVIDER_DEN / 2UL)) /
                         (uint32_t)BATTERY_DIVIDER_DEN;
+    scaledMv = ((scaledMv * (uint32_t)BATTERY_CALIBRATION_NUM) + ((uint32_t)BATTERY_CALIBRATION_DEN / 2UL)) /
+               (uint32_t)BATTERY_CALIBRATION_DEN;
     if (scaledMv > 65535UL) scaledMv = 65535UL;
 
     *batteryMv = (uint16_t)scaledMv;

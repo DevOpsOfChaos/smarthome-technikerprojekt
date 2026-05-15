@@ -1,0 +1,84 @@
+Protokoll: BAT-SEN-001 erster Realtest, Batteriemessung, Serverpfad
+Datum: 2026-05-15
+
+Ausgangslage
+- Erster Hardwaretest des neutralen BAT-SEN-Basistyps.
+- Master war auf COM3 vorhanden.
+- BAT-SEN wurde als zweites serielles USB-Geraet auf COM5 erkannt.
+- Am BAT-SEN waren noch keine Sensoren angeschlossen.
+- Testziel:
+  - aktuelle BAT-SEN-Firmware flashen
+  - Master-Bindung pruefen
+  - Batteriemesswert pruefen
+  - Serverpfad bis SQLite bestaetigen
+
+Firmware- und Flash-Nachweis
+- bat_sen Build erfolgreich.
+- BAT-SEN auf COM5 geflasht und verifiziert.
+- Flash musste direkt ueber das ESP-Flash-Tool laufen, weil die normale Upload-Ausgabe unter Windows an Unicode-Fortschrittszeichen haengen blieb.
+- Nach Flash war der BAT-SEN erreichbar und ging erwartungsgemaess in den Provisioning-Pfad, solange keine Master-MAC gespeichert war.
+
+Provisioning
+- Ohne gespeicherte Master-Bindung startete der BAT-SEN den Setup-Modus.
+- Master-MAC wurde anschliessend provisioniert.
+- Danach lud der BAT-SEN die gemeinsame Node-Basis.
+
+Festgestellte Abweichungen und Korrekturen
+- Die urspruengliche Default-Node-ID `bat_sen_base_01` war fuer den Master ungueltig.
+- Ursache:
+  - Das Protokoll erlaubt fuer Device-IDs nur Grossbuchstaben, Ziffern und Bindestrich.
+  - Der Master lehnte HELLO deshalb ab.
+- Korrektur:
+  - Default-Node-ID auf `BAT-SEN-001` gesetzt.
+- Der Setup-Taster war im Basistyp active-high konfiguriert.
+- Bei unbeschaltetem Pin fuehrte das dazu, dass der BAT-SEN nach kurzer Zeit erneut in den Setup-Modus sprang.
+- Korrektur:
+  - Setup-Taster auf active-low gestellt, passend zum Pullup-/Bootbutton-Pfad.
+
+Batteriemessung
+- Erste Servermessung nach erfolgreichem Serverpfad:
+  - `battery_mv = 2690`
+- Gegenmessung mit Multimeter:
+  - ca. 2,9 V an zwei AA-Zellen in Reihe
+- Bewertung:
+  - Das Default-Profil war fuer diesen Test falsch, weil der Basistyp noch auf LiIon 1S stand.
+  - Zusaetzlich lag die Messkette ca. 7 bis 8 Prozent zu niedrig.
+- Korrekturen:
+  - Default-Batterieprofil auf 2x AA gesetzt.
+  - Messketten-Kalibrierung als eigener Faktor ergaenzt:
+    - `BAT_SEN_BATTERY_CALIBRATION_NUM = 1078`
+    - `BAT_SEN_BATTERY_CALIBRATION_DEN = 1000`
+  - Kalibrierung wird nach der Spannungsteiler-Skalierung angewendet.
+- Nachtest nach erneutem Flash:
+  - `battery_mv = 2947`
+  - `battery_pct = 78`
+  - `fault = 0`
+- Bewertung:
+  - Der Wert passt fuer den ersten Test ausreichend zur Multimeter-Messung.
+  - Weitere Nachkalibrierung erst nach mehreren Messpunkten sinnvoll.
+
+Serverpfad
+- BAT-SEN meldete sich serverseitig als `BAT-SEN-001`.
+- Serverdatensatz vorhanden:
+  - device_class = `bat_sen`
+  - power_type = `battery`
+  - availability = `online`
+  - battery_mv nach Korrektur = `2947`
+  - battery_pct nach Korrektur = `78`
+  - fault = `0`
+- Der Weg BAT-SEN -> Master -> MQTT/Server -> SQLite ist fuer diesen ersten Test bestaetigt.
+
+Geaenderte Dateien
+- firmware/src/basetypes/bat_sen/DeviceConfig.h
+- firmware/src/basetypes/bat_sen/PinConfig.h
+- firmware/src/basetypes/bat_sen/BatSenRuntime.h
+- firmware/src/basetypes/bat_sen/README.md
+- PROTOKOLL/PROTOKOLL_2026-05-15_bat_sen_001_realtest_batterie_serverpfad.txt
+
+Ergebnis
+- BAT-SEN-001 ist als erster BAT-SEN-Realtest erfolgreich.
+- Master-Bindung funktioniert.
+- Serverpfad funktioniert.
+- Batteriemessung ist fuer 2x AA plausibel kalibriert.
+- Resthinweis:
+  - Kalibrierfaktor erst nach weiteren Messpunkten final bewerten.

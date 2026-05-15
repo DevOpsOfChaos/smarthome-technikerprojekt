@@ -30,7 +30,7 @@
 // =============================================================================
 
 #ifndef BAT_SEN_DEVICE_ID
-#define BAT_SEN_DEVICE_ID "bat_sen_base_01"
+#define BAT_SEN_DEVICE_ID "BAT-SEN-001"
 #endif
 
 #ifndef BAT_SEN_DEVICE_NAME
@@ -147,7 +147,7 @@
 #define BAT_PROFILE_LIION_1S 6U // 1S LiIon/LiPo (3.0V-4.2V)
 
 #ifndef BAT_SEN_BATTERY_PROFILE
-#define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_LIION_1S
+#define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_2X_AA
 #endif
 
 // Spannungsteiler (num/den): z.B. 2/1 = keine Teilung, 4/1 = Viertel
@@ -157,6 +157,16 @@
 
 #ifndef BAT_SEN_BATTERY_DIVIDER_DEN
 #define BAT_SEN_BATTERY_DIVIDER_DEN 1U
+#endif
+
+// Kalibrierung der realen Messkette nach erstem BAT-SEN-Test:
+// Multimeter 2900mV, Firmware 2690mV -> Faktor ca. 1.078.
+#ifndef BAT_SEN_BATTERY_CALIBRATION_NUM
+#define BAT_SEN_BATTERY_CALIBRATION_NUM 1078U
+#endif
+
+#ifndef BAT_SEN_BATTERY_CALIBRATION_DEN
+#define BAT_SEN_BATTERY_CALIBRATION_DEN 1000U
 #endif
 
 // ADC-Mittelung: Anzahl Samples pro Messung
@@ -235,6 +245,8 @@ constexpr uint16_t BATTERY_EMPTY_MV = SELECTED_BATTERY_PROFILE.emptyMv;
 constexpr uint16_t BATTERY_FULL_MV = SELECTED_BATTERY_PROFILE.fullMv;
 constexpr uint16_t BATTERY_DIVIDER_NUM = BAT_SEN_BATTERY_DIVIDER_NUM;
 constexpr uint16_t BATTERY_DIVIDER_DEN = BAT_SEN_BATTERY_DIVIDER_DEN;
+constexpr uint16_t BATTERY_CALIBRATION_NUM = BAT_SEN_BATTERY_CALIBRATION_NUM;
+constexpr uint16_t BATTERY_CALIBRATION_DEN = BAT_SEN_BATTERY_CALIBRATION_DEN;
 constexpr uint8_t BATTERY_ADC_SAMPLE_COUNT = BAT_SEN_BATTERY_ADC_SAMPLE_COUNT;
 
 constexpr bool DEEP_SLEEP_AKTIV = BAT_SEN_ENABLE_DEEP_SLEEP != 0;
@@ -246,6 +258,7 @@ constexpr bool GPIO_WAKE_AKTIV = BAT_SEN_ENABLE_GPIO_WAKE != 0;
 // =============================================================================
 
 static_assert(BATTERY_DIVIDER_DEN > 0U, "BAT_SEN_BATTERY_DIVIDER_DEN darf nicht 0 sein.");
+static_assert(BATTERY_CALIBRATION_DEN > 0U, "BAT_SEN_BATTERY_CALIBRATION_DEN darf nicht 0 sein.");
 static_assert(BATTERY_ADC_SAMPLE_COUNT > 0U, "BAT_SEN_BATTERY_ADC_SAMPLE_COUNT darf nicht 0 sein.");
 static_assert(BATTERY_FULL_MV > BATTERY_EMPTY_MV, "BAT_SEN_BATTERY_PROFILE liefert ungueltige Spannungsgrenzen.");
 static_assert(

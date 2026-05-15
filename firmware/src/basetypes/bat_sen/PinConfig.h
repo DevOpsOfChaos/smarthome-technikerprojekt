@@ -43,7 +43,7 @@
 
 // Button-Polaritaet: 1 = active-LOW (LOW = gedrueckt)
 #ifndef SETUP_BUTTON_ACTIVE_LOW
-#define SETUP_BUTTON_ACTIVE_LOW 0
+#define SETUP_BUTTON_ACTIVE_LOW 1
 #endif
 
 // Haltedauer fuer Setup-Modus (ms)
