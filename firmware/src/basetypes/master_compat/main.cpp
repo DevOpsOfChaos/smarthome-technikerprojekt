@@ -1,32 +1,23 @@
-// =============================================================================
-// main.cpp – master_compat: Minimaler ESP-NOW-MQTT-Bridge (Stage 2)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/basetypes/master_compat/main.cpp
-//
-// Datei-Funktion:
-//   Minimaler ESP-NOW-MQTT-Bridge fuer genau einen net_zrl-Node.
-//   Uebersetzt MQTT-Kommandos (get_state, open, close, stop,
-//   set_position) in ESP-NOW-Protokoll-Nachrichten und sendet
-//   Node-Status (STATE, Availability, ACK) zurueck auf MQTT.
-//   Nutzt ArduinoJson fuer JSON-Bau/Parsing.
-//
-// MQTT-Topics:
-//   smarthome/master/{MASTER_ID}/status            – Master-Status (retain)
-//   smarthome/device/{NODE_ID}/{meta,availability,state,ack}
-//   smarthome/device/+/command                      – Eingehende Kommandos
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-//
-// Aenderungshistorie:
-//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch, Doxygen-Stil)
-//
-// Abhaengigkeiten:
-//   config.h (WLAN/MQTT-Zugangsdaten – NICHT im Repo!),
-//   ArduinoJson, lib/sh_protocol (Protocol.h, DeviceTypes.h)
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief master_compat: Minimaler ESP-NOW-MQTT-Bridge fuer einen net_zrl-Node (Legacy/Stage 2)
+ *
+ * @details Uebersetzt MQTT-Kommandos (get_state, open, close, stop, set_position)
+ *          in ESP-NOW-Protokoll-Nachrichten. Sendet Node-Status (STATE, Availability, ACK)
+ *          zurueck auf MQTT. Nutzt ArduinoJson fuer JSON-Bau/Parsing.
+ *          Single-Node-Bridge: unterstuetzt genau EINEN net_zrl-Node.
+ *
+ * MQTT-Topics:
+ *   - smarthome/master/{MASTER_ID}/status           (Master-Status, retained)
+ *   - smarthome/device/{NODE_ID}/meta               (Node-Metadaten)
+ *   - smarthome/device/{NODE_ID}/availability       (Online/Offline)
+ *   - smarthome/device/{NODE_ID}/state              (Cover-Zustand)
+ *   - smarthome/device/{NODE_ID}/ack                (Kommando-Bestaetigung)
+ *   - smarthome/device/+/command                    (Eingehende Kommandos)
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ */
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -124,7 +115,13 @@ static uint8_t g_next_seq = 1;
 // HILFSFUNKTIONEN – Texte kopieren, MAC formatieren, Enum-to-Text
 // =============================================================================
 
-// copyText – Sicheres Kopieren eines null-terminierten Strings
+/**
+ * @brief Sicheres Kopieren eines null-terminierten Strings
+ *
+ * @param target      Zielpuffer
+ * @param target_size Groesse des Zielpuffers
+ * @param source      Quell-String (darf nullptr sein)
+ */
 static void copyText(char* target, size_t target_size, const char* source) {
     if (target == nullptr || target_size == 0U) return;
     if (source == nullptr) {
@@ -135,7 +132,14 @@ static void copyText(char* target, size_t target_size, const char* source) {
     target[target_size - 1U] = '\0';
 }
 
-// copyFixedText – Kopiert einen String mit fester Laenge aus einem Protokoll-Puffer
+/**
+ * @brief Kopiert einen String fester Laenge aus Protokoll-Puffer
+ *
+ * @param target      Zielpuffer
+ * @param target_size Groesse des Zielpuffers
+ * @param source      Quell-Puffer
+ * @param source_len  Laenge des Quell-Strings
+ */
 static void copyFixedText(char* target, size_t target_size,
                           const char* source, size_t source_len) {
     if (target == nullptr || target_size == 0U) return;
@@ -145,7 +149,13 @@ static void copyFixedText(char* target, size_t target_size,
     target[len] = '\0';
 }
 
-// macToText – Formatiert eine MAC-Adresse als "AA:BB:CC:DD:EE:FF"
+/**
+ * @brief Formatiert MAC als "AA:BB:CC:DD:EE:FF"
+ *
+ * @param mac         MAC-Adresse (6 Bytes)
+ * @param buffer      Zielpuffer
+ * @param buffer_size Groesse des Zielpuffers
+ */
 static void macToText(const uint8_t* mac, char* buffer, size_t buffer_size) {
     if (buffer == nullptr || buffer_size == 0U) return;
     if (mac == nullptr || !SmartHome::isValidMac(mac)) {
@@ -157,17 +167,32 @@ static void macToText(const uint8_t* mac, char* buffer, size_t buffer_size) {
     copyText(buffer, buffer_size, local);
 }
 
-// helloCaps – Extrahiert die 16-Bit-Faehigkeiten aus dem HELLO-Payload
+/**
+ * @brief Extrahiert 16-Bit-Faehigkeiten aus HELLO
+ *
+ * @param payload HELLO-Payload
+ * @return 16-Bit-Caps
+ */
 static uint16_t helloCaps(const SmartHome::HelloPayload& payload) {
     return (uint16_t)(((uint16_t)payload.caps_hi << 8) | payload.caps_lo);
 }
 
-// powerTypeText – Wandelt Power-Type in lesbaren String
+/**
+ * @brief Power-Type als String
+ *
+ * @param power_type Stromversorgungstyp
+ * @return "mains" oder "battery"
+ */
 static const char* powerTypeText(uint8_t power_type) {
     return power_type == SH_POWER_BATTERY ? "battery" : "mains";
 }
 
-// controlModeText – Wandelt Control-Mode in lesbaren String
+/**
+ * @brief Control-Mode als String
+ *
+ * @param control_mode Steuerungsmodus
+ * @return z.B. "relay", "cover"
+ */
 static const char* controlModeText(uint8_t control_mode) {
     switch (control_mode) {
         case SH_CONTROL_MODE_RELAY: return "relay";
@@ -180,7 +205,12 @@ static const char* controlModeText(uint8_t control_mode) {
     }
 }
 
-// configProfileText – Wandelt Config-Profil in lesbaren String
+/**
+ * @brief Config-Profil als String
+ *
+ * @param config_profile Konfigurationsprofil
+ * @return z.B. "hall_light"
+ */
 static const char* configProfileText(uint8_t config_profile) {
     switch (config_profile) {
         case SH_PROFILE_HALL_LIGHT: return "hall_light";
@@ -191,7 +221,12 @@ static const char* configProfileText(uint8_t config_profile) {
     }
 }
 
-// reportingModeText – Wandelt Report-Modus in lesbaren String
+/**
+ * @brief Report-Mode als String
+ *
+ * @param reporting_mode Report-Modus
+ * @return z.B. "hybrid"
+ */
 static const char* reportingModeText(uint8_t reporting_mode) {
     switch (reporting_mode) {
         case SH_REPORTING_PERIODIC: return "periodic";
@@ -203,7 +238,11 @@ static const char* reportingModeText(uint8_t reporting_mode) {
     }
 }
 
-// coverStateText – Gibt den Cover-State als MQTT-String zurueck
+/**
+ * @brief Cover-State als MQTT-String (opening/closing/open/closed/stopped)
+ *
+ * @return Zustand als String
+ */
 static const char* coverStateText() {
     switch (g_node.cover_state) {
         case SH_COVER_STATE_MOVING_UP: return "opening";
@@ -216,7 +255,12 @@ static const char* coverStateText() {
     }
 }
 
-// ackStatusText – Wandelt ACK-Status-Code in lesbaren String
+/**
+ * @brief ACK-Status als String
+ *
+ * @param status ACK-Status-Code
+ * @return "ok", "rejected", "error"
+ */
 static const char* ackStatusText(uint8_t status) {
     switch (status) {
         case SH_ACK_OK: return "ok";
@@ -230,14 +274,25 @@ static const char* ackStatusText(uint8_t status) {
 // MQTT / JSON-HELFER – Topic bauen, Status publishen (Meta, State, Availability, Ack)
 // =============================================================================
 
-// buildNodeTopic – Baut ein MQTT-Topic fuer eine Node
+/**
+ * @brief Baut MQTT-Topic "smarthome/device/{id}/{suffix}"
+ *
+ * @param device_id   Geraete-ID
+ * @param suffix      Topic-Suffix (z.B. "meta", "state")
+ * @param buffer      Zielpuffer
+ * @param buffer_size Groesse des Zielpuffers
+ */
 static void buildNodeTopic(const char* device_id, const char* suffix,
                            char* buffer, size_t buffer_size) {
     snprintf(buffer, buffer_size, "smarthome/device/%s/%s",
              device_id != nullptr ? device_id : "unknown", suffix);
 }
 
-// publishMasterStatus – Publisht Master-Online-Status auf MQTT (retained)
+/**
+ * @brief Publisht Master-Online-Status (retained)
+ *
+ * @param online true wenn Master online
+ */
 static void publishMasterStatus(bool online) {
     StaticJsonDocument<256> doc;
     doc["master_id"] = CONF_MASTER_ID;
@@ -252,7 +307,9 @@ static void publishMasterStatus(bool online) {
     mqtt.publish(TOPIC_MASTER_STATUS, (uint8_t*)payload, strlen(payload), true);
 }
 
-// publishNodeMeta – Publisht Node-Metadaten (HELLO-info) auf MQTT (retained)
+/**
+ * @brief Publisht Node-Metadaten aus HELLO (retained)
+ */
 static void publishNodeMeta() {
     if (!g_node.registered_node || !g_node.meta_known) return;
 
@@ -281,7 +338,9 @@ static void publishNodeMeta() {
     mqtt.publish(topic, (uint8_t*)payload, strlen(payload), true);
 }
 
-// publishNodeAvailability – Publisht Node-Online/Offline auf MQTT (retained)
+/**
+ * @brief Publisht Node-Online/Offline (retained)
+ */
 static void publishNodeAvailability() {
     if (!g_node.registered_node) return;
 
@@ -299,7 +358,9 @@ static void publishNodeAvailability() {
     mqtt.publish(topic, (uint8_t*)payload, strlen(payload), true);
 }
 
-// publishNodeState – Publisht Cover-Zustand der Node auf MQTT (retained)
+/**
+ * @brief Publisht Cover-Zustand der Node (retained)
+ */
 static void publishNodeState() {
     if (!g_node.registered_node || !g_node.state_known) return;
 
@@ -327,7 +388,17 @@ static void publishNodeState() {
     mqtt.publish(topic, (uint8_t*)payload, strlen(payload), true);
 }
 
-// publishNodeAckById – Publisht eine ACK-Antwort an eine beliebige device_id
+/**
+ * @brief Publisht ACK an beliebige device_id
+ *
+ * @param device_id    Geraete-ID
+ * @param request_id   Request-ID aus MQTT-Kommando
+ * @param status       Status-String (z.B. "ok", "timeout")
+ * @param status_code  Numerischer Status-Code
+ * @param ack_msg_type Nachrichtentyp der Bestaetigung
+ * @param ack_seq      Sequenznummer der Bestaetigung
+ * @param source       Quelle der Bestaetigung (z.B. "node_ack", "master_timeout")
+ */
 static void publishNodeAckById(const char* device_id, const char* request_id,
                                const char* status, int status_code,
                                uint8_t ack_msg_type, uint8_t ack_seq,
@@ -350,7 +421,16 @@ static void publishNodeAckById(const char* device_id, const char* request_id,
     mqtt.publish(topic, (uint8_t*)payload, strlen(payload), false);
 }
 
-// publishNodeAck – Publisht ACK an die bekannte Node
+/**
+ * @brief Publisht ACK an die registrierte Node
+ *
+ * @param request_id   Request-ID aus MQTT-Kommando
+ * @param status       Status-String (z.B. "ok", "timeout")
+ * @param status_code  Numerischer Status-Code
+ * @param ack_msg_type Nachrichtentyp der Bestaetigung
+ * @param ack_seq      Sequenznummer der Bestaetigung
+ * @param source       Quelle der Bestaetigung (z.B. "node_ack", "master_timeout")
+ */
 static void publishNodeAck(const char* request_id, const char* status,
                            int status_code, uint8_t ack_msg_type,
                            uint8_t ack_seq, const char* source) {
@@ -358,7 +438,9 @@ static void publishNodeAck(const char* request_id, const char* status,
                        ack_msg_type, ack_seq, source);
 }
 
-// publishAllKnown – Publisht beim MQTT-Reconnect alle bekannten Zustaende
+/**
+ * @brief Publisht alle bekannten Zustaende nach MQTT-Reconnect
+ */
 static void publishAllKnown() {
     publishMasterStatus(true);
     publishNodeMeta();
@@ -370,7 +452,12 @@ static void publishAllKnown() {
 // ESP-NOW – Peer, Paket senden, Kommando senden
 // =============================================================================
 
-// ensurePeer – Registriert eine MAC als ESP-NOW-Peer (falls nicht vorhanden)
+/**
+ * @brief Registriert MAC als ESP-NOW-Peer (falls nicht vorhanden)
+ *
+ * @param mac MAC-Adresse (6 Bytes)
+ * @return true bei Erfolg
+ */
 static bool ensurePeer(const uint8_t* mac) {
     if (!SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
@@ -383,7 +470,19 @@ static bool ensurePeer(const uint8_t* mac) {
     return esp_now_add_peer(&peer) == ESP_OK;
 }
 
-// sendPacketWithOptions – Zentrale ESP-NOW-Sendefunktion mit Flags und fester Sequenz
+/**
+ * @brief Zentrale ESP-NOW-Sendefunktion
+ *
+ * @param dest_mac    Ziel-MAC-Adresse
+ * @param msg_type    Nachrichtentyp
+ * @param payload     Payload-Daten
+ * @param payload_len Payload-Laenge
+ * @param flags       Nachrichten-Flags
+ * @param fixed_seq   Feste Sequenznummer verwenden
+ * @param seq         Sequenznummer (wenn fixed_seq)
+ * @param used_seq    Ausgabe: tatsaechlich verwendete Sequenznummer
+ * @return true bei Erfolg
+ */
 static bool sendPacketWithOptions(const uint8_t* dest_mac, uint8_t msg_type,
                                   const void* payload, size_t payload_len,
                                   uint8_t flags, bool fixed_seq, uint8_t seq,
@@ -412,14 +511,30 @@ static bool sendPacketWithOptions(const uint8_t* dest_mac, uint8_t msg_type,
     return esp_now_send(dest_mac, buffer, SH_HEADER_SIZE + payload_len) == ESP_OK;
 }
 
-// sendPacket – Vereinfachte Sendefunktion (ohne Flags, ohne feste Seq)
+/**
+ * @brief Vereinfachte Sendefunktion (ohne Flags)
+ *
+ * @param dest_mac    Ziel-MAC-Adresse
+ * @param msg_type    Nachrichtentyp
+ * @param payload     Payload-Daten
+ * @param payload_len Payload-Laenge
+ * @return true bei Erfolg
+ */
 static bool sendPacket(const uint8_t* dest_mac, uint8_t msg_type,
                        const void* payload, size_t payload_len) {
     return sendPacketWithOptions(dest_mac, msg_type, payload, payload_len,
                                  0U, false, 0U, nullptr);
 }
 
-// sendCommand – Sendet ein Kommando an die Node und registriert Pending
+/**
+ * @brief Sendet Kommando an Node und registriert Pending
+ *
+ * @param cmd_type   Kommando-Typ (z.B. SH_CMD_COVER)
+ * @param param1     Parameter 1 (z.B. Cover-Aktion)
+ * @param param2     Parameter 2 (z.B. Zielposition)
+ * @param request_id Request-ID fuer ACK-Routing
+ * @return true bei Erfolg
+ */
 static bool sendCommand(uint8_t cmd_type, uint8_t param1, uint8_t param2,
                         const char* request_id) {
     if (!g_node.registered_node || !g_node.mac_known) return false;
@@ -448,7 +563,9 @@ static bool sendCommand(uint8_t cmd_type, uint8_t param1, uint8_t param2,
     return true;
 }
 
-// requestFreshState – Fordert aktuellen STATE von der Node an
+/**
+ * @brief Fordert aktuellen STATE von der Node an (SH_CMD_STATE_REQUEST)
+ */
 static void requestFreshState() {
     if (!g_node.registered_node || !g_node.mac_known) return;
 
@@ -461,7 +578,11 @@ static void requestFreshState() {
 // PROTOKOLL-VERARBEITUNG (ESP-NOW) – HELLO, HEARTBEAT, STATE, ACK
 // =============================================================================
 
-// refreshNodeContact – Aktualisiert Kontaktzeit und Online-Status der Node
+/**
+ * @brief Aktualisiert Kontaktzeit und Online-Status der Node
+ *
+ * @param sender_mac MAC-Adresse des Senders
+ */
 static void refreshNodeContact(const uint8_t* sender_mac) {
     const bool was_offline = !g_node.online;
     g_node.last_contact_ms = millis();
@@ -484,7 +605,12 @@ static void refreshNodeContact(const uint8_t* sender_mac) {
     }
 }
 
-// sendHelloAck – Sendet HELLO_ACK an die Node
+/**
+ * @brief Sendet HELLO_ACK an Node
+ *
+ * @param dest_mac   Ziel-MAC-Adresse
+ * @param ack_status ACK-Status (SH_ACK_OK oder SH_ACK_REJECTED)
+ */
 static void sendHelloAck(const uint8_t* dest_mac, uint8_t ack_status) {
     SmartHome::HelloAckPayload payload = {};
     payload.channel = (uint8_t)(WiFi.status() == WL_CONNECTED ? WiFi.channel() : 0);
@@ -492,13 +618,23 @@ static void sendHelloAck(const uint8_t* dest_mac, uint8_t ack_status) {
     sendPacket(dest_mac, SH_MSG_HELLO_ACK, &payload, sizeof(payload));
 }
 
-// isKnownDeviceId – Prueft ob eine device_id der registrierten Node entspricht
+/**
+ * @brief Prueft ob device_id der registrierten Node entspricht
+ *
+ * @param device_id Zu pruefende Geraete-ID
+ * @return true wenn bekannt
+ */
 static bool isKnownDeviceId(const char* device_id) {
     return g_node.registered_node &&
            strncmp(g_node.device_id, device_id, SH_DEVICE_ID_LEN) == 0;
 }
 
-// handleHello – Verarbeitet eingehendes HELLO (Node-Registrierung)
+/**
+ * @brief Verarbeitet HELLO (Node-Registrierung)
+ *
+ * @param sender_mac MAC-Adresse des Senders
+ * @param payload    HELLO-Payload
+ */
 static void handleHello(const uint8_t* sender_mac,
                         const SmartHome::HelloPayload& payload) {
     char device_id[SH_DEVICE_ID_LEN];
@@ -555,7 +691,12 @@ static void handleHello(const uint8_t* sender_mac,
     requestFreshState();
 }
 
-// handleHeartbeat – Verarbeitet eingehenden HEARTBEAT
+/**
+ * @brief Verarbeitet HEARTBEAT (Kontaktzeit)
+ *
+ * @param sender_mac MAC-Adresse des Senders
+ * @param payload    HEARTBEAT-Payload
+ */
 static void handleHeartbeat(const uint8_t* sender_mac,
                             const SmartHome::HeartbeatPayload& payload) {
     char node_id[SH_DEVICE_ID_LEN];
@@ -567,7 +708,13 @@ static void handleHeartbeat(const uint8_t* sender_mac,
     publishNodeAvailability();
 }
 
-// handleZrlState – Aktualisiert den Cover-Zustand aus einem STATE-Payload
+/**
+ * @brief Aktualisiert Cover-Zustand aus STATE
+ *
+ * @param sender_mac MAC-Adresse des Senders
+ * @param node_id    Geraete-ID
+ * @param state      ZrlStateReport-Payload
+ */
 static void handleZrlState(const uint8_t* sender_mac, const char* node_id,
                            const SmartHome::ZrlStateReportPayload& state) {
     if (!isKnownDeviceId(node_id)) return;
@@ -586,7 +733,13 @@ static void handleZrlState(const uint8_t* sender_mac, const char* node_id,
     publishNodeAvailability();
 }
 
-// handleStateReport – Verarbeitet STATE (unterstuetzt 2 Payload-Formate)
+/**
+ * @brief Verarbeitet STATE (2 Formate: ZrlState, ZrlConfigState)
+ *
+ * @param sender_mac  MAC-Adresse des Senders
+ * @param payload     Roh-Payload
+ * @param payload_len Payload-Laenge
+ */
 static void handleStateReport(const uint8_t* sender_mac,
                               const uint8_t* payload,
                               uint16_t payload_len) {
@@ -621,7 +774,12 @@ static void handleStateReport(const uint8_t* sender_mac,
     }
 }
 
-// handleAck – Verarbeitet ACK (meldet Kommando-Bestaetigung auf MQTT)
+/**
+ * @brief Verarbeitet ACK (Kommando-Bestaetigung)
+ *
+ * @param sender_mac MAC-Adresse des Senders
+ * @param payload    ACK-Payload
+ */
 static void handleAck(const uint8_t* sender_mac,
                       const SmartHome::AckPayload& payload) {
     // Nur ACK von der bekannten Node akzeptieren
@@ -644,7 +802,13 @@ static void handleAck(const uint8_t* sender_mac,
 // ESP-NOW – Empfangsverarbeitung, Callbacks
 // =============================================================================
 
-// handleEspNowPacket – CRC-Pruefung + Dispatch an Handler (switch/msg_type)
+/**
+ * @brief CRC-Pruefung + Dispatch an Handler (switch/msg_type)
+ *
+ * @param sender_mac MAC-Adresse des Senders
+ * @param data       Rohdaten des Pakets
+ * @param length     Datenlaenge
+ */
 static void handleEspNowPacket(const uint8_t* sender_mac,
                                 const uint8_t* data, int length) {
     if (sender_mac == nullptr || data == nullptr ||
@@ -686,7 +850,13 @@ static void handleEspNowPacket(const uint8_t* sender_mac,
     }
 }
 
-// ESP-NOW Recv-Callback (Core v3 und v2)
+/**
+ * @brief ESP-NOW Recv-Callback (Core v3 und v2)
+ *
+ * @details Leitet eingehende ESP-NOW-Pakete an handleEspNowPacket() weiter.
+ *          Die Signatur unterscheidet sich je nach Arduino-Core-Version
+ *          (esp_now_recv_info_t in Core v3, direkte MAC in Core v2).
+ */
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
 static void onEspNowReceive(const esp_now_recv_info_t* info,
                             const uint8_t* data, int length) {
@@ -700,7 +870,13 @@ static void onEspNowReceive(const uint8_t* sender_mac,
 }
 #endif
 
-// ESP-NOW Sent-Callback (leer, nur Callback-Registrierung)
+/**
+ * @brief ESP-NOW Sent-Callback (leer)
+ *
+ * @details Nur zur Callback-Registrierung erforderlich. Keine Aktion noetig,
+ *          da ACK ueber SH_MSG_ACK abgewickelt wird. Die Signatur ist
+ *          versionsabhaengig (ESP-IDF v5.5+ vs. aelter).
+ */
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
 static void onEspNowSent(const esp_now_send_info_t* info,
                          esp_now_send_status_t status) {
@@ -718,7 +894,14 @@ static void onEspNowSent(const uint8_t* mac, esp_now_send_status_t status) {
 // JSON-HILFE – tryGetLong (ArduinoJson-basiert)
 // =============================================================================
 
-// tryGetLong – Holt einen Zahlenwert per Key aus einem JsonDocument
+/**
+ * @brief Holt Zahlenwert per Key aus JsonDocument
+ *
+ * @param doc   JsonDocument (ArduinoJson)
+ * @param key   Schluessel
+ * @param value Ausgabe: Gefundener Zahlenwert
+ * @return true bei Erfolg
+ */
 static bool tryGetLong(const JsonDocument& doc, const char* key, long* value) {
     if (!doc.containsKey(key) || value == nullptr) return false;
     JsonVariantConst variant = doc[key];
@@ -731,7 +914,13 @@ static bool tryGetLong(const JsonDocument& doc, const char* key, long* value) {
 // MQTT-COMMAND-HANDLER – get_state, open, close, stop, set_position
 // =============================================================================
 
-// handleCommand – Verarbeitet ein eingehendes MQTT-Kommando
+/**
+ * @brief Verarbeitet MQTT-Kommando (get_state/open/close/stop/set_position)
+ *
+ * @param device_id   Geraete-ID (aus MQTT-Topic extrahiert)
+ * @param payload_str JSON-Payload als null-terminierter String
+ * @param len         Laenge des Payloads
+ */
 static void handleCommand(const char* device_id, const char* payload_str,
                           unsigned int len) {
     StaticJsonDocument<512> doc;
@@ -831,7 +1020,13 @@ static void handleCommand(const char* device_id, const char* payload_str,
                    "master_validation");
 }
 
-// onMqttMessage – MQTT-Callback: Parst Topic, extrahiert device_id, ruft handleCommand auf
+/**
+ * @brief MQTT-Callback: extrahiert device_id aus Topic, ruft handleCommand
+ *
+ * @param topic   MQTT-Topic
+ * @param payload Payload-Daten
+ * @param len     Payload-Laenge
+ */
 static void onMqttMessage(char* topic, byte* payload, unsigned int len) {
     if (topic == nullptr || payload == nullptr) return;
 
@@ -862,7 +1057,9 @@ static void onMqttMessage(char* topic, byte* payload, unsigned int len) {
 // KONNEKTIVITAET – WLAN, ESP-NOW, MQTT
 // =============================================================================
 
-// wifiConnect – Synchroner WLAN-Connect mit max. 40 Versuchen (20s)
+/**
+ * @brief Synchroner WLAN-Connect (max 20s)
+ */
 static void wifiConnect() {
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
@@ -887,7 +1084,9 @@ static void wifiConnect() {
     }
 }
 
-// initEspNowIfNeeded – Startet ESP-NOW wenn WLAN verbunden ist
+/**
+ * @brief Startet ESP-NOW wenn WLAN verbunden
+ */
 static void initEspNowIfNeeded() {
     if (g_espnow_ready || WiFi.status() != WL_CONNECTED) return;
 
@@ -901,7 +1100,9 @@ static void initEspNowIfNeeded() {
     g_espnow_ready = true;
 }
 
-// mqttConnect – Verbindet zu MQTT und subscribed auf Node-Commands
+/**
+ * @brief Verbindet zu MQTT mit LWT, subscribed Node-Commands
+ */
 static void mqttConnect() {
     StaticJsonDocument<256> lwt_doc;
     lwt_doc["master_id"] = CONF_MASTER_ID;
@@ -926,7 +1127,9 @@ static void mqttConnect() {
     publishAllKnown();
 }
 
-// ensureConnectivity – Erhaelt WLAN/ESP-NOW/MQTT-Konnektivitaet (wird zyklisch aufgerufen)
+/**
+ * @brief Erhaelt WLAN/ESP-NOW/MQTT-Konnektivitaet (zyklisch)
+ */
 static void ensureConnectivity() {
     const bool wifi_now = (WiFi.status() == WL_CONNECTED);
     if (!wifi_now && (millis() - g_last_wifi_attempt_ms) >= WIFI_RETRY_INTERVAL_MS) {
@@ -951,7 +1154,9 @@ static void ensureConnectivity() {
 // TIMEOUT-PRUEFUNGEN – Pending-Timeout und Offline-Timeout
 // =============================================================================
 
-// checkPendingTimeout – Prueft ob ein ausstehendes Kommando getimeoutet ist
+/**
+ * @brief Prueft ob ausstehendes Kommando getimeoutet ist
+ */
 static void checkPendingTimeout() {
     if (!g_node.pending.active) return;
     if ((millis() - g_node.pending.sent_ms) < COMMAND_TIMEOUT_MS) return;
@@ -961,7 +1166,9 @@ static void checkPendingTimeout() {
     g_node.pending = {};
 }
 
-// checkNodeOffline – Prueft ob die Node als offline markiert werden muss
+/**
+ * @brief Prueft ob Node als offline markiert werden muss
+ */
 static void checkNodeOffline() {
     if (!g_node.registered_node || !g_node.online) return;
     if ((millis() - g_node.last_contact_ms) <= NODE_OFFLINE_TIMEOUT_MS) return;
@@ -976,6 +1183,9 @@ static void checkNodeOffline() {
 // ARDUINO – setup() und loop()
 // =============================================================================
 
+/**
+ * @brief Initialisiert Serial, WLAN, ESP-NOW, MQTT
+ */
 void setup() {
     Serial.begin(115200);
     delay(500);
@@ -995,6 +1205,9 @@ void setup() {
     mqttConnect();
 }
 
+/**
+ * @brief Hauptereignisschleife: Konnektivitaet, MQTT, Timeouts
+ */
 void loop() {
     ensureConnectivity();
 

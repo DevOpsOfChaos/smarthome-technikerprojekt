@@ -1,34 +1,21 @@
-// =============================================================================
-// main.cpp – NET-ERL Basistyp: Netz-Relais (ESP-NOW)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/basetypes/net_erl/main.cpp
-//
-// Datei-Funktion:
-//   ESP-NOW-basierte Relais-Steuerung für ein einzelnes Relais (1 Kanal).
-//   Sendet periodisch HELLO (bei unbekanntem Master), HEARTBEAT und STATE.
-//   Empfaengt CMD (set_relay, state_request) und CFG (report_interval).
-//   Nutzt ShNodeProvisioning fuer Master-Bindung, Web-Provisioning und
-//   persistente Speicherung.
-//
-// Protokoll-Nachrichten:
-//   Senden:   HELLO, HEARTBEAT, STATE, EVENT (RELAY_CHANGED), ACK
-//   Empfangen: HELLO_ACK, CMD, CFG
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Änderung: 2026-05-14
-//
-// Aenderungshistorie:
-//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch, Doxygen-Stil)
-//
-// Abhaengigkeiten (externe Libs):
-//   Arduino.h, WiFi.h, esp_now.h, esp_wifi.h, ShNodeProvisioning.h
-//
-// Abhaengigkeiten (Projekt-intern):
-//   DeviceConfig.h, PinConfig.h, DebugConfig.h, ProjectVersion.h,
-//   lib/sh_protocol (DeviceTypes.h, Protocol.h), NetErlProvisioning.h
-// =============================================================================
+/**
+ * @file main.cpp
+ * @brief NET-ERL Basistyp: Netz-Relais mit ESP-NOW (1-Kanal)
+ *
+ * @details ESP-NOW-basierte Relais-Steuerung. Sendet HELLO/HEARTBEAT/STATE,
+ *          empfaengt CMD (set_relay, state_request) und CFG (report_interval).
+ *          ShNodeProvisioning fuer Master-Bindung, Web-Provisioning und NVS.
+ *
+ * Protokoll:
+ *   - Senden:   HELLO, HEARTBEAT, STATE, EVENT (RELAY_CHANGED), ACK
+ *   - Empfangen: HELLO_ACK, CMD, CFG
+ *
+ * @author DevOpsOfChaos
+ * @date   2026-05-14
+ *
+ * @note Alle Funktionen im Rest der Datei sind bereits mit @brief/@param/@return
+ *       im Doxygen-Stil dokumentiert (deutsch).
+ */
 
 #include <Arduino.h>
 #include <ShNodeProvisioning.h>

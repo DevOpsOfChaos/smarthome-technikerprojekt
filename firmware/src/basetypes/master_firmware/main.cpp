@@ -640,6 +640,21 @@ void schreibeUIntOrNull(char* buffer, size_t bufferSize, unsigned long value, un
     snprintf(buffer, bufferSize, "%lu", value);
 }
 
+/**
+ * @brief Baut das MQTT-State-JSON für eine Node (4 Device-Klassen).
+ *
+ * Unterstützte Device-Klassen:
+ * - SH_CLASS_NET_ERL (Relais): relay_1, fault
+ * - SH_CLASS_NET_ZRL (Cover): relay_1/2, cover_mode/state/position/calibrated, fault
+ * - SH_CLASS_NET_SEN (Sensor): temp_01c, hum_01pct, lux, motion, fault
+ * - SH_CLASS_BAT_SEN (Batterie): channelBool1, channelU16_1, battery_mv/level, fault
+ *
+ * Ungültige Werte (INT16_MIN, 0xFFFF, 0xFFFFFFFF) werden als JSON-null serialisiert.
+ *
+ * @param nodeIndex  Index in nodeStates[]
+ * @param buffer     Ausgabe-Puffer für JSON-String
+ * @param bufferSize Größe des Ausgabe-Puffers
+ */
 void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
     char tempText[16] = {0};
     char humText[16] = {0};
@@ -926,6 +941,19 @@ void sendeHelloAck(const uint8_t* zielMac, uint8_t ackStatus) {
     sendePaket(zielMac, SH_MSG_HELLO_ACK, &payload, sizeof(payload), "HELLO_ACK");
 }
 
+/**
+ * @brief Registriert eine neue Node oder findet eine bestehende anhand HELLO-Daten.
+ *
+ * Suchstrategie (in Reihenfolge):
+ * 1. Validiert device_id, device_class, power_type
+ * 2. Sucht per device_id (findeNodeIndex) – Treffer: MAC-Konflikt-Check, dann Index zurück
+ * 3. Sucht per MAC (findeNodeIndexPerMac) – Treffer mit anderer ID: ablehnen
+ * 4. Freien Slot suchen – neuen Node-Eintrag initialisieren
+ *
+ * @param senderMac MAC-Adresse des Senders (6 Byte)
+ * @param payload   HELLO-Payload mit device_id, device_class, power_type
+ * @return Node-Index (0..MAX_NODES-1), -1 bei Fehler, STATUS_CODE_REGISTRY_FULL wenn voll
+ */
 int registriereOderFindeNode(const uint8_t* senderMac, const SmartHome::HelloPayload& payload) {
     if (!SmartHome::isValidDeviceId(payload.device_id)) {
         logf("WARN", "HELLO abgelehnt: ungueltige device_id=%s", payload.device_id);
@@ -1014,6 +1042,25 @@ void verarbeiteHeartbeat(const uint8_t* senderMac, const SmartHome::HeartbeatPay
     logf("INFO", "HEARTBEAT von %s (uptime=%lus)", payload.node_id, (unsigned long)payload.uptime_s);
 }
 
+/**
+ * @brief Verarbeitet eingehenden STATE-Report (5 Payload-Formate, 14 Parsing-Pfade).
+ *
+ * Payload-Erkennung anhand payloadLen:
+ * - sizeof(StateReportPayload) → Basis-State (nur relay_1 + fault)
+ * - sizeof(RelayComfortStateReportPayload) → NET_ERL Comfort (Relais + Sensor)
+ * - sizeof(RelayComfortConfigStateReportPayload) → NET_ERL Comfort + Config
+ * - sizeof(ExtendedRelayComfortGasStateReportPayload) → NET_ERL Extended (BME680)
+ * - sizeof(ExtendedRelayComfortGasConfigStateReportPayload) → NET_ERL Extended + Config
+ * - sizeof(BatteryStateReportPayload) → BAT_SEN (battery_mv/level + channels)
+ * - sizeof(ZrlStateReportPayload) → NET_ZRL Cover
+ * - sizeof(ZrlConfigStateReportPayload) → NET_ZRL Cover + Config
+ *
+ * Aktualisiert nodeStates[], publisht via MQTT (publishNodeState, publishNodeAvailability).
+ *
+ * @param senderMac  MAC des Senders
+ * @param payload    Roh-Payload (device_id an Position 0)
+ * @param payloadLen Länge des Payloads (bestimmt das Format)
+ */
 void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uint16_t payloadLen) {
     if (!payload || payloadLen < SH_DEVICE_ID_LEN) {
         logf("WARN", "STATE_REPORT verworfen: payload ungueltig");
@@ -1204,6 +1251,18 @@ void verarbeiteEventReport(const uint8_t* senderMac, const SmartHome::EventRepor
     logf("INFO", "EVENT von %s: type=%u", payload.node_id, (unsigned)payload.event_type);
 }
 
+/**
+ * @brief Verarbeitet ACK von einer Node (Kommando-Bestätigung).
+ *
+ * Matcht ACK gegen pending_cmd oder pending_cfg:
+ * - ACK zu pending_cmd: ACK auf MQTT publishen, pending_cmd löschen
+ * - ACK zu pending_cfg: ACK auf MQTT publishen, pending_cfg löschen
+ *
+ * @param senderMac MAC des Senders (Node)
+ * @param payload   ACK-Payload (ack_seq, ack_msg_type, status)
+ *
+ * @note ACK ohne passenden Pending-Eintrag wird ignoriert (veraltet/dupliziert).
+ */
 void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payload) {
     const int nodeIndex = findeNodeIndexPerMac(senderMac);
     if (nodeIndex < 0) {
@@ -1233,9 +1292,26 @@ void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payloa
 }
 
 // =============================================================================
-// ESP-NOW EMPFANG – Paket validieren und an Handler weiterleiten (switch/msg_type)
+// ESP-NOW EMPFANG – Paket validieren und an Handler weiterleiten
 // =============================================================================
 
+/**
+ * @brief Zentrale ESP-NOW-Empfangsverarbeitung: CRC-Prüfung + Dispatch.
+ *
+ * Ablauf:
+ * 1. Validiert Eingabe (nullptr, Mindestlänge)
+ * 2. CRC-Prüfung (hasValidPacketCrc)
+ * 3. Switch(msg_type) → Handler:
+ *    - SH_MSG_HELLO       → verarbeiteHello
+ *    - SH_MSG_HEARTBEAT   → verarbeiteHeartbeat
+ *    - SH_MSG_STATE       → verarbeiteStateReport
+ *    - SH_MSG_EVENT       → verarbeiteEventReport
+ *    - SH_MSG_ACK         → verarbeiteAck
+ *
+ * @param senderMac MAC des Senders
+ * @param daten     Rohdaten (Header + Payload)
+ * @param laenge    Gesamtlänge der Rohdaten
+ */
 void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* daten, int laenge) {
     if (!senderMac || !daten || laenge < (int)sizeof(SmartHome::MsgHeader)) {
         logf("WARN", "ESP-NOW Paket verworfen: ungueltige Eingabe");
@@ -1489,6 +1565,26 @@ bool jsonHoleZahl(const char* json, const char* key, long* wert) {
     return true;
 }
 
+/**
+ * @brief Extrahiert ein JSON-Objekt ({...}) per Key aus einem JSON-String (manuelle State-Machine).
+ *
+ * Verwendet KEINE JSON-Bibliothek, sondern arbeitet direkt auf dem String:
+ * 1. Key suchen: strstr() nach "key"
+ * 2. '{' nach ':' finden
+ * 3. Geschweifte Klammern zählen (Nesting-Tiefe):
+ *    - '{' → depth++, '}' → depth--
+ *    - depth==0 → Objekt-Ende erreicht
+ * 4. Gefundenen Teilstring ins Ziel kopieren
+ *
+ * @param json         JSON-Eingabestring
+ * @param key          Gesuchter Key (ohne Anfuehrungszeichen)
+ * @param ziel         Ausgabe-Puffer für das extrahierte Objekt
+ * @param zielGroesse  Größe des Ausgabe-Puffers
+ * @return true wenn Objekt gefunden und kopiert wurde
+ *
+ * @note Unterstützt KEIN escaptes " innerhalb von Strings im JSON.
+ *       Für MQTT-Kommandos ausreichend (keine komplexen Payloads).
+ */
 bool jsonHoleObjekt(const char* json, const char* key, char* ziel, size_t zielGroesse) {
     if (!json || !key || !ziel || zielGroesse == 0U) return false;
     char muster[48] = {0};
@@ -1578,9 +1674,24 @@ uint8_t ackMsgTypeFuerCommand(const char* cmd) {
 }
 
 // =============================================================================
-// MQTT-COMMAND-HANDLER – mqttCallback: get_state, set_relay, Cover-Kommandos, set_config
+// MQTT-COMMAND-HANDLER – 4 Kommandos: get_state, set_relay, Cover, set_config
 // =============================================================================
 
+/**
+ * @brief MQTT-Callback: Empfängt und verarbeitet Kommandos vom Broker.
+ *
+ * Unterstützte Kommandos (via JSON "command"-Feld):
+ * 1. get_state    → state_request an Node, ACK auf MQTT
+ * 2. set_relay    → SET_RELAY-CMD an Node (param1=index, param2=zustand)
+ * 3. open/close/stop/set_position → Cover-CMD an Node
+ * 4. set_config   → CFG an Node (report_interval, lux_threshold, etc.)
+ *
+ * Topic-Struktur: smarthome/device/{node_id}/command
+ *
+ * @param topic   MQTT-Topic (enthält device_id)
+ * @param payload JSON-Payload (max 256 Bytes)
+ * @param length  Payload-Länge
+ */
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
     char json[256] = {0};
     size_t copyLen = length;
@@ -1982,9 +2093,25 @@ void gibStartmeldungAus() {
 }  // namespace
 
 // =============================================================================
-// ARDUINO ENTRY POINTS – setup() und loop() (globaler Scope)
+// ARDUINO ENTRY POINTS – Initialisierung und Hauptschleife
 // =============================================================================
 
+/**
+ * @brief Arduino-setup(): Initialisiert Master-Firmware in 10 Schritten.
+ *
+ * Reihenfolge:
+ * 1. Serial (bei DEBUG_LOKAL_AKTIV)
+ * 2. masterStatus nullen, nodeStates[] initialisieren
+ * 3. Startmeldung ausgeben (gibStartmeldungAus)
+ * 4. Hardware initialisieren (initialisiereHardware)
+ * 5. WLAN verbinden (initialisiereWlan)
+ * 6. 500ms warten, WLAN prüfen (pruefeWlanVerbindung)
+ * 7. ESP-NOW starten (initialisiereEspNow)
+ * 8. MQTT verbinden (initialisiereMqtt)
+ *
+ * @note setup() kehrt erst zurück wenn alle Schritte durchlaufen sind.
+ *       loop() übernimmt danach die zyklische Kommunikation.
+ */
 void setup() {
     if (DEBUG_LOKAL_AKTIV) {
         Serial.begin(115200);
@@ -2002,6 +2129,18 @@ void setup() {
     initialisiereMqtt();
 }
 
+/**
+ * @brief Arduino-loop(): Zyklische Hauptschleife (alle LOOP_INTERVAL_MS ms).
+ *
+ * Aufgaben pro Zyklus:
+ * 1. Watchdog zurücksetzen (esp_task_wdt_reset)
+ * 2. WLAN-Verbindung prüfen/wiederherstellen
+ * 3. MQTT-Verbindung prüfen/wiederherstellen
+ * 4. Pending-CMD-Timeout prüfen
+ * 5. Pending-CFG-Timeout prüfen
+ * 6. Node-Offline-Timeout prüfen
+ * 7. LOOP_INTERVAL_MS warten
+ */
 void loop() {
     esp_task_wdt_reset();
     pruefeWlanVerbindung();
