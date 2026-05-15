@@ -173,6 +173,7 @@ String htmlEscapeLocal(const String& s) {
     return e;
 }
 
+// clampToU16 – Wert auf uint16-Bereich begrenzen (0-65535)
 uint16_t clampToU16(long v) { return v < 0L ? 0U : v > 65535L ? 65535U : (uint16_t)v; }
 
 void logf(const char* l, const char* f, ...) {
