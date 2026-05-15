@@ -40,6 +40,7 @@
 #include <PubSubClient.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <esp_task_wdt.h>
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
@@ -91,6 +92,7 @@ namespace {
 constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "MASTER";
 constexpr char DATEI_VERSION[] = "0.4.0";
+constexpr int MASTER_WDT_TIMEOUT_S = 10;
 // MQTT-Topic fuer eingehende Device-Kommandos (+ = Wildcard fuer device_id)
 constexpr char MQTT_TOPIC_COMMAND_SUB[] = "smarthome/device/+/command";
 // Maximale Laenge der request_id (aus MQTT-Kommando)
@@ -1764,6 +1766,16 @@ void initialisiereWlan() {
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     masterStatus.letzter_wlan_versuch_ms = millis();
     logf("INFO", "WLAN-Verbindung gestartet: SSID=%s", WIFI_SSID);
+
+    // Watchdog initialisieren
+    esp_task_wdt_deinit();
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = (uint32_t)MASTER_WDT_TIMEOUT_S * 1000,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+        .trigger_panic = true
+    };
+    esp_task_wdt_init(&wdt_config);
+    esp_task_wdt_add(NULL);
 }
 
 void pruefeWlanVerbindung() {
@@ -1778,8 +1790,7 @@ void pruefeWlanVerbindung() {
     }
 
     if (!verbunden && (millis() - masterStatus.letzter_wlan_versuch_ms) >= WIFI_RECONNECT_INTERVAL_MS) {
-        WiFi.disconnect();
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        WiFi.reconnect();
         masterStatus.letzter_wlan_versuch_ms = millis();
         logf("INFO", "WLAN-Reconnect gestartet");
     }
@@ -1990,6 +2001,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset();
     pruefeWlanVerbindung();
     pruefeMqttVerbindung();
     pruefePendingCmdTimeouts();

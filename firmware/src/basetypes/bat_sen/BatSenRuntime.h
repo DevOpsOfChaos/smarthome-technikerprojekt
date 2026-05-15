@@ -32,6 +32,7 @@
 #include <esp_now.h>
 #include <esp_sleep.h>
 #include <esp_wifi.h>
+#include <esp_task_wdt.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -64,6 +65,10 @@ extern SmartHome::ShNodeProvisioning::NodeProvisioningController nodeProvisionin
 constexpr bool DEBUG_LOKAL_AKTIV = DEVICE_DEBUG_AKTIV && DEBUG_AKTIV;
 constexpr char DATEI_GERAET[] = "BAT-SEN";
 constexpr char DATEI_VERSION[] = "0.1.0";
+
+#ifndef BAT_SEN_WDT_TIMEOUT_S
+#define BAT_SEN_WDT_TIMEOUT_S 15
+#endif
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 constexpr size_t SETUP_AP_SSID_BUFFER_SIZE = 32U;
 static_assert(
@@ -975,6 +980,16 @@ void setup() {
     nodeStatus.letzte_batterie_probe_ms = millis();
     aktualisiereSchlafFenster(DISCOVERY_WINDOW_MS);
 
+    // Watchdog initialisieren
+    esp_task_wdt_deinit();
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = (uint32_t)BAT_SEN_WDT_TIMEOUT_S * 1000,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+        .trigger_panic = true
+    };
+    esp_task_wdt_init(&wdt_config);
+    esp_task_wdt_add(NULL);
+
     // Provisioning konfigurieren und starten
     SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
         SmartHome::BatSenProvisioning::makeConfig(
@@ -1037,6 +1052,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset();
     const unsigned long jetzt = millis();
 
     nodeProvisioning.update();

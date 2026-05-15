@@ -36,6 +36,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <esp_task_wdt.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -194,6 +195,8 @@ constexpr uint32_t MAX_SEND_INTERVAL_S = 65535UL;
 constexpr uint8_t CALIBRATION_SUCCESS_BLINK_PULSES = 3U;
 constexpr uint8_t SETUP_CONFIRM_BLINK_PULSES = 3U;
 constexpr uint8_t RESET_CONFIRM_BLINK_PULSES = 10U;
+constexpr uint32_t RELAY_DEAD_TIME_MS = 300UL;  // Mindestpause zwischen Richtungswechsel
+constexpr int NET_ZRL_WDT_TIMEOUT_S = 10;
 constexpr size_t SERIAL_BUFFER_SIZE = 128U;
 constexpr size_t MASTER_MAC_TEXT_LEN = SmartHome::ShNodeProvisioning::MASTER_MAC_TEXT_LEN;
 constexpr size_t SETUP_SSID_BUFFER_SIZE = 32U;
@@ -270,6 +273,7 @@ struct RuntimeState {
     CoverDirection coverDirection;        // Fahrtrichtung (none/up/down)
     bool relayAActive;                    // Relais A aktiv (HIGH)
     bool relayBActive;                    // Relais B aktiv (HIGH)
+    unsigned long letzteRelaisWechselMs;    // Zeitstempel letzter Relaiswechsel (Dead-Time)
     bool relayUpUsesRelayA;               // Relais-Zuordnung: true=A=Up, false=B=Up
     bool masterMacValid;                  // Master-MAC wurde provisioniert
     uint8_t masterMac[6];                 // Provisionierte Master-MAC
@@ -1227,6 +1231,15 @@ void setzeRelaisFuerRichtung(CoverDirection direction, const char* grund) {
         return;
     }
 
+    // Dead-Time: Verhindere schnellen Richtungswechsel (Schutz vor Motor-Kurzschluss)
+    const unsigned long jetzt = millis();
+    const unsigned long seitLetztemWechsel = jetzt - runtime.letzteRelaisWechselMs;
+    if (runtime.letzteRelaisWechselMs > 0 && seitLetztemWechsel < RELAY_DEAD_TIME_MS) {
+        const unsigned long restMs = RELAY_DEAD_TIME_MS - seitLetztemWechsel;
+        logf("WARN", "Relais-Dead-Time: %lu ms warten vor Richtungswechsel", restMs);
+        delay(restMs);
+    }
+
     schreibePin(PIN_RELAY_A, false, RELAY_A_ACTIVE_HIGH);
     schreibePin(PIN_RELAY_B, false, RELAY_B_ACTIVE_HIGH);
     runtime.relayAActive = false;
@@ -1237,6 +1250,7 @@ void setzeRelaisFuerRichtung(CoverDirection direction, const char* grund) {
     runtime.relayAActive = pin == PIN_RELAY_A;
     runtime.relayBActive = pin == PIN_RELAY_B;
 
+    runtime.letzteRelaisWechselMs = millis();
     logf("INFO", "Relais fuer %s aktiv (%s)", toText(direction), grund ? grund : "ohne grund");
 }
 
@@ -2479,10 +2493,22 @@ void setup() {
 
     setzeLedPins(false, false);
     setzeRelaisNeutral("boot");
+    runtime.letzteRelaisWechselMs = 0;
 
-    initialisierePin(PIN_BUTTON_UP, INPUT);
-    initialisierePin(PIN_BUTTON_DOWN, INPUT);
-    initialisierePin(PIN_BUTTON_STOP, INPUT);
+    // Watchdog initialisieren
+    esp_task_wdt_deinit();
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = (uint32_t)NET_ZRL_WDT_TIMEOUT_S * 1000,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+        .trigger_panic = true
+    };
+    esp_task_wdt_init(&wdt_config);
+    esp_task_wdt_add(NULL);
+    logf("INFO", "Watchdog aktiviert (%d s)", NET_ZRL_WDT_TIMEOUT_S);
+
+    initialisierePin(PIN_BUTTON_UP, INPUT_PULLUP);
+    initialisierePin(PIN_BUTTON_DOWN, INPUT_PULLUP);
+    initialisierePin(PIN_BUTTON_STOP, INPUT_PULLUP);
 
     const SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
         SmartHome::NetZrlProvisioning::makeConfig(
@@ -2541,6 +2567,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset();
     verarbeiteSerielleBefehle();
     pollButtons();
     verarbeiteBewegungsTimeouts();

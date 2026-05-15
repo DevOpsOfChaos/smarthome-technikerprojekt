@@ -718,7 +718,7 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
 // onEspNowSend – Callback nach ESP-NOW-Sendevorgang
 //   Wird aufgerufen wenn ein ESP-NOW-Paket gesendet (oder verworfen) wurde.
 //   Loggt eine Warnung bei Sendefehler (ist informativ, kein kritischer Fehler).
-void onEspNowSend(const uint8_t* /*mac*/, esp_now_send_status_t status) {
+void onEspNowSend(const wifi_tx_info_t* /*tx_info*/, esp_now_send_status_t status) {
     // Prueft ob das Senden fehlgeschlagen ist
     if (status != ESP_NOW_SEND_SUCCESS) {
         logf("WARN", "ESP-NOW Versand fehlgeschlagen");

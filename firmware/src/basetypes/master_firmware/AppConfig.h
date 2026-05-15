@@ -125,7 +125,7 @@
 
 // MQTT-Puffergroesse (B) fuer eingehende Nachrichten
 #ifndef MASTER_MQTT_BUFFER_BYTES
-#define MASTER_MQTT_BUFFER_BYTES 768U
+#define MASTER_MQTT_BUFFER_BYTES 1024U
 #endif
 
 // Loop-Ausfuehrungsintervall (ms)
