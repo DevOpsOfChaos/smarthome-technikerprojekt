@@ -1,10 +1,34 @@
+// =============================================================================
+// DeviceConfig.h – Geraetekonfiguration NET-SEN Room (Legacy)
+// =============================================================================
+// Projekt:    Smarthome Technikerprojekt
+// Pfad:       firmware/src/devices/net_sen_room/DeviceConfig.h
+//
+// === EINSATZZWECK ===
+// [HIER EINTRAGEN]
+// === EINSATZZWECK ===
+//
+// Geraete-Identitaet:
+//   ID:       net_sen_01
+//   Name:     NET-SEN Room
+//   Variante: net_sen_room
+//   Caps:     TEMP | HUM | LUX
+//
+// Sensoren (optional via #if):
+//   BME280:  GPIO4=I2C SDA, GPIO5=I2C SCL, Adresse 0x76
+//   VEML7700: I2C Adresse 0x10
+//
+// Status: LEGACY – dieser Pfad ist ein aeLterer Zwischenstand und gehoert
+// nicht zur aktiven net_sen-Linie (siehe README).
+//
+// Autor:           DevOpsOfChaos
+// Erstelldatum:    2026-05-14
+// Letzte Aenderung: 2026-05-14
+// =============================================================================
+
 #pragma once
 
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
-
-// Legacy-Provisorium: aelterer net_sen_room-Pfad.
-// Diese Datei bleibt fuer Rueckvergleich buildbar, ist aber nicht Teil der
-// offiziellen aktiven net_sen-Linie.
 
 #define NET_SEN_DEVICE_ID "net_sen_01"
 #define NET_SEN_DEVICE_NAME "NET-SEN Room"
@@ -22,7 +46,7 @@
 #define NET_SEN_ROOM_HUM_DELTA_01PCT 50U
 #define NET_SEN_ROOM_LUX_DELTA 25U
 
+// Optionale Sensoren (koennen per #if-Option beim Build aktiviert werden)
 #define NET_SEN_ROOM_USE_BME280 1
 #define NET_SEN_ROOM_BME280_ADDRESS 0x76
-
 #define NET_SEN_ROOM_USE_VEML7700 1
