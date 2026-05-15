@@ -1,23 +1,17 @@
 #pragma once
 
-/*
-====================================================================
- Projekt   : SmartHome ESP32
- Datei     : DeviceTypes.h
- Modul     : ShProtocol
- Version   : 0.3.0
- Stand     : 2026-03-25
-
- Funktion:
- Geräteklassen, Fähigkeits-Bitmasks, Power-Typen und die
- protokollrelevanten Meta-Enums für den oberen Gerätevertrag.
-
- Entscheidung:
- Geräteklassen beschreiben die Basisarchitektur eines Nodes.
- Sondergeräte (z. B. Rolladensteuerung) sind NET-ZRL-Geräte
- mit entsprechenden Meta-/Profilfeldern – keine neue Klasse.
-====================================================================
-*/
+/**
+ * @file DeviceTypes.h
+ * @brief Geraeteklassen, Faehigkeits-Bitmasks, Power-Typen und Meta-Enums
+ *
+ * @details Definiert den oberen Geraetevertrag fuer das SmartHome-Protokoll.
+ *          Geraeteklassen beschreiben die Basisarchitektur eines Nodes.
+ *          Sondergeraete (z.B. Rolladensteuerung) sind NET-ZRL-Geraete
+ *          mit entsprechenden Meta-/Profilfeldern – keine neue Klasse.
+ *
+ * @version 0.3.0
+ * @date    2026-03-25
+ */
 
 // ============================================================
 // Geräteklassen (device_class im HELLO-Payload)
@@ -121,11 +115,15 @@
 #define SH_REPORTING_SLEEP_EVENT     0x05U
 
 // ============================================================
-// Fähigkeits-Bitmasks (caps_hi / caps_lo im HELLO-Payload)
+// Faehigkeits-Bitmasks (caps_hi / caps_lo im HELLO-Payload)
 // ============================================================
 //
 // Beide Bytes zusammen ergeben eine 16-Bit-Maske.
-// caps_hi enthält Bits 15..8, caps_lo enthält Bits 7..0.
+// caps_hi enthaelt Bits 15..8, caps_lo enthaelt Bits 7..0.
+//
+// Kombination zu 16-Bit-Wert: uint16_t caps = ((uint16_t)caps_hi << 8) | caps_lo;
+//
+// Pruefung auf Faehigkeit:    bool hatRelay = (caps & SH_CAP_RELAY) != 0;
 //
 // Bits 7..0 (caps_lo):
 
