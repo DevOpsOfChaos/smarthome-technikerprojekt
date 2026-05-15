@@ -63,6 +63,7 @@ uint16_t clampToHum01pct(long value) {
     return (uint16_t)value;
 }
 
+// absDiffU16 – Absolute Differenz zweier uint16-Werte
 uint16_t absDiffU16(uint16_t a, uint16_t b) {
     return a > b ? (uint16_t)(a - b) : (uint16_t)(b - a);
 }
