@@ -1,23 +1,22 @@
 // =============================================================================
-// main.cpp – NET-ZRL Shutter (Platzhalter)
+// main.cpp – NET-ZRL Shutter: Rollo-Steuerung (THIN)
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
 // Pfad:       firmware/src/devices/net_zrl_shutter/main.cpp
-// Hardware:   ESP32-C3
+// Hardware:   ESP32-C3 + 2 Relais (Auf/Ab) + 3 Taster + 2 LEDs
+// Pattern:    Thin-Wrapper – alle Logik im net_zrl-Basistyp
 //
 // === EINSATZZWECK ===
-// [HIER EINTRAGEN: Rolladen-Jalousie-Steuerung, 2 Relais]
+// [HIER EINTRAGEN]
 // === EINSATZZWECK ===
-//
-// Status: PLATZHALTER – main.cpp enthaelt nur leeres setup()/loop().
-// Wird bei Bedarf mit der eigentlichen Logik befuellt.
 //
 // Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
+// Erstelldatum:    2026-05-15
 // =============================================================================
 
 #include <Arduino.h>
 
-void setup() {}
-void loop() {}
+#include "DeviceConfig.h"
+
+// -- Basistyp einbinden (liefert setup() und loop()) --
+#include "../../basetypes/net_zrl/main.cpp"
