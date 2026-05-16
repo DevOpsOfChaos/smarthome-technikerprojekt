@@ -1,0 +1,93 @@
+PROTOKOLL 2026-05-16 - NET-SEN-002 Regenstation Abschluss
+
+Ziel
+- NET-SEN-002 als netzbetriebene Regenstation abschliessend pruefen.
+- Geraetepfad: firmware/src/devices/net_sen_env_bme280_veml_rain
+- Sensorik: BME280, VEML7700, digitaler Regensensor.
+- Kommunikationspfad: NET-SEN-002 -> Master -> MQTT -> Node-RED/SQLite -> Dashboard.
+
+Hardware- und Portzuordnung
+- Master: COM3
+- NET-SEN-002 Regenstation: COM4
+- Zielgeraet auf COM4 wurde als ESP32-C3 bestaetigt.
+- COM4-MAC: 8c:d0:b2:a8:b4:ab
+
+Code-Abschlusspruefung
+- Geraete-ID: NET-SEN-002
+- Variante: net_sen_env_bme280_veml_rain
+- Caps: TEMP, HUM, LUX, PRESSURE, RAIN
+- Regen-Digitalpfad: GPIO3, active-LOW, Pullup aktiv.
+- Regen wird als Event gemeldet; der Server leitet daraus den aktuellen rain-State ab.
+- Beim Boot wird der aktuelle Regenstatus einmal als Event vorgemerkt, damit der Server auch ohne Zustandswechsel einen belastbaren Startwert erhaelt.
+- NET-SEN-ESP-NOW-Retry nutzt eine stabile Sequenznummer pro Paketversuch.
+- Dokumentationsplatzhalter im Geraeteordner wurden entfernt.
+
+Build
+- Environment: net_sen_env_bme280_veml_rain
+- Ergebnis: SUCCESS
+- RAM: 38812 Bytes von 327680 Bytes
+- Flash: 1071677 Bytes von 1310720 Bytes
+
+Flash
+- Firmware wurde auf COM4 geladen.
+- Flash-Verifikation: Hash of data verified.
+- Hinweis: Der erste PlatformIO-Upload lief in ein Windows-/Tooling-Problem. Der direkte esptool-Flash mit UTF-8-Ausgabe und 115200 Baud war erfolgreich.
+
+Geraete-Log
+- NET-SEN-002 startete mit Variante net_sen_env_bme280_veml_rain.
+- BME280, VEML7700 und Regensensor lieferten plausible Werte.
+- Beispiel-Snapshot:
+  - Temperatur: ca. 21,5 C
+  - Feuchte: ca. 39 %
+  - Lux: ca. 28-31
+  - Luftdruck: ca. 99138-99143 Pa
+  - Regenstatus: trocken
+  - Fault: false
+
+Master-Kommunikation
+- Master auf COM3 verarbeitete HEARTBEAT von NET-SEN-002.
+- Master auf COM3 verarbeitete STATE_REPORT von NET-SEN-002.
+- MQTT-State wurde retained publiziert:
+  - device_id: NET-SEN-002
+  - temp_01c: ca. 215-216
+  - hum_01pct: ca. 390-399
+  - lux: ca. 27-31
+  - pressure_pa: ca. 99137-99142
+  - fault: false
+- MQTT-Availability wurde retained publiziert:
+  - availability: online
+  - online: true
+  - power_type: mains
+
+Server- und Dashboardpfad
+- Docker-Serverpfad lief:
+  - Mosquitto: up
+  - Node-RED: up und healthy
+- MQTT-State fuer NET-SEN-002 war auf dem Broker vorhanden.
+- MQTT-Availability fuer NET-SEN-002 war auf dem Broker vorhanden.
+- SQLite device_state_latest enthielt NET-SEN-002 mit:
+  - availability: online
+  - online: 1
+  - fault: 0
+  - rain: 0
+  - last_event_label: rain_detected
+  - last_event_param1: 0
+- Dashboard war erreichbar.
+
+Nass/Trocken-Test
+- Der reale Nass/Trocken-Wechsel wurde am Regensensor ausgeloest.
+- Ergebnis: Die Umschaltung kam puenktlich in der Dashboard-Uebersicht an.
+- Damit ist der Eventpfad fuer beide Regenzustaende praktisch bestaetigt.
+
+Abschlussbewertung
+- Build: bestanden.
+- Flash: bestanden.
+- Sensorlog: bestanden.
+- Master-Kommunikation: bestanden.
+- MQTT-State und Availability: bestanden.
+- SQLite-Persistenz: bestanden.
+- Dashboarddarstellung inklusive Nass/Trocken-Wechsel: bestanden.
+
+Gesamturteil
+- NET-SEN-002 Regenstation ist fuer den aktuellen Projektstand fertiggestellt.
+- Keine offenen Firmware- oder Serverfehler im geprueften Pfad.

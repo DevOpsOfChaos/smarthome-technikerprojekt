@@ -6,7 +6,7 @@
 // Hardware:   ESP32-C3
 //
 // === EINSATZZWECK ===
-// [HIER EINTRAGEN]
+// Pin-Mapping fuer den produktiven NET-SEN-002 Aussenumwelt- und Regenpfad.
 // === EINSATZZWECK ===
 //
 // Pin-Belegung:
@@ -19,7 +19,7 @@
 //
 // Autor:           DevOpsOfChaos
 // Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
+// Letzte Aenderung: 2026-05-16
 // =============================================================================
 
 #pragma once

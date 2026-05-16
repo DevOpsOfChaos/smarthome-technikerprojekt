@@ -5,7 +5,8 @@
 // Pfad:       firmware/src/devices/net_sen_env_bme280_veml_rain/DeviceConfig.h
 //
 // === EINSATZZWECK ===
-// [HIER EINTRAGEN]
+// Netzbetriebene Regenstation fuer Aussenumgebung:
+// Temperatur, Feuchte, Luftdruck, Helligkeit und digitaler Nass/Trocken-Status.
 // === EINSATZZWECK ===
 //
 // Geraete-Identitaet:
@@ -19,11 +20,11 @@
 //   VEML7700:    I2C, Adresse 0x10
 //   Regensensor: GPIO3, digital, active-LOW mit Pullup
 //
-// Regen wird aktuell als Event gemeldet (STATE-Payload hat noch kein Regenfeld).
+// Regen wird als Event gemeldet. Der Server leitet daraus den aktuellen rain-State ab.
 //
 // Autor:           DevOpsOfChaos
 // Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
+// Letzte Aenderung: 2026-05-16
 // =============================================================================
 
 #pragma once
