@@ -244,6 +244,8 @@ void netSenDeviceSensorInit() {
     pinMode(NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN, INPUT);
 #endif
     regenNass = leseRegenNass();
+    regenEventStatus = regenNass ? 1U : 0U;
+    regenEventOffen = true;
     logf("INFO", "Regensensor init: pin=%d status=%s",
          NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN,
          regenNass ? "nass" : "trocken");
