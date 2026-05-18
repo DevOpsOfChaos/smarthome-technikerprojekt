@@ -435,7 +435,7 @@ static_assert(sizeof(StateConfigReportPayload) == 22,
 /**
  * @brief Relay-Comfort-STATE: Relais + Umweltsensorik (27 Bytes).
  *
- * Genutzt von: net_erl_hall_light, net_erl_kitchen_light (mit PIR + Lux).
+ * Genutzt von: net_erl_hall_light (mit PIR + Lux).
  * Erweitert den Basis-State um Temperatur, Luftfeuchte, Lux, Bewegung und Auto-Flags.
  */
 typedef struct __attribute__((packed)) {
@@ -456,7 +456,7 @@ static_assert(sizeof(RelayComfortStateReportPayload) == 27,
 /**
  * @brief Relay-Comfort-STATE + Konfigurations-Rueckmeldung (31 Bytes).
  *
- * Genutzt von: net_erl_hall_light, net_erl_kitchen_light als CFG-Abfrage-Antwort.
+ * Genutzt von: net_erl_hall_light als CFG-Abfrage-Antwort.
  */
 typedef struct __attribute__((packed)) {
     char     node_id[SH_DEVICE_ID_LEN]; ///< Geraete-ID

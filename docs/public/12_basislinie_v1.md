@@ -16,9 +16,11 @@ Die Basislinie V1 definiert den Stand, der für die offizielle Projektlinie zuer
 ### Geplante konkrete Geräte
 - Master als ESP-NOW- zu MQTT-Brücke
 - `net_zrl_shutter` als Rolladensteuerung
-- `net_sen_room` als netzbetriebenes Sensormodul
-- `net_erl_kitchen_light` und später `net_erl_hall_light`
-- `bat_sen_window_contact` oder `bat_sen_rain`
+- `net_sen_env_bme280_veml_rain` als netzbetriebenes Umwelt- und Regenmodul
+- `net_erl_hall_light` als Flurlicht
+- `net_erl_kitchen` als Küchenmodul
+- `bat_sen_window_contact` als Fensterkontakt
+- `bat_sen_rain` als batteriebetriebener Regensensor
 
 ## Ziele der Basislinie
 

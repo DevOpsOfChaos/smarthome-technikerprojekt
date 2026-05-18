@@ -1,0 +1,163 @@
+# Testprotokoll 2026-05-16 - NET-ERL Hall Light Firmware Realtest
+
+## Ziel
+
+- Zielgeraet: `NET-ERL-001` / `net_erl_hall_light`
+- Zielpfad: `firmware/src/devices/net_erl_hall_light`
+- Master: ESP32-C3 an `COM3`
+- Hall-Light: ESP32-C3 an `COM12`
+- Server: lokaler Docker-Stack mit Mosquitto und Node-RED
+
+## Vorpruefung
+
+- Serielle Ports geprueft:
+  - `COM3`: ESP32-C3, MAC dokumentiert, Master
+  - `COM12`: ESP32-C3, MAC dokumentiert, Hall-Light
+- Server geprueft:
+  - `server-mosquitto-1`: Up, Port `1883`
+  - `server-nodered-1`: Up/healthy, Port `1880`
+  - `http://127.0.0.1:1880/dashboard/`: HTTP 200
+  - `http://127.0.0.1:1880/dashboard/geraet?device=NET-ERL-001`: HTTP 200
+- Build-Environment:
+  - PlatformIO-Environment `net_erl_hall_light`
+  - Board `esp32-c3-devkitm-1`
+  - Build erfolgreich
+  - RAM ca. 11.9 %
+  - Flash ca. 81.8 %
+
+## Codebefund vor Flash
+
+Die Firmware war nicht vollstaendig ok.
+
+1. Lokale Logs waren im Zieldevice deaktiviert:
+   - `NET_ERL_DEBUG_ENABLED` stand auf `0`.
+   - Fuer den angeforderten lokalen Logtest waere das unbrauchbar gewesen.
+
+2. Die Auto-On-Logik hatte einen echten Fehler:
+   - PIR meldete dauerhaft Bewegung.
+   - VEML7700 meldete niedrige Luxwerte.
+   - Trotzdem blieb das Relais aus, sobald ein Master bekannt war.
+   - Ursache war die Bedingung `runtime.relay_auto_owned || !runtime.master_bekannt` in der Late-Lux-Entscheidung.
+   - Logbefund vor Fix: `auto_on_late_lux blockiert (master uebernimmt)`.
+
+## Aenderungen
+
+- `firmware/src/devices/net_erl_hall_light/DeviceConfig.h`
+  - `NET_ERL_DEBUG_ENABLED` auf `1` gesetzt, damit lokale Runtime-Logs sichtbar sind.
+
+- `firmware/src/devices/net_erl_hall_light/main.cpp`
+  - Late-Lux-Auto-On korrigiert.
+  - Bei `motion_aktiv`, gueltigem Luxwert und `lux <= auto_on_lux_threshold` schaltet das Relais jetzt automatisch ein.
+  - Master-Kommandos koennen Auto-Light danach weiter uebersteuern; sie blockieren aber nicht mehr die urspruengliche Auto-On-Entscheidung.
+
+## Flash
+
+- Erster PlatformIO-Uploadversuch auf `COM12` hing beim esptool-Verbindungs-/Schreibpfad.
+- Direkter Chiptest auf `COM12` war erfolgreich.
+- Flash wurde danach robust mit `esptool` bei `115200` Baud durchgefuehrt.
+- Alle Flashbereiche wurden geschrieben und per Hash verifiziert:
+  - Bootloader
+  - Partitionstabelle
+  - Boot-App
+  - Firmware
+- `COM3` wurde nicht geflasht.
+- `COM3` wurde nur zur Master-Wiederherstellung per esptool hart resettet, nachdem ein serieller Mitschnitt den Master in den ROM/Bootloader-Zustand gebracht hatte.
+
+## Testergebnisse
+
+### Lokaler Hall-Light-Log
+
+Logdatei:
+
+- `logs/2026-05-16_net_erl_hall_light_COM12_final.log`
+
+Relevante Befunde:
+
+- Firmware startet als `NET-ERL-001 NET-ERL Hall Light net_erl_hall_light`.
+- Setup-/Device-Daten werden geladen.
+- PIR ist aktiv (`m=1`), plausibel wegen Testaufbau neben dem Bediener.
+- Lux liegt bei ca. `3-4`.
+- Relais schaltet automatisch ein:
+  - `Relay ON (auto_on_late_lux)`
+- Snapshots danach:
+  - `r=1`
+  - `auto=1`
+  - `fault=0`
+
+Hinweis:
+
+- Beim seriellen Oeffnen erscheint einmalig `task_wdt: TWDT already initialized`. Das ist in diesem Lauf kein Funktionsfehler; die Firmware laeuft danach weiter und meldet gueltige States.
+
+### Master- und MQTT-Pfad
+
+Logdateien:
+
+- `logs/2026-05-16_master_COM3_after_hard_reset.log`
+- `logs/2026-05-16_mqtt_final_hall_after_target_reset.log`
+
+Relevante MQTT-Befunde:
+
+- Master online:
+  - `{"master_id":"MASTER-001","online":true,"wifi":true,"mqtt":true,"espnow":true,"fw":"0.4.0"}`
+- Device availability:
+  - `{"device_id":"NET-ERL-001","availability":"online","online":true,"power_type":"mains"}`
+- Device meta:
+  - `device_class="net_erl"`
+  - `control_mode="relay_light"`
+  - `config_profile="hall_light"`
+  - `sensor_mask="THLMXXXXXX"`
+  - `mac_address` vorhanden
+- Frischer Device-State nach Fix:
+  - `relay_1=true`
+  - `temp_01c` ca. `222-223`
+  - `hum_01pct` ca. `305-315`
+  - `lux` ca. `3-4`
+  - `motion=true`
+  - `fault=false`
+
+### Server-Befehlspfad
+
+Logdatei:
+
+- `logs/2026-05-16_command_off_capture.log`
+
+Test:
+
+- HTTP POST an `http://127.0.0.1:1880/api/phase1/net-erl/relay-1`
+- Payload:
+  - `{"device_id":"NET-ERL-001","relay_1":false}`
+
+Ergebnis:
+
+- HTTP-Antwort: angenommen (`202` ueber Node-RED-Response, Payload mit `accepted_at`)
+- MQTT command sichtbar:
+  - `smarthome/device/NET-ERL-001/command`
+  - `command="set_relay"`
+  - `relay_1=false`
+- Device event sichtbar:
+  - `event="relay_changed"`
+  - `trigger=2` (Master/Server-Befehl)
+- ACK sichtbar:
+  - `status="ok"`
+  - `source="node_ack"`
+- Frischer State danach:
+  - `relay_1=false`
+  - `motion=true`
+  - `fault=false`
+
+## Bewertung
+
+Bestanden nach Fix.
+
+- Firmware baut erfolgreich.
+- Hall-Light wurde auf `COM12` geflasht und verifiziert.
+- Lokale Sensor-/Relaislogik funktioniert.
+- Master erkennt und verarbeitet `NET-ERL-001`.
+- Server/MQTT empfaengt Meta, Availability und State.
+- Server-Befehlspfad bis ACK und State-Update funktioniert.
+
+Offener Hinweis:
+
+- Der PIR war im Test dauerhaft aktiv. Das passt zur Erwartung, weil die Platine neben dem Bediener lag.
+- Nach manuellem Server-Relais-Aus bleibt `motion=true`, aber `relay_1=false`. Das ist korrekt fuer einen Master/Server-Override in diesem Lauf.
+- Die aehnliche Late-Lux-Blockade existiert im Kitchen-Device-Code ebenfalls. Sie wurde hier nicht geaendert, weil dieser Testauftrag nur `net_erl_hall_light` betraf.

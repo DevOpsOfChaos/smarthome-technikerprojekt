@@ -162,8 +162,8 @@ void netErlDeviceSetRelayOutput(bool on) {
  *
  * @param nowMs aktueller millis()-Wert
  *
- * @note Late-Lux-Race-Schutz: Master-CMD kann relay_auto_owned löschen.
- *       Nur einschalten wenn relay_auto_owned noch true ODER master_bekannt==false.
+ * @note Master-CMDs koennen Auto-Light spaeter wieder uebersteuern. Die
+ *       urspruengliche Auto-On-Entscheidung darf dadurch nicht blockiert werden.
  */
 void netErlDevicePollSensors(unsigned long nowMs) {
     if ((nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
@@ -198,18 +198,13 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     runtime.fault = !(bme280_ok && veml7700_ok);
 
     // Late-Lux: Auto-On-Entscheidung wenn Lux-Wert jetzt verfügbar ist
-    // Race-Schutz: Master-CMD kann relay_auto_owned zwischenzeitlich gelöscht haben
     if (runtime.motion_aktiv && runtime.pending_auto_on_decision && !runtime.relay_1 && lux != 0xFFFFU) {
         runtime.pending_auto_on_decision = false;
         if (lux <= runtime.auto_on_lux_threshold) {
-            if (runtime.relay_auto_owned || !runtime.master_bekannt) {
-                runtime.relay_auto_owned = true; runtime.blocked_by_lux = false;
-                setRelay(true, "auto_on_late_lux");
-                sendRelayEvent(SH_TRIGGER_AUTO);
-                runtime.state_report_offen = true;
-            } else {
-                logMsg("INFO", "auto_on_late_lux blockiert (master uebernimmt)");
-            }
+            runtime.relay_auto_owned = true; runtime.blocked_by_lux = false;
+            setRelay(true, "auto_on_late_lux");
+            sendRelayEvent(SH_TRIGGER_AUTO);
+            runtime.state_report_offen = true;
         } else {
             runtime.blocked_by_lux = true;
             runtime.state_report_offen = true;

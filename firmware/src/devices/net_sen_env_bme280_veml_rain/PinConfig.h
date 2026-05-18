@@ -7,7 +7,6 @@
 //
 // === EINSATZZWECK ===
 // Pin-Mapping fuer den produktiven NET-SEN-002 Aussenumwelt- und Regenpfad.
-// === EINSATZZWECK ===
 //
 // Pin-Belegung:
 //   I2C SDA:         GPIO0 – BME280 (Adr. 0x76/0x77) + VEML7700 (0x10)
