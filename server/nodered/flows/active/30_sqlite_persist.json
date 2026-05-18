@@ -103,7 +103,7 @@
   {
     "id": "sqlitedb_30_phase1",
     "type": "sqlitedb",
-    "db": "/data/sqlite/smarthome_phase1.db",
+    "db": "/config/node-red/sqlite/smarthome_phase1.db",
     "mode": "RWC"
   }
 ]

@@ -864,7 +864,7 @@ function describeDevice(row) {
         controls,
         highlight_values: pickHighlights(device, state, meta),
         battery_value: batteryValue,
-        detail_url: "/dashboard/geraet?device=" + encodeURIComponent(row.device_id),
+        detail_url: "/geraet?device=" + encodeURIComponent(row.device_id),
         status_time_label: "Zuletzt gesehen",
         status_time_value: relativeTimestamp(row.last_seen_at),
         status_time_exact_label: formatTimestamp(row.last_seen_at)

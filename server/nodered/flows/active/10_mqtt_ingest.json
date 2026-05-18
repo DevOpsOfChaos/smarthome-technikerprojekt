@@ -19,8 +19,8 @@
   {
     "id": "cfg_mqtt_broker",
     "type": "mqtt-broker",
-    "name": "local mqtt",
-    "broker": "mosquitto",
+    "name": "Home Assistant Mosquitto",
+    "broker": "192.168.178.53",
     "port": "1883",
     "clientid": "nodered-phase1",
     "autoConnect": true,

@@ -23,6 +23,7 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 const { isPlainObject } = require("./time_helpers");
 const { isCoverDevice } = require("./capability_helpers");
 
@@ -30,7 +31,7 @@ const { isCoverDevice } = require("./capability_helpers");
 // KONFIGURATION
 // ===========================================================================
 
-const STORAGE_PATH = process.env.COVER_AUTOMATION_PATH || "/data/cover_automation.json";
+const STORAGE_PATH = process.env.COVER_AUTOMATION_PATH || path.join(__dirname, "..", "cover_automation.json");
 const TIME_ZONE = process.env.TZ || "Europe/Berlin";
 const ALLOWED_POSITIONS = [0, 25, 50, 75, 100];
 const SLOT_KEYS = ["slot_1", "slot_2"];
@@ -528,6 +529,14 @@ function renderDetailPage(runtime, deviceId, notice = "") {
 
   <script>
     const deviceId = ${JSON.stringify(summary.deviceId)};
+    function nodeRedRoot() {
+      const marker = "/device";
+      const index = window.location.pathname.indexOf(marker);
+      return index > 0 ? window.location.pathname.slice(0, index) : "";
+    }
+    function apiUrl(path) {
+      return nodeRedRoot() + path;
+    }
     const form = document.getElementById("automation-form");
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -539,7 +548,7 @@ function renderDetailPage(runtime, deviceId, notice = "") {
         slot_2_position: Number(document.getElementById("slot_2_position").value)
       };
 
-      const response = await fetch("/api/phase1/cover/automation/" + encodeURIComponent(deviceId), {
+      const response = await fetch(apiUrl("/api/phase1/cover/automation/" + encodeURIComponent(deviceId)), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -549,7 +558,7 @@ function renderDetailPage(runtime, deviceId, notice = "") {
         alert(result.message || "Speichern fehlgeschlagen");
         return;
       }
-      window.location.href = "/device/" + encodeURIComponent(deviceId) + "?saved=1";
+      window.location.href = nodeRedRoot() + "/device/" + encodeURIComponent(deviceId) + "?saved=1";
     });
   </script>
 </body>
