@@ -149,6 +149,17 @@ void netErlDeviceInit() {
     if (!veml7700_ok) logMsg("WARN", "VEML7700 init fail");
 
     pinMode(PIN_PIR, INPUT);
+// Status LED not used when PIN_STATUS_LED < 0
+#if PIN_STATUS_LED >= 0
+    pinMode(PIN_STATUS_LED, OUTPUT);
+    digitalWrite(PIN_STATUS_LED, LOW);
+#endif
+    
+#if SETUP_INDICATOR_LED_PIN >= 0
+    pinMode(SETUP_INDICATOR_LED_PIN, OUTPUT);
+    /* set setup indicator off (respect active polarity) */
+    digitalWrite(SETUP_INDICATOR_LED_PIN, SETUP_INDICATOR_LED_ACTIVE_HIGH ? LOW : HIGH);
+#endif
 }
 
 // Aufgabe: Setzt alle Sensorwerte auf die ungueltigen Startwerte zurueck.

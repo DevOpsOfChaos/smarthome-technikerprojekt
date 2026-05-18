@@ -63,7 +63,7 @@
     "y": 140,
     "wires": [
       [
-        "json_10_device"
+        "func_10_device_drop_empty"
       ]
     ]
   },
@@ -241,7 +241,7 @@
     "y": 280,
     "wires": [
       [
-        "json_10_master"
+        "func_10_master_drop_empty"
       ]
     ]
   },
@@ -317,5 +317,43 @@
     "x": 1095,
     "y": 260,
     "wires": []
+  },
+  {
+    "id": "func_10_device_drop_empty",
+    "type": "function",
+    "z": "tab_10_ingest",
+    "name": "Drop empty device payload",
+    "func": "// Leere retained MQTT-Clears nicht an den JSON-Parser weiterreichen.\nif (msg.payload === undefined || msg.payload === null) {\n    return null;\n}\nif (Buffer.isBuffer(msg.payload) && msg.payload.length === 0) {\n    return null;\n}\nif (typeof msg.payload === 'string' && msg.payload.trim() === '') {\n    return null;\n}\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 330,
+    "y": 140,
+    "wires": [
+      [
+        "json_10_device"
+      ]
+    ]
+  },
+  {
+    "id": "func_10_master_drop_empty",
+    "type": "function",
+    "z": "tab_10_ingest",
+    "name": "Drop empty master payload",
+    "func": "// Leere retained MQTT-Clears nicht an den JSON-Parser weiterreichen.\nif (msg.payload === undefined || msg.payload === null) {\n    return null;\n}\nif (Buffer.isBuffer(msg.payload) && msg.payload.length === 0) {\n    return null;\n}\nif (typeof msg.payload === 'string' && msg.payload.trim() === '') {\n    return null;\n}\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 330,
+    "y": 280,
+    "wires": [
+      [
+        "json_10_master"
+      ]
+    ]
   }
 ]
