@@ -89,11 +89,11 @@
 // Flurlicht / Bewegungslicht mit einem Relais.
 #define SH_PROFILE_HALL_LIGHT     0x01U
 
-// Küchenlicht mit Luftqualitäts-/Presence-Erweiterung.
-#define SH_PROFILE_KITCHEN_LIGHT  0x02U
-
 // Basis-Rolladenprofil.
 #define SH_PROFILE_COVER_BASIC    0x03U
+
+// Flurmodul mit LED-Ring, Luftqualitaets- und Presence-Erweiterung.
+#define SH_PROFILE_HALL_MODULE_LED_RING 0x04U
 
 // ============================================================
 // Reporting-Modes (reporting_mode im HELLO-Payload)

@@ -31,14 +31,14 @@ Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Pro
 - erneuter Latest-Flash-/Kommunikationsnachweis für `net_zrl`
 - erfolgreicher enger Server-Contract-Smoke-Test für numerische `caps`, `button_flags`, ACK-`source` und SQL-/Migrationsstart
 
-### NET-ERL Hall-Light
-- realer Gerätepfad `net_erl_hall_light`
+### NET-ERL Hall-Modul
+- realer Gerätepfad `net_erl_hall_module`
 - überprüfter Normalbetrieb gegen den echten Master
 - real nachgewiesener Setup-Pfad über den konkreten Gerätepfad
 - Provisioning und Rückkehr in den Normalmodus praktisch belegt
 
 ### NET-SEN Außensensor
-- realer Gerätepfad `net_sen_env_bme280_veml_rain`
+- realer Gerätepfad `net_sen_weather_station`
 - enger Device-ID-Fix auf protokollgültigen Gerätepfad
 - realer Build-/Flash-/Kommunikationsnachweis
 - BME280 real belegt
@@ -63,8 +63,8 @@ Wichtig ist dabei:
 - grundlegende öffentliche Projektdokumentation
 - technische Trennung von Geräteschicht, Master und Server
 - aktueller Server für Ingest, Zustandsmodell, Snapshot-Persistenz und kleines Dashboard
-- reale Nachweise für Hall-Light, `net_zrl` und `net_sen`
-- bestätigte Setup-Pfade für Hall-Light und `net_sen`
+- reale Nachweise für Hall-Modul, `net_zrl` und `net_sen`
+- bestätigte Setup-Pfade für Hall-Modul und `net_sen`
 - host-unabhängiger Server-Contract-Smoke-Test unter `tests/server/server_contract_smoke.ps1`
 - offizielle Nachweis- und Teststruktur
 

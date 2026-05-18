@@ -68,9 +68,9 @@ Bereits sichtbar und nachweisbar sind unter anderem:
 - gemeinsames Geräteobjekt und separater Masterpfad
 - minimales SQLite-Schema für aktuelle Zustände und Persistenz
 - Dashboard als belastbare öffentliche Serverlinie
-- realer Gerätepfad `net_erl_hall_light` mit überprüftem Normalbetrieb
-- real nachgewiesener Setup-Pfad für Hall-Light
-- realer Gerätepfad `net_sen_env_bme280_veml_rain` mit BME280, VEML7700 und digitalem Regenpfad
+- realer Gerätepfad `net_erl_hall_module` mit überprüftem Normalbetrieb
+- real nachgewiesener Setup-Pfad für Hall-Modul
+- realer Gerätepfad `net_sen_weather_station` mit BME280, VEML7700 und digitalem Regenpfad
 - real nachgewiesener Setup-Pfad für `net_sen`
 - reale Entwicklungs- und Verifikationsnachweise unter `PROTOKOLL/`
 

@@ -14,7 +14,7 @@ Netzbetriebener Sensorknoten ohne Relais. Dieser Typ dient zur Erfassung und Mel
 
 ## NET-ERL
 
-Netzbetriebener Basistyp mit einem Relais. Dieser Typ bildet die Grundlage für Lichtgeräte wie Küchenlicht und Flurlicht.
+Netzbetriebener Basistyp mit einem Relais. Dieser Typ bildet die Grundlage für Lichtgeräte wie Hall-Modul und Hall-Modul mit LED-Ring.
 
 ## BAT-SEN
 

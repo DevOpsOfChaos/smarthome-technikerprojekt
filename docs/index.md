@@ -39,9 +39,9 @@ Belastbar sichtbar sind:
 - gemeinsames Geräteobjekt
 - minimales SQLite-Fundament
 - Dashboard-V1-Grundlinie
-- realer Gerätepfad `net_erl_hall_light`
-- real bestätigter Setup-Pfad für Hall-Light
-- realer Gerätepfad `net_sen_env_bme280_veml_rain`
+- realer Gerätepfad `net_erl_hall_module`
+- real bestätigter Setup-Pfad für Hall-Modul
+- realer Gerätepfad `net_sen_weather_station`
 - real bestätigter Setup-Pfad für `net_sen`
 - reale Nachweise unter `PROTOKOLL/`
 

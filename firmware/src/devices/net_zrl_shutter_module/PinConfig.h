@@ -2,7 +2,7 @@
 // PinConfig.h – GPIO-Pin-Mapping fuer NET-ZRL Shutter
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_zrl_shutter/PinConfig.h
+// Pfad:       firmware/src/devices/net_zrl_shutter_module/PinConfig.h
 // Hardware:   ESP32-C3
 //
 // === EINSATZZWECK ===

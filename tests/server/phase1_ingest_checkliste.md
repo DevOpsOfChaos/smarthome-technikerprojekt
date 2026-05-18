@@ -97,7 +97,7 @@ Test-Path .\server\sqlite\smarthome_phase1.db
 ### Meta senden
 
 ```powershell
-Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/meta" -Retain -Payload '{"device_id":"net_erl_hall_light","device_name":"Flurlicht","device_class":"net_erl","power_type":"mains","caps":81,"fw_version":"0.1.0","meta_schema_version":1,"control_mode":"relay_light","config_profile":"hall_light","reporting_mode":"hybrid","sensor_mask":"TPL_______","input_mask":"B____"}'
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_module/meta" -Retain -Payload '{"device_id":"net_erl_hall_module","device_name":"Hall-Modul","device_class":"net_erl","power_type":"mains","caps":81,"fw_version":"0.1.0","meta_schema_version":1,"control_mode":"relay_light","config_profile":"hall_light","reporting_mode":"hybrid","sensor_mask":"TPL_______","input_mask":"B____"}'
 ```
 
 Erwartung:
@@ -105,12 +105,12 @@ Erwartung:
 - Geraet wird auto-angelegt
 - `identity.device_id` und `identity.device_name` sind gesetzt
 - `meta.caps` enthaelt aus der numerischen Bitmaske mindestens `switchable`, `lux`, `motion`, `online_state`, `fault_state`, `ack_tracking`
-- `devices` enthaelt oder aktualisiert eine Zeile fuer `net_erl_hall_light`
+- `devices` enthaelt oder aktualisiert eine Zeile fuer `net_erl_hall_module`
 
 ## Availability prüfen
 
 ```powershell
-Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/availability" -Retain -Payload '{"device_id":"net_erl_hall_light","availability":"online","online":true}'
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_module/availability" -Retain -Payload '{"device_id":"net_erl_hall_module","availability":"online","online":true}'
 ```
 
 Erwartung:
@@ -125,7 +125,7 @@ Erwartung:
 ### Erster State
 
 ```powershell
-Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/state" -Retain -Payload '{"device_id":"net_erl_hall_light","relay_1":true,"motion":true,"lux":120,"fault":false,"report_interval_s":60}'
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_module/state" -Retain -Payload '{"device_id":"net_erl_hall_module","relay_1":true,"motion":true,"lux":120,"fault":false,"report_interval_s":60}'
 ```
 
 Erwartung:
@@ -183,7 +183,7 @@ Erwartung:
 ### Partieller State
 
 ```powershell
-Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/state" -Retain -Payload '{"device_id":"net_erl_hall_light","motion":false}'
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_module/state" -Retain -Payload '{"device_id":"net_erl_hall_module","motion":false}'
 ```
 
 Erwartung:
@@ -197,7 +197,7 @@ Erwartung:
 ## Event prüfen
 
 ```powershell
-Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/event" -Payload '{"device_id":"net_erl_hall_light","event":"motion_detected","event_type":2,"trigger":1,"param1":0,"param2":0}'
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_module/event" -Payload '{"device_id":"net_erl_hall_module","event":"motion_detected","event_type":2,"trigger":1,"param1":0,"param2":0}'
 ```
 
 Erwartung:
@@ -212,7 +212,7 @@ Erwartung:
 ## ACK prüfen
 
 ```powershell
-Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_light/ack" -Payload '{"device_id":"net_erl_hall_light","request_id":"req-1","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":17,"source":"node_ack"}'
+Publish-ServerMqtt -Topic "smarthome/device/net_erl_hall_module/ack" -Payload '{"device_id":"net_erl_hall_module","request_id":"req-1","channel":"command","status":"ok","status_code":0,"ack_msg_type":5,"ack_seq":17,"source":"node_ack"}'
 ```
 
 Erwartung:
@@ -228,7 +228,7 @@ Erwartung:
 ## Minimalen Command-/ACK-Pfad pruefen
 
 Fuer den echten Master-/Hardware-Roundtrip den vorhandenen realen Node `net_erl_01` verwenden.
-Der Platzhalter `net_erl_hall_light` taugt fuer den serverseitigen Ingest-Aufbau, aber nicht als belastbarer Hardware-Nachweis.
+Der Platzhalter `net_erl_hall_module` taugt fuer den serverseitigen Ingest-Aufbau, aber nicht als belastbarer Hardware-Nachweis.
 
 In einem zweiten Terminal vor dem HTTP-Aufruf den offiziellen Command-Capture starten:
 

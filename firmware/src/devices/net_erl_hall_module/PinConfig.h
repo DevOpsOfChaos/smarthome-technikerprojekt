@@ -1,12 +1,12 @@
 // =============================================================================
-// PinConfig.h – GPIO-Pin-Mapping fuer NET-ERL Hall Light
+// PinConfig.h – GPIO-Pin-Mapping fuer NET-ERL Hall Module
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_hall_light/PinConfig.h
+// Pfad:       firmware/src/devices/net_erl_hall_module/PinConfig.h
 // Hardware:   ESP32-C3
 //
 // === EINSATZZWECK ===
-// [HIER EINTRAGEN: Flurlicht-Steuerung mit Bewegungsmelder]
+// Pin-Mapping fuer Hall-Modul mit Bewegungsmelder.
 // === EINSATZZWECK ===
 //
 // Pin-Belegung:

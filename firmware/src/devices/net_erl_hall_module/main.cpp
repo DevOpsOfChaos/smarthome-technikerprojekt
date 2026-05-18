@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief NET-ERL Hall Light: Flurlicht mit PIR + Lux (Thin-Wrapper)
+ * @brief NET-ERL Hall Module: Flurmodul mit PIR + Lux (Thin-Wrapper)
  *
  * @details Auto-Light-Logik mit PIR-Bewegungssensor und VEML7700-Luxsensor.
  *          BME280 fuer Temperatur/Feuchte. Late-Lux: Auto-On-Entscheidung
@@ -28,11 +28,11 @@
 #define NET_ERL_INPUT_MASK              "XXXXX"
 #define NET_ERL_PERSISTED_MAGIC         0x484C4C31UL
 #define NET_ERL_PERSISTED_KEY           "hall_setup_v1"
-#define NET_ERL_DEVICE_PAGE_TITLE       "NET-ERL Hall Light"
-#define NET_ERL_DEVICE_SECTION_TITLE    "Hall Light"
+#define NET_ERL_DEVICE_PAGE_TITLE       "NET-ERL Hall Module"
+#define NET_ERL_DEVICE_SECTION_TITLE    "Hall Module"
 #define NET_ERL_DEVICE_SECTION_INTRO    "Lux-Schwelle und Nachlauf."
 
-// Hall-spezifische Unterschiede zum Kitchen
+// Hall-Modul-spezifische Unterschiede zum LED-Ring-Modul
 #define NET_ERL_USE_ISR_CMD_QUEUE       1   // ISR-safe CMD-Queue
 #define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 0  // Nachlauf NICHT verlängern
 #define NET_ERL_WDT_TIMEOUT_S           8UL

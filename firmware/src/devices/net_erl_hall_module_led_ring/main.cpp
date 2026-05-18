@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief NET-ERL Kitchen: Kuechenlicht mit Radar + Luftqualitaet (Thin-Wrapper)
+ * @brief NET-ERL Hall Module LED Ring: Flurmodul mit Radar + Luftqualitaet (Thin-Wrapper)
  *
  * @details Komplexester NET-ERL-Device-Adapter. Auto-Light mit LD2410-Radar,
  *          BME680 (Temp/Feuchte/Druck/Gas), VEML7700 (Lux), ENS160 (AQI/TVOC/eCO2),
@@ -30,13 +30,13 @@
 #include "PinConfig.h"
 
 // -- Baukasten-Defines (vor NetErlRuntime.h) --
-#define NET_ERL_STORAGE_NS              "net_erl_kit"
+#define NET_ERL_STORAGE_NS              "net_erl_hlr"
 #define NET_ERL_SENSOR_MASK             "THLPGAMXXX"
 #define NET_ERL_INPUT_MASK              "BXXXX"
 #define NET_ERL_PERSISTED_MAGIC         0x4B544331UL
-#define NET_ERL_PERSISTED_KEY           "kitchen_cfg_v1"
-#define NET_ERL_DEVICE_PAGE_TITLE       "NET-ERL Kitchen"
-#define NET_ERL_DEVICE_SECTION_TITLE    "Kitchen"
+#define NET_ERL_PERSISTED_KEY           "hall_led_cfg_v1"
+#define NET_ERL_DEVICE_PAGE_TITLE       "NET-ERL Hall Module LED Ring"
+#define NET_ERL_DEVICE_SECTION_TITLE    "Hall Module LED Ring"
 #define NET_ERL_DEVICE_SECTION_INTRO    "Lux-Schwelle und Nachlauf."
 #define NET_ERL_HAS_BUTTON
 #define NET_ERL_HAS_INDICATOR_UPDATE
@@ -222,6 +222,9 @@ void netErlDeviceUpdateIndicators(bool relayOn) {
  *          6. ENS160 Messwerte lesen (AQI500 bevorzugt, Fallback AQI 1-5); Stale-Detection
  *          7. Late-Lux: Auto-On-Entscheidung falls Lux-Wert nach Pending-Status verfuegbar
  *          8. Delta-Detection: STATE-Trigger nur bei signifikanter Messwert-Aenderung
+ *
+ * @note Master-CMDs koennen Auto-Light spaeter wieder uebersteuern. Die
+ *       urspruengliche Auto-On-Entscheidung darf dadurch nicht blockiert werden.
  */
 void netErlDevicePollSensors(unsigned long nowMs) {
     if ((nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
@@ -283,18 +286,13 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     runtime.fault = !(bme_ok && lux_ok) || !ens_ok;
 
     // Late-Lux: Auto-On-Entscheidung wenn Lux-Wert jetzt verfügbar ist
-    // Race-Schutz: Master-CMD kann relay_auto_owned zwischenzeitlich gelöscht haben
     if (runtime.motion_aktiv && runtime.pending_auto_on_decision && !runtime.relay_1 && lux != 0xFFFFU) {
         runtime.pending_auto_on_decision = false;
         if (lux <= runtime.auto_on_lux_threshold) {
-            if (runtime.relay_auto_owned || !runtime.master_bekannt) {
-                runtime.relay_auto_owned = true; runtime.blocked_by_lux = false;
-                setRelay(true, "auto_on_late_lux");
-                sendRelayEvent(SH_TRIGGER_AUTO);
-                runtime.state_report_offen = true;
-            } else {
-                logMsg("INFO", "auto_on_late_lux blockiert (master uebernimmt)");
-            }
+            runtime.relay_auto_owned = true; runtime.blocked_by_lux = false;
+            setRelay(true, "auto_on_late_lux");
+            sendRelayEvent(SH_TRIGGER_AUTO);
+            runtime.state_report_offen = true;
         } else {
             runtime.blocked_by_lux = true;
             runtime.state_report_offen = true;

@@ -33,7 +33,7 @@ using SmartHome::absDiffU16;
 // =============================================================================
 
 static_assert(BAT_SEN_RAIN_SIGNAL_PIN >= 0,
-    "bat_sen_rain braucht einen gueltigen ADC-Pin.");
+    "bat_sen_rain_sensor braucht einen gueltigen ADC-Pin.");
 static_assert(BAT_SEN_RAIN_STATE_DELTA_RAW > 0U,
     "BAT_SEN_RAIN_STATE_DELTA_RAW muss groesser als 0 sein.");
 

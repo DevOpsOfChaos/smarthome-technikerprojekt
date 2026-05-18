@@ -1,8 +1,8 @@
 // =============================================================================
-// DeviceConfig.h – Geraetekonfiguration NET-ERL Hall Light
+// DeviceConfig.h – Geraetekonfiguration NET-ERL Hall Module
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_hall_light/DeviceConfig.h
+// Pfad:       firmware/src/devices/net_erl_hall_module/DeviceConfig.h
 //
 // === EINSATZZWECK ===
 // [HIER EINTRAGEN]
@@ -10,8 +10,8 @@
 //
 // Geraete-Identitaet:
 //   ID:       NET-ERL-001
-//   Name:     NET-ERL Hall Light
-//   Variante: net_erl_hall_light
+//   Name:     NET-ERL Hall Module
+//   Variante: net_erl_hall_module
 //   Caps:     RELAY | TEMP | HUM | LUX | MOTION
 //
 // Sensoren:
@@ -33,8 +33,8 @@
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
 #define NET_ERL_DEVICE_ID "NET-ERL-001"
-#define NET_ERL_DEVICE_NAME "NET-ERL Hall Light"
-#define NET_ERL_FW_VARIANT "net_erl_hall_light"
+#define NET_ERL_DEVICE_NAME "NET-ERL Hall Module"
+#define NET_ERL_FW_VARIANT "net_erl_hall_module"
 
 // Druck bleibt trotz BME280 bewusst aussen vor (Aussenvertrag ohne PRESSURE)
 #define NET_ERL_DEVICE_CAPS (SH_CAP_RELAY | SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_MOTION)

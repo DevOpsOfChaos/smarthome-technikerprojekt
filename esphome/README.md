@@ -122,7 +122,7 @@ Wenn `cover_calibrated = true` und eine belastbare Position vorliegt, kommt zusa
 
 ```json
 {
-  "device_id": "bat_sen_rain_01",
+  "device_id": "bat_sen_rain_sensor_01",
   "rain_detected": true,
   "fault": false
 }
@@ -193,7 +193,7 @@ Nach erfolgreicher Kalibrierung:
 
 ### Devices - Battery (batteriebetrieben)
 - `devices/bat_sen_window_contact_example.yaml`: Fensterkontakt, GPIO-Wake bei Kontaktwechsel, Deep Sleep
-- `devices/bat_sen_rain_example.yaml`: Regensensor, periodischer Wake (900s), ADC-basierte Nasserkennung
+- `devices/bat_sen_rain_sensor_example.yaml`: Regensensor, periodischer Wake (900s), ADC-basierte Nasserkennung
 
 ## Abgrenzung
 
@@ -218,4 +218,4 @@ Wer diesen Pfad produktiv nutzen will, muss die jeweiligen Pins, Sensoren, Fahrz
 | net_sen_env (BME280+VEML) | ✅ | ✅ (Temp/Hum/Druck/Lux) | N/A | ❌ |
 | net_zrl_cover | ✅ | ✅ (zeitbasiert) | ✅ (manuell) | ❌ |
 | bat_sen_window_contact | ✅ | ✅ (GPIO-Wake) | N/A | ❌ |
-| bat_sen_rain | ✅ | ✅ (ADC, periodisch) | N/A | ❌ |
+| bat_sen_rain_sensor | ✅ | ✅ (ADC, periodisch) | N/A | ❌ |

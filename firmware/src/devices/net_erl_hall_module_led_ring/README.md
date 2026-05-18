@@ -1,10 +1,10 @@
-# NET-ERL Kitchen
+# NET-ERL Hall Module LED Ring
 
-Konkreter erster Kitchen-Stand fuer den Basistyp `net_erl`.
+Konkreter Hall-Modul-Stand mit LED-Ring fuer den Basistyp `net_erl`.
 
 Basis:
-- Hall-Light-Ablauf mit Relais, lokaler Taste, Praesenz-Auto-On, Lux-Sperre und Auto-Off-Nachlauf
-- Kitchen-Pinlinie mit LD2410C, VEML7700, BME680, ENS160, NeoPixel-Ring und Relais
+- Hall-Modul-Ablauf mit Relais, lokaler Taste, Praesenz-Auto-On, Lux-Sperre und Auto-Off-Nachlauf
+- Hall-Modul-Pinlinie mit LD2410C, VEML7700, BME680, ENS160, NeoPixel-Ring und Relais
 
 Sichtbarer STATE:
 - `relay_1`

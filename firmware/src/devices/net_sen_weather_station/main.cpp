@@ -46,7 +46,7 @@ bool netSenDevicePollEvent(uint8_t*, uint8_t*, uint8_t*, uint16_t*);
 #include "../../basetypes/net_sen/NetSenRuntime.h"
 
 static_assert(NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN >= 0,
-    "net_sen_env_bme280_veml_rain braucht einen gueltigen Regen-Pin.");
+    "net_sen_weather_station braucht einen gueltigen Regen-Pin.");
 
 // =============================================================================
 // KONSTANTEN + LOKALER ZUSTAND

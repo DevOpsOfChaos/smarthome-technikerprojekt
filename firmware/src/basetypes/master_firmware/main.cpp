@@ -282,8 +282,8 @@ const char* controlModeText(uint8_t controlMode) {
 const char* configProfileText(uint8_t configProfile) {
     switch (configProfile) {
         case SH_PROFILE_HALL_LIGHT: return "hall_light";
-        case SH_PROFILE_KITCHEN_LIGHT: return "kitchen_light";
         case SH_PROFILE_COVER_BASIC: return "cover_basic";
+        case SH_PROFILE_HALL_MODULE_LED_RING: return "hall_module_led_ring";
         case SH_PROFILE_NONE:
         default: return "none";
     }

@@ -36,7 +36,7 @@
 #define NET_ERL_DEVICE_NAME "NET-ERL Blank Relay Test"
 #endif
 
-// Firmware-Variante (z.B. "net_erl_base", "net_erl_hall_light")
+// Firmware-Variante (z.B. "net_erl_base", "net_erl_hall_module")
 #ifndef NET_ERL_FW_VARIANT
 #define NET_ERL_FW_VARIANT "net_erl_base"
 #endif

@@ -288,7 +288,7 @@ static_assert(sizeof(MsgHeader) == SH_HEADER_SIZE,
  */
 typedef struct __attribute__((packed)) {
     char     device_id[SH_DEVICE_ID_LEN];     ///< Eindeutige Geraete-ID (z.B. "NET-ERL-001")
-    char     device_name[SH_DEVICE_NAME_LEN]; ///< Anzeigename (z.B. "Kuechenlicht")
+    char     device_name[SH_DEVICE_NAME_LEN]; ///< Anzeigename (z.B. "Hall-Modul")
     uint8_t  device_class;                    ///< Geraeteklasse (SH_CLASS_NET_ERL, ...)
     uint8_t  caps_hi;                         ///< Faehigkeiten Bits 15..8
     uint8_t  caps_lo;                         ///< Faehigkeiten Bits 7..0
@@ -435,7 +435,7 @@ static_assert(sizeof(StateConfigReportPayload) == 22,
 /**
  * @brief Relay-Comfort-STATE: Relais + Umweltsensorik (27 Bytes).
  *
- * Genutzt von: net_erl_hall_light (mit PIR + Lux).
+ * Genutzt von: net_erl_hall_module (mit PIR + Lux).
  * Erweitert den Basis-State um Temperatur, Luftfeuchte, Lux, Bewegung und Auto-Flags.
  */
 typedef struct __attribute__((packed)) {
@@ -456,7 +456,7 @@ static_assert(sizeof(RelayComfortStateReportPayload) == 27,
 /**
  * @brief Relay-Comfort-STATE + Konfigurations-Rueckmeldung (31 Bytes).
  *
- * Genutzt von: net_erl_hall_light als CFG-Abfrage-Antwort.
+ * Genutzt von: net_erl_hall_module als CFG-Abfrage-Antwort.
  */
 typedef struct __attribute__((packed)) {
     char     node_id[SH_DEVICE_ID_LEN]; ///< Geraete-ID
@@ -478,7 +478,7 @@ static_assert(sizeof(RelayComfortConfigStateReportPayload) == 31,
 /**
  * @brief Extended-Relay-Comfort-STATE: Vollausbau mit BME680-Umweltdaten (37 Bytes).
  *
- * Genutzt von: net_erl_kitchen (BME680 ohne Gas-OHM, mit ENS160 fuer AQI/tVOC/eCO2).
+ * Genutzt von: net_erl_hall_module_led_ring (BME680 ohne Gas-OHM, mit ENS160 fuer AQI/tVOC/eCO2).
  * Erweitert RelayComfort um pressure_pa, aqi, tvoc_ppb, eco2_ppm.
  */
 typedef struct __attribute__((packed)) {
@@ -503,7 +503,7 @@ static_assert(sizeof(ExtendedRelayComfortStateReportPayload) == 37,
 /**
  * @brief Extended-Relay-Comfort-STATE + Konfigurations-Rueckmeldung (41 Bytes).
  *
- * Genutzt von: net_erl_kitchen als CFG-Abfrage-Antwort (BME680 ohne Gas-OHM).
+ * Genutzt von: net_erl_hall_module_led_ring als CFG-Abfrage-Antwort (BME680 ohne Gas-OHM).
  */
 typedef struct __attribute__((packed)) {
     char     node_id[SH_DEVICE_ID_LEN]; ///< Geraete-ID
@@ -529,7 +529,7 @@ static_assert(sizeof(ExtendedRelayComfortConfigStateReportPayload) == 41,
 /**
  * @brief Extended-Relay-Gas-STATE: Vollausbau mit BME680-Gaswiderstand (41 Bytes).
  *
- * Genutzt von: net_erl_kitchen (BME680 + ENS160 mit Gas-OHM).
+ * Genutzt von: net_erl_hall_module_led_ring (BME680 + ENS160 mit Gas-OHM).
  * Erweitert ExtendedRelayComfort um gas_ohm (BME680-Gaswiderstand in Ohm).
  */
 typedef struct __attribute__((packed)) {
@@ -555,7 +555,7 @@ static_assert(sizeof(ExtendedRelayComfortGasStateReportPayload) == 41,
 /**
  * @brief Extended-Relay-Gas-STATE + Konfigurations-Rueckmeldung (45 Bytes).
  *
- * Genutzt von: net_erl_kitchen (BME680 + ENS160 mit Gas-OHM) als CFG-Abfrage-Antwort.
+ * Genutzt von: net_erl_hall_module_led_ring (BME680 + ENS160 mit Gas-OHM) als CFG-Abfrage-Antwort.
  */
 typedef struct __attribute__((packed)) {
     char     node_id[SH_DEVICE_ID_LEN]; ///< Geraete-ID
@@ -582,7 +582,7 @@ static_assert(sizeof(ExtendedRelayComfortGasConfigStateReportPayload) == 45,
 /**
  * @brief ZRL-STATE: Cover/Rollladen-Zustand (23 Bytes).
  *
- * Genutzt von: SH_CLASS_NET_ZRL (net_zrl_shutter).
+ * Genutzt von: SH_CLASS_NET_ZRL (net_zrl_shutter_module).
  * Enthaelt Relais-Zustaende und Cover-Position/Status.
  */
 typedef struct __attribute__((packed)) {
@@ -602,7 +602,7 @@ static_assert(sizeof(ZrlStateReportPayload) == 23,
 /**
  * @brief ZRL-STATE + Konfigurations-Rueckmeldung (25 Bytes).
  *
- * Genutzt von: SH_CLASS_NET_ZRL (net_zrl_shutter) als CFG-Abfrage-Antwort.
+ * Genutzt von: SH_CLASS_NET_ZRL (net_zrl_shutter_module) als CFG-Abfrage-Antwort.
  */
 typedef struct __attribute__((packed)) {
     char     node_id[SH_DEVICE_ID_LEN]; ///< Geraete-ID

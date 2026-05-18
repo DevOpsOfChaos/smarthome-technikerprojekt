@@ -32,7 +32,7 @@
 #                       esp_net_sen_env_bme280_veml.yaml
 #                       esp_net_zrl_cover_example.yaml
 #                       bat_sen_window_contact_example.yaml
-#                       bat_sen_rain_example.yaml
+#                       bat_sen_rain_sensor_example.yaml
 #   Importiert selbst:   (keine – reines Basis-Package)
 # =============================================================================
 

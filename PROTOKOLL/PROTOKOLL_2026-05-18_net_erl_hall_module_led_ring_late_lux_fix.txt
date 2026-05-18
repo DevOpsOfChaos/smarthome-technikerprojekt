@@ -1,0 +1,86 @@
+# Protokoll 2026-05-18 - NET-ERL Hall Module LED Ring Late-Lux-Fix
+
+## Ziel
+
+Der bekannte Late-Lux-Fehler aus dem Hall-Modul-Pfad sollte im LED-Ring-Modul geprueft und bereinigt werden.
+
+Betroffener Pfad:
+
+- `firmware/src/devices/net_erl_hall_module_led_ring/main.cpp`
+
+Vergleichspfad:
+
+- `firmware/src/devices/net_erl_hall_module/main.cpp`
+
+## Ausgangsbefund
+
+Im LED-Ring-Modul war noch die alte Blockadelogik vorhanden:
+
+- Bewegung aktiv
+- Late-Lux-Entscheidung ausstehend
+- Relais aus
+- gueltiger Luxwert vorhanden
+- Luxwert unter oder gleich der Einschaltschwelle
+- Master bereits bekannt
+
+In diesem Zustand wurde nicht automatisch eingeschaltet, weil die Bedingung an `relay_auto_owned` oder einen noch unbekannten Master gekoppelt war.
+
+Das war fachlich falsch. Ein bekannter Master darf spaetere manuelle Befehle senden und Auto-Light dadurch uebersteuern. Er darf aber nicht die urspruengliche Auto-On-Entscheidung verhindern, wenn Bewegung erkannt wurde und der Luxwert dunkel genug ist.
+
+## Aenderung
+
+Entfernt wurde:
+
+- die Bedingung, die Auto-On bei bekanntem Master blockierte
+- die zugehoerige Logmeldung `auto_on_late_lux blockiert (master uebernimmt)`
+- der irrefuehrende Kommentar zum angeblichen Race-Schutz
+
+Das LED-Ring-Modul schaltet jetzt bei Late-Lux wie das Hall-Modul:
+
+- `pending_auto_on_decision` wird nach gueltiger Lux-Entscheidung geloescht
+- bei `lux <= auto_on_lux_threshold` wird `relay_auto_owned` gesetzt
+- `blocked_by_lux` wird geloescht
+- Relais wird mit Grund `auto_on_late_lux` eingeschaltet
+- ein Auto-Relay-Event wird gesendet
+- ein State-Report wird angefordert
+
+Master-/Server-Befehle bleiben weiterhin wirksam. Sie setzen in der gemeinsamen NET-ERL-Runtime `relay_auto_owned`, `pending_auto_on_decision` und `blocked_by_lux` zurueck und schalten das Relais danach manuell.
+
+## Plausibilitaetspruefung
+
+Geprueft wurde gegen:
+
+- `motionOn(...)`: setzt bei Bewegung und ausgeschaltetem Relais `pending_auto_on_decision`
+- `handleCmd(...)`: Master-Befehl deaktiviert Auto-Light und uebernimmt danach manuell
+- Hall-Modul-Fix: gleiche fachliche Semantik fuer Late-Lux
+
+Die alte Blockadelogik ist im LED-Ring-Modul und im Hall-Modul nicht mehr vorhanden.
+
+## Build-Nachweis
+
+Ausgefuehrte Build-Ziele:
+
+- `net_erl_hall_module_led_ring`
+- `net_erl_hall_module`
+
+Ergebnis:
+
+- beide Builds erfolgreich
+- LED-Ring-Modul RAM ca. 11.9 %
+- LED-Ring-Modul Flash ca. 82.6 %
+- Hall-Modul RAM ca. 11.9 %
+- Hall-Modul Flash ca. 81.8 %
+
+## Bewertung
+
+Bestanden als Code- und Build-Nachweis.
+
+Der Fix ist sauber, weil er nur die falsche Auto-On-Blockade entfernt und die Master-Uebersteuerung nicht antastet. Es bleibt kein nutzloser Altcode fuer diese Blockade im LED-Ring-Modul stehen.
+
+Nicht durchgefuehrt:
+
+- kein Flash auf reale LED-Ring-Modul-Hardware
+- kein serieller Runtime-Mitschnitt
+- kein MQTT-/Server-End-to-End-Test
+
+Diese Punkte waeren ein separater Realtest, nicht Teil dieses Code-Fix-Nachweises.

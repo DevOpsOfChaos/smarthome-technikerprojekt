@@ -2,7 +2,7 @@
 // DeviceConfig.h – Geraetekonfiguration fuer BAT-SEN Rain (Regensensor)
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/bat_sen_rain/DeviceConfig.h
+// Pfad:       firmware/src/devices/bat_sen_rain_sensor/DeviceConfig.h
 //
 // === EINSATZZWECK ===
 // [HIER EINTRAGEN]
@@ -11,7 +11,7 @@
 // Geraete-Identitaet:
 //   ID:       bat_sen_02
 //   Name:     BAT-SEN Rain
-//   Variante: bat_sen_rain
+//   Variante: bat_sen_rain_sensor
 //   Caps:     BATTERY | RAIN
 //
 // Batterieprofil: 2x AA (2.0V-3.2V)
@@ -39,7 +39,7 @@
 
 #define BAT_SEN_DEVICE_ID "bat_sen_02"
 #define BAT_SEN_DEVICE_NAME "BAT-SEN Rain"
-#define BAT_SEN_FW_VARIANT "bat_sen_rain"
+#define BAT_SEN_FW_VARIANT "bat_sen_rain_sensor"
 #define BAT_SEN_DEVICE_CAPS (SH_CAP_BATTERY | SH_CAP_RAIN)
 
 #define BAT_SEN_REPORTING_MODE SH_REPORTING_SLEEP_EVENT

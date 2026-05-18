@@ -1,10 +1,10 @@
 # =============================================================================
-# bat_sen_rain_example.yaml
+# bat_sen_rain_sensor_example.yaml
 # =============================================================================
 # Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
 # Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
 # Lizenz:     Proprietär – nur für Projektzwecke
-# Pfad:       esphome/devices/bat_sen_rain_example.yaml
+# Pfad:       esphome/devices/bat_sen_rain_sensor_example.yaml
 #
 # Datei-Funktion:
 #   Beispiel: Batteriebetriebener Regensensor (ESP32-C3).
@@ -37,7 +37,7 @@
 # sensor_mask="RXXXXXXXXX" → R=Regen (Position 1)
 # Schwellwerte mit Hysterese (2050-2200) verhindern Flattern bei Nässe-Grenze
 substitutions:
-  device_id: bat_sen_rain_01
+  device_id: bat_sen_rain_sensor_01
   device_name: BAT-SEN Rain
   device_class: bat_sen
   power_type: battery

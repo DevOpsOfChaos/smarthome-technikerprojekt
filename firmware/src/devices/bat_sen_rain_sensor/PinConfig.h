@@ -2,7 +2,7 @@
 // PinConfig.h – GPIO-Pin-Mapping fuer BAT-SEN Rain (Regensensor)
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/bat_sen_rain/PinConfig.h
+// Pfad:       firmware/src/devices/bat_sen_rain_sensor/PinConfig.h
 // Hardware:   ESP32-C3
 //
 // === EINSATZZWECK ===

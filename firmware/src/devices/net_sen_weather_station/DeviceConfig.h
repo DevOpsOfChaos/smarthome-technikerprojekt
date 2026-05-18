@@ -2,7 +2,7 @@
 // DeviceConfig.h – Geraetekonfiguration NET-SEN Env BME280+VEML+Rain
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_sen_env_bme280_veml_rain/DeviceConfig.h
+// Pfad:       firmware/src/devices/net_sen_weather_station/DeviceConfig.h
 //
 // === EINSATZZWECK ===
 // Netzbetriebene Regenstation fuer Aussenumgebung:
@@ -12,7 +12,7 @@
 // Geraete-Identitaet:
 //   ID:       NET-SEN-002
 //   Name:     NET-SEN Env BME280+VEML+Rain
-//   Variante: net_sen_env_bme280_veml_rain
+//   Variante: net_sen_weather_station
 //   Caps:     TEMP | HUM | LUX | PRESSURE | RAIN
 //
 // Sensoren:
@@ -33,7 +33,7 @@
 
 #define NET_SEN_DEVICE_ID "NET-SEN-002"
 #define NET_SEN_DEVICE_NAME "NET-SEN Env BME280+VEML+Rain"
-#define NET_SEN_FW_VARIANT "net_sen_env_bme280_veml_rain"
+#define NET_SEN_FW_VARIANT "net_sen_weather_station"
 #define NET_SEN_DEVICE_CAPS (SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_PRESSURE | SH_CAP_RAIN)
 #define NET_SEN_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
 

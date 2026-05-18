@@ -29,7 +29,7 @@
 //   #define NET_ERL_HAS_INDICATOR_UPDATE → void netErlDeviceUpdateIndicators(bool relayOn)
 //
 // KONFIGURATION (in DeviceConfig.h vor dem Include setzbar):
-//   NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION  (1=Kitchen-Stil, 0=Hall-Stil)
+//   NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION  (1=LED-Ring-Modul-Stil, 0=Hall-Modul-Stil)
 //   NET_ERL_USE_ISR_CMD_QUEUE           (0=direkt, 1=ISR-safe Queue)
 //   NET_ERL_WDT_TIMEOUT_S               (Watchdog-Timeout, Default 15)
 //   NET_ERL_SENSOR_MASK                 (Hello-Sensor-Maske, z.B. "THLPGAMXXX")
@@ -57,7 +57,7 @@
 // KONFIGURIERBARE DEFAULTS (per DeviceConfig.h überschreibbar)
 // =============================================================================
 #ifndef NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
-#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 1   // 1=verlängert Nachlauf bei erneuter Bewegung (Kitchen), 0=nicht (Hall)
+#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 1   // 1=verlaengert Nachlauf bei erneuter Bewegung, 0=nicht
 #endif
 #ifndef NET_ERL_USE_ISR_CMD_QUEUE
 #define NET_ERL_USE_ISR_CMD_QUEUE 0             // 0=direkte Verarbeitung, 1=ISR-safe Queue (Hall)
@@ -1070,8 +1070,8 @@ void motionOn(unsigned long nowMs) {
 // PARAM nowMs: Aktuelle Zeit in Millisekunden (millis()).
 //
 // KONFIG: NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
-//         1 = "Kitchen-Stil": Jede neue Bewegung setzt Nachlauf zurueck
-//         0 = "Hall-Stil":    Nur die ERSTE Bewegung startet Nachlauf
+//         1 = "LED-Ring-Modul-Stil": Jede neue Bewegung setzt Nachlauf zurueck
+//         0 = "Hall-Modul-Stil":     Nur die ERSTE Bewegung startet Nachlauf
 // =============================================================================
 void pollPresence(unsigned long nowMs) {
     // Sensor nur im konfigurierten Intervall abfragen
@@ -1090,7 +1090,7 @@ void pollPresence(unsigned long nowMs) {
         } else {
             // Bewegung dauert noch an
 #if NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
-            // Kitchen-Stil: Nachlauf-Timer bei jeder Bewegung verlaengern
+            // LED-Ring-Modul-Stil: Nachlauf-Timer bei jeder Bewegung verlaengern
             runtime.letzte_motion_ms = nowMs;
 #endif
         }

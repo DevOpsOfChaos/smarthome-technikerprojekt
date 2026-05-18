@@ -2,7 +2,7 @@
 // PinConfig.h – GPIO-Pin-Mapping fuer NET-SEN Env BME280+VEML+Rain
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_sen_env_bme280_veml_rain/PinConfig.h
+// Pfad:       firmware/src/devices/net_sen_weather_station/PinConfig.h
 // Hardware:   ESP32-C3
 //
 // === EINSATZZWECK ===

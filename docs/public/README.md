@@ -34,9 +34,9 @@ Der öffentliche Stand besteht inzwischen nicht mehr nur aus Architektur und Ser
 Belastbar sichtbar sind:
 - Serverkern mit MQTT-Ingest, Geräteobjekt, Snapshot-Persistenz und Dashboard-Linie
 - `net_zrl` als real belastbarer Server-/Gerätepfad im öffentlichen Kern
-- `net_erl_hall_light` als real belegter konkreter Gerätepfad
-- real bestätigter Setup-Pfad für Hall-Light
-- `net_sen_env_bme280_veml_rain` als real belegter konkreter Außensensorpfad
+- `net_erl_hall_module` als real belegter konkreter Gerätepfad
+- real bestätigter Setup-Pfad für Hall-Modul
+- `net_sen_weather_station` als real belegter konkreter Außensensorpfad
 - real bestätigter Setup-Pfad für `net_sen`
 - offizielle Entwicklungs- und Verifikationsnachweise unter `PROTOKOLL/`
 

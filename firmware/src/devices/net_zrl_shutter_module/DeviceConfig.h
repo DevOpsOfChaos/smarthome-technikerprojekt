@@ -2,7 +2,7 @@
 // DeviceConfig.h – NET-ZRL Shutter: Geraetespezifische Konfiguration
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_zrl_shutter/DeviceConfig.h
+// Pfad:       firmware/src/devices/net_zrl_shutter_module/DeviceConfig.h
 // Hardware:   ESP32-C3 + 2-Relais-Rollo (Auf/Ab)
 //
 // Ueberschreibt die Defaults aus dem net_zrl-Basistyp.
@@ -14,7 +14,7 @@
 // -- Geraete-Identifikation --
 #define NET_ZRL_DEVICE_ID           "NET-ZRL-002"
 #define NET_ZRL_DEVICE_NAME         "NET-ZRL Shutter"
-#define NET_ZRL_FW_VARIANT          "net_zrl_shutter"
+#define NET_ZRL_FW_VARIANT          "net_zrl_shutter_module"
 
 // -- Debug --
 #define NET_ZRL_DEBUG_ENABLED       1

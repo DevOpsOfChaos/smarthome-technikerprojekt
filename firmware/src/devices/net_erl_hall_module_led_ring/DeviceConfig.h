@@ -1,8 +1,8 @@
 // =============================================================================
-// DeviceConfig.h – Geraetekonfiguration NET-ERL Kitchen
+// DeviceConfig.h – Geraetekonfiguration NET-ERL Hall Module LED Ring
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_kitchen/DeviceConfig.h
+// Pfad:       firmware/src/devices/net_erl_hall_module_led_ring/DeviceConfig.h
 //
 // === EINSATZZWECK ===
 // [HIER EINTRAGEN]
@@ -10,8 +10,8 @@
 //
 // Geraete-Identitaet:
 //   ID:       NET-ERL-002
-//   Name:     NET-ERL Kitchen
-//   Variante: net_erl_kitchen
+//   Name:     NET-ERL Hall Module LED Ring
+//   Variante: net_erl_hall_module_led_ring
 //   Caps:     RELAY | TEMP | HUM | LUX | MOTION | AQI | PRESSURE | BUTTON | LED_RING
 //
 // Sensoren/Aktoren:
@@ -23,7 +23,7 @@
 //   Button:     GPIO6 (active-LOW, 40ms Debounce)
 //   Relais:     GPIO10 (active-HIGH)
 //
-// Auto-Licht: wie Hall-Light (PIR durch LD2410 ersetzt)
+// Auto-Licht: wie Hall-Modul (PIR durch LD2410 ersetzt)
 // STATE: ExtendedRelayComfortGasConfigStateReportPayload (volle Sensorik + AQI)
 //
 // Autor:           DevOpsOfChaos
@@ -36,12 +36,12 @@
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
 #define NET_ERL_DEVICE_ID "NET-ERL-002"
-#define NET_ERL_DEVICE_NAME "NET-ERL Kitchen"
-#define NET_ERL_FW_VARIANT "net_erl_kitchen"
+#define NET_ERL_DEVICE_NAME "NET-ERL Hall Module LED Ring"
+#define NET_ERL_FW_VARIANT "net_erl_hall_module_led_ring"
 #define NET_ERL_DEVICE_CAPS (SH_CAP_RELAY | SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_MOTION | SH_CAP_AQI | SH_CAP_PRESSURE | SH_CAP_BUTTON | SH_CAP_LED_RING)
 
 #define NET_ERL_DEVICE_CONTROL_MODE SH_CONTROL_MODE_RELAY_LIGHT
-#define NET_ERL_DEVICE_CONFIG_PROFILE SH_PROFILE_KITCHEN_LIGHT
+#define NET_ERL_DEVICE_CONFIG_PROFILE SH_PROFILE_HALL_MODULE_LED_RING
 #define NET_ERL_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
 
 #define NET_ERL_DEBUG_ENABLED 1

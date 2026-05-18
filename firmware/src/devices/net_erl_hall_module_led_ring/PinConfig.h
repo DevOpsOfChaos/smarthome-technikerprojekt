@@ -1,12 +1,12 @@
 // =============================================================================
-// PinConfig.h – GPIO-Pin-Mapping fuer NET-ERL Kitchen
+// PinConfig.h – GPIO-Pin-Mapping fuer NET-ERL Hall Module LED Ring
 // =============================================================================
 // Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_kitchen/PinConfig.h
+// Pfad:       firmware/src/devices/net_erl_hall_module_led_ring/PinConfig.h
 // Hardware:   ESP32-C3
 //
 // === EINSATZZWECK ===
-// [HIER EINTRAGEN: Kuechenlicht mit Radar-Praesenz und Luftqualitaet]
+// Pin-Mapping fuer Hall-Modul mit Radar-Praesenz, Luftqualitaet und LED-Ring.
 // === EINSATZZWECK ===
 //
 // Pin-Belegung:
