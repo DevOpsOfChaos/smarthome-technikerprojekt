@@ -257,6 +257,48 @@ void copyText(char* target, size_t targetSize, const char* source) {
     target[targetSize - 1U] = '\0';
 }
 
+// Aufgabe: Escaped Text fuer sichere Einbettung in JSON-Stringwerte.
+// Eingabewerte:
+// - target zeigt auf den Zielpuffer.
+// - targetSize ist die Zielpuffergroesse.
+// - source ist der rohe Text oder nullptr.
+// Ausgabewert: keiner; target enthaelt danach einen JSON-sicheren Stringinhalt.
+void jsonEscapeText(char* target, size_t targetSize, const char* source) {
+    if (!target || targetSize == 0U) return;
+    target[0] = '\0';
+    if (!source) return;
+
+    size_t out = 0U;
+    for (const char* in = source; *in != '\0' && out + 1U < targetSize; ++in) {
+        const char c = *in;
+        const char* replacement = nullptr;
+        switch (c) {
+            case '"': replacement = "\\\""; break;
+            case '\\': replacement = "\\\\"; break;
+            case '\b': replacement = "\\b"; break;
+            case '\f': replacement = "\\f"; break;
+            case '\n': replacement = "\\n"; break;
+            case '\r': replacement = "\\r"; break;
+            case '\t': replacement = "\\t"; break;
+            default: break;
+        }
+
+        if (replacement != nullptr) {
+            for (const char* r = replacement; *r != '\0' && out + 1U < targetSize; ++r) {
+                target[out++] = *r;
+            }
+            continue;
+        }
+
+        if ((unsigned char)c < 0x20U) {
+            if (out + 1U < targetSize) target[out++] = ' ';
+            continue;
+        }
+        target[out++] = c;
+    }
+    target[out] = '\0';
+}
+
 // Aufgabe: Wandelt eine MAC-Adresse in lesbaren Text um.
 // Eingabewerte:
 // - mac zeigt auf 6 MAC-Bytes oder ist nullptr.
@@ -1050,20 +1092,32 @@ void publishNodeEvent(size_t nodeIndex, const SmartHome::EventReportPayload& pay
 // Ausgabewert: keiner; das ACK wird transient per MQTT veroeffentlicht.
 void publishNodeAckById(const char* deviceId, const char* requestId, const char* channel, const char* statusText, int statusCode, uint8_t ackMsgType, uint8_t ackSeq, const char* source) {
     char topic[96] = {0};
-    char payload[384] = {0};
+    char payload[640] = {0};
+    char escapedDeviceId[(SH_DEVICE_ID_LEN * 2U) + 1U] = {0};
+    char escapedRequestId[(REQUEST_ID_LEN * 2U) + 1U] = {0};
+    char escapedChannel[48] = {0};
+    char escapedStatus[48] = {0};
+    char escapedSource[64] = {0};
+
     baueNodeTopicAusId(deviceId, "ack", topic, sizeof(topic));
+    jsonEscapeText(escapedDeviceId, sizeof(escapedDeviceId), deviceId ? deviceId : "unknown");
+    jsonEscapeText(escapedRequestId, sizeof(escapedRequestId), requestId ? requestId : "");
+    jsonEscapeText(escapedChannel, sizeof(escapedChannel), channel ? channel : "command");
+    jsonEscapeText(escapedStatus, sizeof(escapedStatus), statusText ? statusText : "unknown");
+    jsonEscapeText(escapedSource, sizeof(escapedSource), source ? source : "master");
+
     snprintf(
         payload,
         sizeof(payload),
         "{\"device_id\":\"%s\",\"request_id\":\"%s\",\"channel\":\"%s\",\"status\":\"%s\",\"status_code\":%d,\"ack_msg_type\":%u,\"ack_seq\":%u,\"source\":\"%s\"}",
-        deviceId ? deviceId : "unknown",
-        requestId ? requestId : "",
-        channel ? channel : "command",
-        statusText ? statusText : "unknown",
+        escapedDeviceId,
+        escapedRequestId,
+        escapedChannel,
+        escapedStatus,
         statusCode,
         (unsigned)ackMsgType,
         (unsigned)ackSeq,
-        source ? source : "master");
+        escapedSource);
     publishTransient(topic, payload);
 }
 
@@ -1250,14 +1304,10 @@ void verarbeiteHeartbeat(const uint8_t* senderMac, const SmartHome::HeartbeatPay
 // Ausgabewert: keiner; nodeStates[], Availability und State-MQTT werden aktualisiert.
 //
 // Payload-Erkennung:
-// 1. StateReportPayload: Basis-State mit relay_1 und fault.
-// 2. RelayComfortStateReportPayload: NET-ERL Comfort mit Relais und Sensorwerten.
-// 3. RelayComfortConfigStateReportPayload: NET-ERL Comfort plus Konfigwerte.
-// 4. ExtendedRelayComfortGasStateReportPayload: NET-ERL Extended mit BME680/ENS160-Werten.
-// 5. ExtendedRelayComfortGasConfigStateReportPayload: NET-ERL Extended plus Konfigwerte.
-// 6. BatteryStateReportPayload: BAT-SEN mit Batterie- und Kanalwerten.
-// 7. ZrlStateReportPayload: NET-ZRL Cover-State.
-// 8. ZrlConfigStateReportPayload: NET-ZRL Cover-State plus Konfigwerte.
+// 1. NET-ERL: Basis-, Comfort-, Extended- und Gas-Varianten mit/ohne Konfigwerte.
+// 2. NET-ZRL: Cover-State mit/ohne Konfigwerte.
+// 3. NET-SEN: Sensor-, Extended- und Gas-Varianten mit/ohne Konfigwerte.
+// 4. BAT-SEN: Batterie-State mit/ohne Konfigwerte.
 void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uint16_t payloadLen) {
     if (!payload || payloadLen < SH_DEVICE_ID_LEN) {
         logf("WARN", "STATE_REPORT verworfen: payload ungueltig");
@@ -1281,6 +1331,12 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
                 break;
             }
+            if (payloadLen == sizeof(SmartHome::StateConfigReportPayload)) {
+                const SmartHome::StateConfigReportPayload& state = *reinterpret_cast<const SmartHome::StateConfigReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
             if (payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload) ||
                 payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)) {
                 const SmartHome::RelayComfortStateReportPayload& state = *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
@@ -1288,6 +1344,47 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
                 nodeStates[nodeIndex].temp_01c = state.temp_01c;
                 nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
                 nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
+                nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+                nodeStates[nodeIndex].aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
+                nodeStates[nodeIndex].tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
+                nodeStates[nodeIndex].eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
+            // Hinweis: ExtendedRelayComfortConfig und ExtendedRelayComfortGasState sind beide 41 Bytes.
+            // LED-Ring-Nodes werden deshalb bei dieser Laenge als Gas-State interpretiert.
+            if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortStateReportPayload) ||
+                (payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload) &&
+                 !nodeHasCap((size_t)nodeIndex, SH_CAP_LED_RING))) {
+                const SmartHome::ExtendedRelayComfortStateReportPayload& state =
+                    *reinterpret_cast<const SmartHome::ExtendedRelayComfortStateReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+                nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+                nodeStates[nodeIndex].aqi = state.aqi;
+                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+                nodeStates[nodeIndex].motion = (state.motion != 0U);
+                nodeStates[nodeIndex].fault = (state.fault != 0U);
+                break;
+            }
+            if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasStateReportPayload)) {
+                const SmartHome::ExtendedRelayComfortGasStateReportPayload& state =
+                    *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasStateReportPayload*>(payload);
+                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+                nodeStates[nodeIndex].temp_01c = state.temp_01c;
+                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+                nodeStates[nodeIndex].lux = state.lux;
+                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
+                nodeStates[nodeIndex].aqi = state.aqi;
+                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
                 nodeStates[nodeIndex].motion = (state.motion != 0U);
                 nodeStates[nodeIndex].fault = (state.fault != 0U);
                 break;
@@ -1537,7 +1634,7 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* daten, int l
             }
             break;
         case SH_MSG_STATE:
-            // STATE: Node-Zustand aktualisieren (5 verschiedene Payload-Formate)
+            // STATE: Node-Zustand aktualisieren; konkrete Payload-Variante erkennt verarbeiteStateReport().
             verarbeiteStateReport(senderMac, payload, header->payload_len);
             break;
         case SH_MSG_EVENT:
@@ -1737,47 +1834,139 @@ bool skipWhitespace(const char*& cursor) {
     return *cursor != '\0';
 }
 
+// Aufgabe: Prueft, ob ein JSON-Wert nach einem Literal sauber beendet ist.
+// Eingabewert: cursor zeigt auf das Zeichen nach true, false oder einer Zahl.
+// Ausgabewert: true bedeutet Ende, Whitespace, Komma oder Objekt-/Array-Ende.
+bool jsonValueTerminated(const char* cursor) {
+    if (cursor == nullptr) return false;
+    const char* c = cursor;
+    while (*c != '\0' && isspace((unsigned char)*c)) c++;
+    return *c == '\0' || *c == ',' || *c == '}' || *c == ']';
+}
+
+// Aufgabe: Findet den Wert eines Top-Level-Keys in einem JSON-Objekt.
+// Eingabewerte:
+// - json ist ein JSON-Objekt als Text.
+// - key ist der gesuchte Key ohne Anfuehrungszeichen.
+// Ausgabewert: Zeiger auf den Wertanfang oder nullptr, wenn der Key nicht existiert.
+//
+// Der Scanner ignoriert Strings und verschachtelte Objekte. Dadurch matcht ein
+// command-Key in values oder in einem String nicht versehentlich den Hauptbefehl.
+const char* jsonFindTopLevelValue(const char* json, const char* key) {
+    if (!json || !key || key[0] == '\0') return nullptr;
+    const size_t keyLen = strlen(key);
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+
+    for (const char* cursor = json; *cursor != '\0'; ++cursor) {
+        const char c = *cursor;
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') inString = false;
+            continue;
+        }
+
+        if (c == '"') {
+            const char* keyStart = cursor + 1;
+            const char* keyEnd = keyStart;
+            bool keyEscaped = false;
+            while (*keyEnd != '\0') {
+                if (keyEscaped) {
+                    keyEscaped = false;
+                } else if (*keyEnd == '\\') {
+                    keyEscaped = true;
+                } else if (*keyEnd == '"') {
+                    break;
+                }
+                keyEnd++;
+            }
+            if (*keyEnd == '\0') return nullptr;
+
+            if (depth == 1 && (size_t)(keyEnd - keyStart) == keyLen && strncmp(keyStart, key, keyLen) == 0) {
+                const char* afterKey = keyEnd + 1;
+                if (!skipWhitespace(afterKey) || *afterKey != ':') {
+                    cursor = keyEnd;
+                    continue;
+                }
+                afterKey++;
+                if (!skipWhitespace(afterKey)) return nullptr;
+                return afterKey;
+            }
+
+            cursor = keyEnd;
+            continue;
+        }
+
+        if (c == '{' || c == '[') depth++;
+        else if ((c == '}' || c == ']') && depth > 0) depth--;
+    }
+
+    return nullptr;
+}
+
+// Aufgabe: Liest einen JSON-String ab dem Wertanfang und dekodiert einfache Escapes.
+// Eingabewerte: cursor zeigt auf das oeffnende Anfuehrungszeichen, ziel ist der Ausgabepuffer.
+// Ausgabewert: true bedeutet, der String wurde vollstaendig gelesen.
+bool jsonReadStringValue(const char* cursor, char* ziel, size_t zielGroesse) {
+    if (!cursor || !ziel || zielGroesse == 0U || *cursor != '"') return false;
+    cursor++;
+    size_t out = 0U;
+    bool escaped = false;
+
+    while (*cursor != '\0') {
+        char c = *cursor++;
+        if (escaped) {
+            switch (c) {
+                case '"': c = '"'; break;
+                case '\\': c = '\\'; break;
+                case '/': c = '/'; break;
+                case 'b': c = '\b'; break;
+                case 'f': c = '\f'; break;
+                case 'n': c = '\n'; break;
+                case 'r': c = '\r'; break;
+                case 't': c = '\t'; break;
+                default: break;
+            }
+            escaped = false;
+        } else if (c == '\\') {
+            escaped = true;
+            continue;
+        } else if (c == '"') {
+            ziel[out] = '\0';
+            return jsonValueTerminated(cursor);
+        }
+
+        if (out + 1U < zielGroesse) {
+            ziel[out++] = c;
+        }
+    }
+
+    ziel[out] = '\0';
+    return false;
+}
+
 // Aufgabe: Liest einen String-Wert aus einem einfachen JSON-Text.
 // Eingabewerte: json, key, Zielpuffer und Zielpuffergroesse.
 // Ausgabewert: true bedeutet, der String wurde gefunden und kopiert.
 bool jsonHoleString(const char* json, const char* key, char* ziel, size_t zielGroesse) {
-    if (!json || !key || !ziel || zielGroesse == 0U) return false;
-    char muster[48] = {0};
-    snprintf(muster, sizeof(muster), "\"%s\"", key);
-    const char* fund = strstr(json, muster);
-    if (!fund) return false;
-    const char* cursor = strchr(fund + strlen(muster), ':');
-    if (!cursor) return false;
-    cursor++;
-    if (!skipWhitespace(cursor) || *cursor != '"') return false;
-    cursor++;
-    const char* ende = strchr(cursor, '"');
-    if (!ende) return false;
-    size_t len = (size_t)(ende - cursor);
-    if (len >= zielGroesse) len = zielGroesse - 1U;
-    memcpy(ziel, cursor, len);
-    ziel[len] = '\0';
-    return true;
+    const char* cursor = jsonFindTopLevelValue(json, key);
+    return jsonReadStringValue(cursor, ziel, zielGroesse);
 }
 
 // Aufgabe: Liest einen Boolean-Wert aus einem einfachen JSON-Text.
 // Eingabewerte: json, key und Ausgabepointer.
 // Ausgabewert: true bedeutet, true oder false wurde gefunden und geschrieben.
 bool jsonHoleBool(const char* json, const char* key, bool* wert) {
-    if (!json || !key || !wert) return false;
-    char muster[48] = {0};
-    snprintf(muster, sizeof(muster), "\"%s\"", key);
-    const char* fund = strstr(json, muster);
-    if (!fund) return false;
-    const char* cursor = strchr(fund + strlen(muster), ':');
+    if (!wert) return false;
+    const char* cursor = jsonFindTopLevelValue(json, key);
     if (!cursor) return false;
-    cursor++;
-    if (!skipWhitespace(cursor)) return false;
-    if (strncmp(cursor, "true", 4) == 0) {
+    if (strncmp(cursor, "true", 4) == 0 && jsonValueTerminated(cursor + 4)) {
         *wert = true;
         return true;
     }
-    if (strncmp(cursor, "false", 5) == 0) {
+    if (strncmp(cursor, "false", 5) == 0 && jsonValueTerminated(cursor + 5)) {
         *wert = false;
         return true;
     }
@@ -1788,19 +1977,14 @@ bool jsonHoleBool(const char* json, const char* key, bool* wert) {
 // Eingabewerte: json, key und Ausgabepointer.
 // Ausgabewert: true bedeutet, die Zahl wurde gefunden und geschrieben.
 bool jsonHoleZahl(const char* json, const char* key, long* wert) {
-    if (!json || !key || !wert) return false;
-    char muster[48] = {0};
-    snprintf(muster, sizeof(muster), "\"%s\"", key);
-    const char* fund = strstr(json, muster);
-    if (!fund) return false;
-    const char* cursor = strchr(fund + strlen(muster), ':');
+    if (!wert) return false;
+    const char* cursor = jsonFindTopLevelValue(json, key);
     if (!cursor) return false;
-    cursor++;
-    if (!skipWhitespace(cursor)) return false;
     char* ende = nullptr;
     const long parsed = strtol(cursor, &ende, 10);
     if (ende == cursor) return false;
     if (*ende == '.' || *ende == 'e' || *ende == 'E') return false;
+    if (!jsonValueTerminated(ende)) return false;
     *wert = parsed;
     return true;
 }
@@ -1819,18 +2003,13 @@ bool jsonHoleZahl(const char* json, const char* key, long* wert) {
 // 3. Geschweifte Klammern werden ueber eine Tiefe gezaehlt.
 // 4. Das Objekt endet, sobald die Tiefe wieder 0 erreicht.
 //
-// Grenze: Escapete Anfuehrungszeichen innerhalb von JSON-Strings werden nicht
-// vollstaendig unterstuetzt. Fuer die einfachen MQTT-Kommandos reicht das aus.
+// Grenze: Das ist weiterhin ein kleiner Command-Parser, kein vollstaendiger
+// JSON-Parser. Verschachtelte Objekte und einfache String-Escapes werden sauber
+// behandelt; Unicode-Escapes werden nicht dekodiert.
 bool jsonHoleObjekt(const char* json, const char* key, char* ziel, size_t zielGroesse) {
     if (!json || !key || !ziel || zielGroesse == 0U) return false;
-    char muster[48] = {0};
-    snprintf(muster, sizeof(muster), "\"%s\"", key);
-    const char* fund = strstr(json, muster);
-    if (!fund) return false;
-    const char* cursor = strchr(fund + strlen(muster), ':');
-    if (!cursor) return false;
-    cursor++;
-    if (!skipWhitespace(cursor) || *cursor != '{') return false;
+    const char* cursor = jsonFindTopLevelValue(json, key);
+    if (!cursor || *cursor != '{') return false;
     const char* start = cursor;
     int tiefe = 0;
     bool inString = false;
@@ -1986,19 +2165,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     const int nodeIndex = findeNodeIndex(nodeId);
 
-    // Kommando-Typ erkennen und an entsprechenden Handler weiterleiten
-    if (strcmp(cmd, "get_state") == 0) {
-        // STATE_REQUEST: Zustandsabfrage ohne ACK-Mechanismus
-        if (nodeIndex < 0) {
-            logf("WARN", "MQTT get_state fuer unbekannte device_id=%s", nodeId);
-            return;
-        }
-        sendeStateRequest((size_t)nodeIndex);
-        return;
-    }
-
     char requestId[REQUEST_ID_LEN] = {0};
-    // request_id ist PFLICHT fuer alle Kommandos mit ACK-Erwartung
+    // request_id ist Pflicht fuer MQTT-Kommandos, damit der Server eine Rueckmeldung zuordnen kann.
     if (!jsonHoleString(json, "request_id", requestId, sizeof(requestId)) || requestId[0] == '\0') {
         logf("WARN", "MQTT %s ohne request_id fuer %s verworfen", cmd, nodeId);
         return;
@@ -2010,6 +2178,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // Wenn nodeIndex < 0: Node nicht registriert, deshalb sofort ACK mit "unknown_device".
     if (nodeIndex < 0) {
         publishNodeAckById(nodeId, requestId, commandChannel, "unknown_device", STATUS_CODE_UNKNOWN_DEVICE, ackMsgType, 0U, "master_registry");
+        return;
+    }
+
+    if (strcmp(cmd, "get_state") == 0) {
+        if (!sendeStateRequest((size_t)nodeIndex)) {
+            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+            return;
+        }
+        publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "sent", 0, SH_MSG_CMD, 0U, "master_send");
         return;
     }
 
