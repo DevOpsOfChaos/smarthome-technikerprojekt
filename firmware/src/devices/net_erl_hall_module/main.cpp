@@ -1,18 +1,43 @@
-/**
- * @file main.cpp
- * @brief NET-ERL Hall Module: Flurmodul mit PIR + Lux (Thin-Wrapper)
- *
- * @details Auto-Light-Logik mit PIR-Bewegungssensor und VEML7700-Luxsensor.
- *          BME280 fuer Temperatur/Feuchte. Late-Lux: Auto-On-Entscheidung
- *          wird verzoegert bis der erste Lux-Wert vorliegt.
- *          Nachlauf wird NICHT durch erneute Bewegung verlaengert.
- *
- * Hardware:   ESP32-C3 + BME280 + VEML7700 + PIR + 1 Relais
- * Pattern:    Thin-Wrapper – Hooks in NetErlRuntime.h eingehängt
- *
- * @author DevOpsOfChaos
- * @date   2026-05-14
- */
+/*
+===============================================================================
+ Datei: main.cpp
+ Code-Name: NET-ERL Hall Module
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Device-Code / Netzbetriebener Relais-Komfortaktor
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: Flurmodul mit PIR-Bewegung, Luxmessung, Klima-Messwerten und Relais
+ Beschreibung: Dieser Device-Adapter ergaenzt den NET-ERL-Basistyp um konkrete
+ Sensoren fuer den Flur. Der PIR meldet Anwesenheit, der VEML7700 liefert Lux
+ fuer die Auto-Light-Entscheidung, der BME280 liefert Temperatur und Feuchte.
+ Die Late-Lux-Logik wartet bei Bedarf auf den ersten gueltigen Lux-Wert, bevor
+ das Relais automatisch eingeschaltet oder wegen zu hoher Helligkeit blockiert
+ wird. Der Nachlauf wird bei diesem Modul nicht durch erneute Bewegung verlaengert.
+
+ Hardware:
+ - ESP32-C3
+ - BME280 fuer Temperatur und relative Feuchte
+ - VEML7700 fuer Beleuchtungsstaerke in Lux
+ - PIR-Bewegungssensor
+ - Ein Relaisausgang
+
+ Genutzte Bibliotheken:
+ - Arduino.h: Arduino-Funktionen wie pinMode, digitalRead, digitalWrite und millis.
+ - Wire.h: I2C-Bus fuer BME280 und VEML7700.
+ - Adafruit_BME280.h: Fremdbibliothek fuer Temperatur- und Feuchtesensor BME280.
+ - Adafruit_VEML7700.h: Fremdbibliothek fuer den Luxsensor VEML7700.
+ - DeviceConfig.h: eigene Device-Konfiguration mit IDs, Intervallen und Schwellwerten.
+ - PinConfig.h: eigene Pin-Zuordnung fuer Sensoren, Relais und Status-LED.
+ - NetErlRuntime.h: eigener NET-ERL-Basistyp; liefert setup(), loop(), Funklogik,
+   Auto-Light-Grundlogik und ruft die Device-Hooks aus dieser Datei auf.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Device-Code fuer NET-ERL Hall Module angelegt.
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -22,7 +47,8 @@
 #include "DeviceConfig.h"
 #include "PinConfig.h"
 
-// -- Baukasten-Defines (vor NetErlRuntime.h) --
+// Baukasten-Defines fuer den NET-ERL-Basistyp. Diese Werte muessen vor
+// NetErlRuntime.h gesetzt sein, weil der Basistyp sie beim Einbinden auswertet.
 #define NET_ERL_STORAGE_NS              "net_erl_hl"
 #define NET_ERL_SENSOR_MASK             "THLMXXXXXX"
 #define NET_ERL_INPUT_MASK              "XXXXX"
@@ -32,16 +58,16 @@
 #define NET_ERL_DEVICE_SECTION_TITLE    "Hall Module"
 #define NET_ERL_DEVICE_SECTION_INTRO    "Lux-Schwelle und Nachlauf."
 
-// Hall-Modul-spezifische Unterschiede zum LED-Ring-Modul
-#define NET_ERL_USE_ISR_CMD_QUEUE       1   // ISR-safe CMD-Queue
-#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 0  // Nachlauf NICHT verlängern
-#define NET_ERL_WDT_TIMEOUT_S           8UL
+// Hall-Modul-spezifische Unterschiede zum LED-Ring-Modul.
+#define NET_ERL_USE_ISR_CMD_QUEUE       1   // CMD-Queue darf aus Interrupt-Kontext genutzt werden.
+#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 0  // Nachlauf wird durch neue Bewegung nicht verlaengert.
+#define NET_ERL_WDT_TIMEOUT_S           8UL // Watchdog-Zeit in Sekunden.
 
-// -- Hooks aktivieren --
+// Aktiviert die Device-Hooks in dieser Datei.
 #define NET_ERL_DEVICE_HAS_CUSTOM_HOOKS 1
 
 // =============================================================================
-// RUNTIME (Baukasten Block 3 – liefert setup() und loop())
+// RUNTIME - Basistyp liefert setup(), loop() und gemeinsame NET-ERL-Logik
 // =============================================================================
 #include "../../basetypes/net_erl/NetErlRuntime.h"
 
@@ -66,14 +92,16 @@ namespace {
     uint16_t hum_01pct = 0xFFFFU, lux = 0xFFFFU;
     bool pir_raw = false;
 
-    constexpr uint32_t SENSOR_POLL_INTERVAL_MS = 250UL;
+    constexpr uint32_t SENSOR_POLL_INTERVAL_MS = 250UL; // 250 Millisekunden.
 }
 
 // =============================================================================
 // SENSOR-HILFSFUNKTIONEN (device-spezifisch)
 // =============================================================================
 namespace {
-    /** @brief Initialisiert BME280 an konfigurierter I2C-Adresse. @return true bei Erfolg */
+    // Aufgabe: Initialisiert den BME280 an der konfigurierten I2C-Adresse.
+    // Eingabewerte: keine; NET_ERL_BME280_ADDRESS kommt aus DeviceConfig.h.
+    // Ausgabewert: true bedeutet, der Sensor wurde gefunden und ist nutzbar.
     bool initBme280() {
         const uint8_t addrs[] = {(uint8_t)NET_ERL_BME280_ADDRESS};
         for (uint8_t a : addrs) {
@@ -83,17 +111,18 @@ namespace {
         return false;
     }
 
-    /** @brief Konfiguriert VEML7700: Gain 1x, Integrationszeit 100ms. */
+    // Aufgabe: Konfiguriert den VEML7700 fuer die Luxmessung.
+    // Eingabewerte: keine.
+    // Ausgabewert: keiner; die Adafruit_VEML7700-Instanz wird intern konfiguriert.
+    // 100 ms Integrationszeit bedeuten, dass eine einzelne Messung etwa 0,1 Sekunden Licht sammelt.
     void konfVeml7700() {
         veml7700.setGain(VEML7700_GAIN_1);
         veml7700.setIntegrationTime(VEML7700_IT_100MS);
     }
 
-    /**
-     * @brief Initialisiert VEML7700 und merkt Zeitstempel der Bereitschaft.
-     * @param jetzt aktueller millis()-Wert
-     * @return true bei Erfolg
-     */
+    // Aufgabe: Initialisiert den VEML7700 und merkt den Bereit-Zeitpunkt.
+    // Eingabewert: jetzt ist der aktuelle millis()-Zeitstempel in Millisekunden.
+    // Ausgabewert: true bedeutet, der Sensor antwortet und wurde konfiguriert.
     bool initVeml7700(unsigned long jetzt) {
         if (!veml7700.begin()) return false;
         konfVeml7700();
@@ -106,10 +135,10 @@ namespace {
 // CUSTOM HOOKS (von NetErlRuntime.h aufgerufen)
 // =============================================================================
 
-/**
- * @brief Initialisiert I2C-Bus, BME280, VEML7700 und PIR-Pin.
- * Wird einmalig von NetErlRuntime beim Boot aufgerufen.
- */
+// Aufgabe: Initialisiert I2C-Bus, BME280, VEML7700 und PIR-Pin.
+// Eingabewerte: keine; Pins und Adressen kommen aus DeviceConfig.h und PinConfig.h.
+// Ausgabewert: keiner; die lokalen Sensor-OK-Flags werden gesetzt.
+// Aufrufer: NetErlRuntime ruft diesen Hook einmal beim Boot auf.
 void netErlDeviceInit() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
 
@@ -122,24 +151,25 @@ void netErlDeviceInit() {
     pinMode(PIN_PIR, INPUT);
 }
 
-/** @brief Setzt alle Sensorwerte auf UNGUELTIG (INT16_MIN / 0xFFFF). */
+// Aufgabe: Setzt alle Sensorwerte auf die ungueltigen Startwerte zurueck.
+// Eingabewerte: keine.
+// Ausgabewert: keiner; INT16_MIN und 0xFFFFU markieren ungueltige Messwerte.
 void netErlDeviceResetSensorDefaults() {
     temp_01c = INT16_MIN; hum_01pct = 0xFFFFU; lux = 0xFFFFU;
 }
 
-/**
- * @brief Liest PIR-Sensor (digitalRead) und aktualisiert pir_raw.
- * @return true wenn Bewegung erkannt (HIGH)
- */
+// Aufgabe: Liest den PIR-Bewegungssensor und speichert den Rohstatus.
+// Eingabewerte: keine; PIN_PIR kommt aus PinConfig.h.
+// Ausgabewert: true bedeutet, der PIR-Pin steht auf HIGH und Bewegung wurde erkannt.
 bool netErlDeviceReadPresence() {
     pir_raw = (digitalRead(PIN_PIR) == HIGH);
     return pir_raw;
 }
 
-/**
- * @brief Setzt Relais-Ausgang und optionale Status-LED.
- * @param on true = Relais aktiv
- */
+// Aufgabe: Schaltet den Relaisausgang und optional die Status-LED.
+// Eingabewert: on=true bedeutet Relais soll aktiv sein.
+// Ausgabewert: keiner; digitalWrite setzt die GPIO-Pegel.
+// RELAY_1_ACTIVE_HIGH legt fest, ob HIGH oder LOW den aktiven Relaiszustand bedeutet.
 void netErlDeviceSetRelayOutput(bool on) {
     digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
 #if PIN_STATUS_LED >= 0
@@ -147,29 +177,25 @@ void netErlDeviceSetRelayOutput(bool on) {
 #endif
 }
 
-/**
- * @brief Periodische Sensormessung mit Recovery, Late-Lux und Delta-Detection.
- *
- * Ablauf:
- * 1. Sample-Intervall prüfen (NET_ERL_ENV_SAMPLE_INTERVAL_MS)
- * 2. Sensor-Recovery: ausgefallene Sensoren periodisch neu initialisieren
- * 3. BME280: Temperatur + Feuchte lesen, unplausible Werte führen zu bme280_ok=false
- * 4. VEML7700: Lux lesen, unplausible Werte führen zu veml7700_ok=false
- * 5. Late-Lux: Wenn motion_aktiv && pending_auto_on_decision && Lux jetzt verfügbar:
- *    - Bei lux <= Schwelle: Relais auto-einschalten (mit Race-Schutz)
- *    - Bei lux > Schwelle: blocked_by_lux setzen
- * 6. Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Änderung
- *
- * @param nowMs aktueller millis()-Wert
- *
- * @note Master-CMDs koennen Auto-Light spaeter wieder uebersteuern. Die
- *       urspruengliche Auto-On-Entscheidung darf dadurch nicht blockiert werden.
- */
+// Aufgabe: Pollt die Sensoren, versucht Recovery und fuehrt die Late-Lux-Entscheidung aus.
+// Eingabewert: nowMs ist der aktuelle millis()-Zeitstempel in Millisekunden.
+// Ausgabewert: keiner; Messwerte, runtime.fault und runtime.state_report_offen werden aktualisiert.
+//
+// Ablauf:
+// 1. NET_ERL_ENV_SAMPLE_INTERVAL_MS begrenzt die Messrate. Der Wert ist in Millisekunden.
+// 2. Ausgefallene Sensoren werden nach SENSOR_RECOVERY_RETRY_INTERVAL_MS erneut initialisiert.
+// 3. BME280 liefert Temperatur in Grad Celsius und relative Feuchte in Prozent.
+// 4. VEML7700 liefert Lux; negative oder NaN-Werte gelten als Fehler.
+// 5. Late-Lux entscheidet ein wartendes Auto-On erst, wenn ein gueltiger Lux-Wert vorliegt.
+// 6. Delta-Detection setzt nur bei relevanten Messwertaenderungen einen STATE-Report.
+//
+// Master-Kommandos duerfen Auto-Light spaeter uebersteuern. Die urspruengliche
+// Auto-On-Entscheidung bleibt trotzdem sauber getrennt.
 void netErlDevicePollSensors(unsigned long nowMs) {
     if ((nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     letztes_env_sample_ms = nowMs;
 
-    // Recovery: ausgefallene Sensoren periodisch neu initialisieren
+    // Recovery: ausgefallene Sensoren erst nach dem Retry-Intervall neu initialisieren.
     if (!bme280_ok && recoveryIsDue(letzter_bme_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
         letzter_bme_recovery_ms = nowMs; bme280_ok = initBme280();
     }
@@ -177,7 +203,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         letzter_veml_recovery_ms = nowMs; veml7700_ok = initVeml7700(nowMs);
     }
 
-    // BME280 lesen
+    // BME280 lesen: Temperatur wird spaeter als Zehntelgrad, Feuchte als 0,1 Prozent gemeldet.
     if (bme280_ok) {
         float t = bme280.readTemperature();
         float h = bme280.readHumidity();
@@ -187,17 +213,17 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         } else { bme280_ok = false; logMsg("WARN", "BME280 unplausibel"); }
     }
 
-    // VEML7700 lesen
+    // VEML7700 lesen: Lux wird auf uint16_t begrenzt, damit der Protokoll-Payload passt.
     if (veml7700_ok) {
         float l = veml7700.readLux();
         if (!isnan(l) && l >= 0) lux = clampToU16((long)lroundf(l));
         else { veml7700_ok = false; logMsg("WARN", "VEML7700 read fail"); }
     }
 
-    // Status aktualisieren
+    // Status aktualisieren: fault=true sobald einer der beiden Sensoren nicht verfuegbar ist.
     runtime.fault = !(bme280_ok && veml7700_ok);
 
-    // Late-Lux: Auto-On-Entscheidung wenn Lux-Wert jetzt verfügbar ist
+    // Late-Lux: Auto-On-Entscheidung erst ausfuehren, wenn ein Lux-Wert verfuegbar ist.
     if (runtime.motion_aktiv && runtime.pending_auto_on_decision && !runtime.relay_1 && lux != 0xFFFFU) {
         runtime.pending_auto_on_decision = false;
         if (lux <= runtime.auto_on_lux_threshold) {
@@ -211,7 +237,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         }
     }
 
-    // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Änderung
+    // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Aenderung.
     {
         static int16_t  last_temp = INT16_MIN;
         static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU;
@@ -225,11 +251,11 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     }
 }
 
-/**
- * @brief Befüllt RelayComfortConfigStateReportPayload mit aktuellen Sensorwerten.
- * @param[out] payload Zeiger auf den Payload-Struct
- * @param[out] size    Geschriebene Größe in Bytes
- */
+// Aufgabe: Befuellt den RelayComfortConfigStateReportPayload mit aktuellen Messwerten.
+// Eingabewerte:
+// - payload zeigt auf den vom Basistyp bereitgestellten Payload-Speicher.
+// - size zeigt auf die verfuegbare Groesse und wird danach auf die benoetigte Groesse gesetzt.
+// Ausgabewert: keiner; der Payload enthaelt danach Relais, Sensorwerte, Auto-Flags und Fehlerstatus.
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     SmartHome::RelayComfortConfigStateReportPayload* p =
         static_cast<SmartHome::RelayComfortConfigStateReportPayload*>(payload);
@@ -248,19 +274,17 @@ void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     if (size != nullptr) *size = sizeof(SmartHome::RelayComfortConfigStateReportPayload);
 }
 
-/**
- * @brief Baut Auto-Light-Flags fuer STATE-Report.
- *
- * Gesetzte Flags:
- * - PRESENCE_SOURCE_AVAILABLE wenn PIR Bewegung meldet
- * - LIGHT_VALUE_AVAILABLE wenn VEML7700 ok
- * - LIGHT_GUARD_ENABLED (immer)
- * - AUTO_RELAY_OWNED wenn Auto-Light das Relais steuert
- * - BLOCKED_BY_LUX wenn zu hell fuer Auto-On
- * - 0x10 (BLOCKED_BY_MISSING_LUX) wenn Lux-Wert noch fehlt
- *
- * @return Bitmaske der Auto-Flags
- */
+// Aufgabe: Baut die Auto-Light-Flags fuer den STATE-Report.
+// Eingabewerte: keine; Status kommt aus runtime und lokalen Sensorflags.
+// Ausgabewert: Bitmaske aus SH_RELAY_COMFORT_FLAG_*-Werten.
+//
+// Gesetzte Flags:
+// - PRESENCE_SOURCE_AVAILABLE: PIR meldet Bewegung.
+// - LIGHT_VALUE_AVAILABLE: VEML7700 ist verfuegbar.
+// - LIGHT_GUARD_ENABLED: Luxschutz ist fuer dieses Device immer aktiv.
+// - AUTO_RELAY_OWNED: Auto-Light steuert aktuell das Relais.
+// - BLOCKED_BY_LUX: Auto-On wurde wegen zu hoher Helligkeit blockiert.
+// - 0x10: Hall-spezifisches Flag fuer fehlenden Lux-Wert waehrend Pending-Entscheidung.
 uint8_t netErlDeviceBuildAutoFlags() {
     uint8_t f = 0;
     if (runtime.motion_aktiv) f |= SH_RELAY_COMFORT_FLAG_PRESENCE_SOURCE_AVAILABLE;
@@ -268,17 +292,21 @@ uint8_t netErlDeviceBuildAutoFlags() {
     f |= SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED;
     if (runtime.relay_auto_owned) f |= SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED;
     if (runtime.blocked_by_lux) f |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_LUX;
-    // Hall-spezifisch: BLOCKED_BY_MISSING_LUX Flag
+    // Hall-spezifisch: BLOCKED_BY_MISSING_LUX-Flag.
     if (runtime.pending_auto_on_decision && lux == 0xFFFFU) f |= 0x10;
     return f;
 }
 
-/** @brief true wenn BME280 oder VEML7700 ausgefallen. @return Fehlerstatus */
+// Aufgabe: Meldet dem Basistyp, ob ein Sensorfehler vorliegt.
+// Eingabewerte: keine; lokale OK-Flags werden ausgewertet.
+// Ausgabewert: true bedeutet, BME280 oder VEML7700 ist nicht verfuegbar.
 bool netErlDeviceHasSensorFault() {
     return !(bme280_ok && veml7700_ok);
 }
 
-/** @brief Loggt alle aktuellen Sensorwerte + Relais-Status (Snapshot). */
+// Aufgabe: Schreibt einen kompakten Snapshot der aktuellen Sensor- und Relaiswerte ins Log.
+// Eingabewerte: keine.
+// Ausgabewert: keiner; logMsg stammt aus dem NET-ERL-Basistyp.
 void netErlDeviceLogSnapshot() {
     logMsg("INFO", "snap t=%d h=%u l=%u m=%s r=%s auto=%s bl=%s fa=%s",
         (int)temp_01c, hum_01pct, lux,
