@@ -1,21 +1,22 @@
-/**
- * @file Secrets.example.h
- * @brief Vorlage fuer Zugangsdaten (WLAN, MQTT)
- *
- * @details Echte Zugangsdaten duerfen NIEMALS committet werden!
- *          Diese Datei ist in .gitignore eingetragen.
- *
- * Verwendung:
- *   1. Diese Datei nach "Secrets.h" kopieren
- *   2. Werte mit echten Zugangsdaten fuellen
- *   3. Secrets.h wird beim Build automatisch eingebunden
- *
- * @note Fuer OTA-Updates und erweiterte MQTT-Authentifizierung
- *       koennen zusaetzliche Defines ergaenzt werden (MQTT_USER, MQTT_PASSWORD, OTA_PASSWORD).
- *
- * @author DevOpsOfChaos
- */
+/*
+===============================================================================
+ Datei: Secrets.example.h
+ Code-Name: Secrets.example
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / gemeinsame Bibliothek
+ Ersteller: DevOpsOfChaos
+ Letzte Bearbeitung: 2026-05-18
 
+ Zweck: Vorlage fuer lokale Zugangsdaten
+ Beschreibung: Zeigt, welche Zugangsdaten lokal benoetigt werden. Echte Zugangsdaten duerfen nicht ins Repository.
+
+ Genutzte Bibliotheken:
+ - Keine importierte Bibliothek. Diese Datei ist nur eine Vorlage fuer lokale Zugangsdaten.
+
+ Aenderungsverlauf:
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
 #pragma once
 
 #define WIFI_SSID         "DEIN_WLAN_NAME"

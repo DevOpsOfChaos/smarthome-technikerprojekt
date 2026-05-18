@@ -1,23 +1,22 @@
-// =============================================================================
-// TimingUtils.h – Gemeinsame Zeitgeber und Entprell-Logik
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/include/TimingUtils.h
-// Teil des:   Baukastensystems Block 2 – Gemeinsame Services
-//
-// Verwendung: #include "TimingUtils.h" in jedem Device-main.cpp
-//             Alle Funktionen inline, Klassen als Header-only.
-//
-// Enthält:
-//   - elapsedSince: millis()-wrap-sichere Zeitdifferenz
-//   - intervalElapsed: Periodische-Ausführung-Prüfung
-//   - Debouncer: Entprellung digitaler Eingänge (Taster, Kontakte, PIR)
-//   - LongPressDetector: Langdruck-Erkennung (Setup-Taster, Reset)
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-15
-// =============================================================================
+/*
+===============================================================================
+ Datei: TimingUtils.h
+ Code-Name: TimingUtils
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / gemeinsame Bibliothek
+ Ersteller: DevOpsOfChaos
+ Letzte Bearbeitung: 2026-05-18
 
+ Zweck: Zeit- und Taster-Hilfsfunktionen
+ Beschreibung: Kapselt Zeitabstaende, Entprellung und Langdruck-Erkennung.
+
+ Genutzte Bibliotheken:
+ - stdint.h: feste Ganzzahltypen fuer Zeit- und Statuswerte.
+
+ Aenderungsverlauf:
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
 #pragma once
 #include <stdint.h>
 
@@ -27,19 +26,19 @@ namespace SmartHome {
 // MILLIS()-DIFFERENZ
 // =============================================================================
 
-// elapsedSince – Berechnet millis()-wrap-sichere Zeitdifferenz.
+// elapsedSince - Berechnet millis()-wrap-sichere Zeitdifferenz.
 //   Der ESP32-millis()-Zähler läuft nach ~49 Tagen über (unsigned long wrap).
 //   Dank unsigned-Arithmetik gilt: (nowMs - timestamp) liefert auch bei Wrap
 //   das korrekte Delta. Kein Sonderfall-Handling nötig!
 //
 //   Beispiel: timestamp = 4294967290 (kurz vor Wrap), nowMs = 500 (nach Wrap)
-//             elapsedSince → 500 - 4294967290 = 506 (korrekt, unsigned wrap)
+//             elapsedSince -> 500 - 4294967290 = 506 (korrekt, unsigned wrap)
 inline unsigned long elapsedSince(unsigned long timestampMs, unsigned long nowMs) {
     return nowMs - timestampMs;
 }
 
-// intervalElapsed – Prüft, ob ein Intervall seit dem letzten Zeitstempel abgelaufen ist.
-//   timestampMs: letzter Ausführungszeitpunkt (0 = erster Aufruf → immer true)
+// intervalElapsed - Prüft, ob ein Intervall seit dem letzten Zeitstempel abgelaufen ist.
+//   timestampMs: letzter Ausführungszeitpunkt (0 = erster Aufruf -> immer true)
 //   nowMs:       aktueller millis()-Wert
 //   intervalMs:  gewünschter Mindestabstand
 //
@@ -56,7 +55,7 @@ inline bool intervalElapsed(unsigned long timestampMs, unsigned long nowMs,
 }
 
 // =============================================================================
-// DEBOUNCER – Entprellung digitaler Eingangssignale
+// DEBOUNCER - Entprellung digitaler Eingangssignale
 // =============================================================================
 // Ein Pegelwechsel an digitalen Eingängen (Taster, Fensterkontakt, PIR)
 // wird erst nach einer stabilen Wartezeit (Debounce-Zeit) als gültig
@@ -78,7 +77,7 @@ public:
         : debounceMs_(debounceMs), stable_(false), lastRaw_(false),
           lastStable_(false), changed_(false), lastChangeMs_(0UL) {}
 
-    // update – Rohwert einlesen, entprellten Zustand zurückgeben.
+    // update - Rohwert einlesen, entprellten Zustand zurückgeben.
     //   raw:   aktueller digitalRead()-Wert (true/false)
     //   nowMs: aktueller millis()-Zeitstempel
     bool update(bool raw, unsigned long nowMs) {
@@ -98,10 +97,10 @@ public:
         return stable_;
     }
 
-    // changed – War der letzte update()-Aufruf ein gültiger Pegelwechsel?
+    // changed - War der letzte update()-Aufruf ein gültiger Pegelwechsel?
     bool changed() const { return changed_; }
 
-    // isActive – Aktueller entprellter Zustand.
+    // isActive - Aktueller entprellter Zustand.
     bool isActive() const { return stable_; }
 
 private:
@@ -111,7 +110,7 @@ private:
 };
 
 // =============================================================================
-// LONG-PRESS-DETECTOR – Erkennung von langem Tastendruck
+// LONG-PRESS-DETECTOR - Erkennung von langem Tastendruck
 // =============================================================================
 // Erkennt, wenn ein Taster für eine konfigurierbare Mindestdauer gehalten wird.
 // Löst nur EINMAL pro Haltezyklus aus (kein Dauerfeuer).
@@ -131,19 +130,19 @@ public:
     explicit LongPressDetector(unsigned long holdMs = 5000UL)
         : holdMs_(holdMs), pressStartMs_(0UL), held_(false), consumed_(false) {}
 
-    // update – Taster-Zustand übergeben.
+    // update - Taster-Zustand übergeben.
     //   active: true = Taster aktuell gedrückt
     //   nowMs:  aktueller millis()-Wert
     //   Rückgabe: true wenn long-press-Bedingung erfüllt
     bool update(bool active, unsigned long nowMs) {
         if (!active) {
-            // Losgelassen → alles zurücksetzen für nächsten Zyklus
+            // Losgelassen -> alles zurücksetzen für nächsten Zyklus
             pressStartMs_ = 0UL;
             consumed_ = false;
             held_ = false;
             return false;
         }
-        // Gedrückt – Zeitstempel merken (nur beim ersten Mal)
+        // Gedrückt - Zeitstempel merken (nur beim ersten Mal)
         if (pressStartMs_ == 0UL) {
             pressStartMs_ = nowMs;
         }
@@ -157,10 +156,10 @@ public:
         return held_;
     }
 
-    // justTriggered – Wurde der Langdruck GERADE erkannt? (einmalig, Flanke)
+    // justTriggered - Wurde der Langdruck GERADE erkannt? (einmalig, Flanke)
     bool justTriggered() const { return held_ && consumed_; }
 
-    // isHeld – Wird der Taster aktuell lange gehalten? (Zustand, nicht Flanke)
+    // isHeld - Wird der Taster aktuell lange gehalten? (Zustand, nicht Flanke)
     bool isHeld() const { return held_ && !consumed_; }
 
 private:

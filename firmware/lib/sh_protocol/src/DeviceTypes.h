@@ -1,17 +1,23 @@
-#pragma once
+/*
+===============================================================================
+ Datei: DeviceTypes.h
+ Code-Name: DeviceTypes
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / gemeinsame Bibliothek
+ Ersteller: DevOpsOfChaos
+ Letzte Bearbeitung: 2026-05-18
 
-/**
- * @file DeviceTypes.h
- * @brief Geraeteklassen, Faehigkeits-Bitmasks, Power-Typen und Meta-Enums
- *
- * @details Definiert den oberen Geraetevertrag fuer das SmartHome-Protokoll.
- *          Geraeteklassen beschreiben die Basisarchitektur eines Nodes.
- *          Sondergeraete (z.B. Rolladensteuerung) sind NET-ZRL-Geraete
- *          mit entsprechenden Meta-/Profilfeldern – keine neue Klasse.
- *
- * @version 0.3.0
- * @date    2026-03-25
- */
+ Zweck: Geraeteklassen und Faehigkeiten
+ Beschreibung: Definiert feste Kennzahlen fuer Geraetetypen, Stromversorgung, Profile und Faehigkeiten.
+
+ Genutzte Bibliotheken:
+ - Keine importierte Bibliothek. Diese Datei definiert feste Protokollwerte.
+
+ Aenderungsverlauf:
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
+#pragma once
 
 // ============================================================
 // Geräteklassen (device_class im HELLO-Payload)

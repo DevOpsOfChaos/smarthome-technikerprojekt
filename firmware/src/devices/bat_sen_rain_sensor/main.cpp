@@ -1,22 +1,39 @@
-/**
- * @file main.cpp
- * @brief BAT-SEN Rain: Batteriebetriebener Regensensor
- *
- * @details Timer-Wake alle 15 Minuten, ADC-Messung mit Hysterese (2050/2200),
- *          Event bei Zustandswechsel (nass/trocken), Deep-Sleep dazwischen.
- *
- * Hardware:   ESP32-C3 + ADC-Regensensor an GPIO3
- * Pin-Belegung (siehe PinConfig.h):
- *   - Regensensor (ADC): GPIO3 (0-4095)
- *   - Batterie-ADC:       HardwarePinStandard::PIN_BATTERY_ADC
- *   - Setup-Button:       GPIO2 (active-LOW)
- *   - Setup-LED:          GPIO7 (active-HIGH)
- *
- * @author DevOpsOfChaos
- * @date   2026-05-14
- *
- * @note BatSenRuntime-Basistyp ruft die Custom-Hooks auf (ESP-NOW + MQTT).
- */
+/*
+===============================================================================
+ Datei: main.cpp
+ Code-Name: BAT-SEN Rain
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Device-Code / Batterie-Sensor
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: Batteriebetriebener Regensensor mit analogem Messwert
+ Beschreibung: Liest einen ADC-Regensensor, bewertet den Rohwert mit Hysterese
+ und meldet Statuswechsel zwischen "nass" und "trocken" als Event. Zwischen den
+ Messungen nutzt der Batterie-Basistyp Deep-Sleep. Das regulaere Timer-Wakeup
+ erfolgt alle 15 Minuten; das entspricht 900 Sekunden.
+
+ Hardware:
+ - ESP32-C3
+ - ADC-Regensensor an GPIO3, Messbereich 0 bis 4095 bei 12 Bit ADC-Aufloesung
+ - Batterie-ADC ueber HardwarePinStandard::PIN_BATTERY_ADC
+ - Setup-Button an GPIO2, active-LOW
+ - Setup-LED an GPIO7, active-HIGH
+
+ Genutzte Bibliotheken:
+ - Arduino.h: Arduino-Funktionen wie pinMode, analogRead und millis.
+ - DeviceConfig.h: eigene Device-Konfiguration mit ADC-Pin, Schwellen und Zeiten.
+ - PinConfig.h: eigene Pin-Zuordnung fuer diesen konkreten Node.
+ - MathUtils.h: eigene Hilfsbibliothek; absDiffU16 erkennt relevante ADC-Aenderungen.
+ - BatSenRuntime.h: eigener Batterie-Sensor-Basistyp; liefert setup(), loop(),
+   Funkprotokoll, Schlaflogik und ruft die Device-Hooks aus dieser Datei auf.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Device-Code fuer Batterie-Regensensor angelegt.
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
 
 #include <Arduino.h>
 
@@ -60,7 +77,9 @@ bool event_regenstatus = false;     // Gemerkter Event-Status (nass/trocken)
 uint16_t event_raw = 0U;            // Gemerkter Event-Rohwert
 unsigned long letzte_probe_ms = 0UL; // Zeitstempel letzte ADC-Messung
 
-/** @brief Liest den ADC-Rohwert vom Regensensor-Pin (0-4095, 12-Bit). */
+// Aufgabe: Liest den ADC-Rohwert vom Regensensor-Pin.
+// Eingabewerte: keine; der ADC-Pin kommt aus DeviceConfig.h.
+// Ausgabewert: Rohwert von 0 bis 4095. 4095 ist der Maximalwert bei 12 Bit.
 uint16_t leseRainRaw() {
     int raw = analogRead(BAT_SEN_RAIN_SIGNAL_PIN);
     if (raw < 0) raw = 0;
@@ -68,20 +87,16 @@ uint16_t leseRainRaw() {
     return (uint16_t)raw;
 }
 
-/**
- * @brief Bestimmt, ob ein ADC-Rohwert "Regen" (nass) bedeutet – mit Hysterese.
- *
- * Zwei Schwellen verhindern Flattern:
- * - Bei bisher "trocken": Rohwert muss Wet-Schwelle ueberschreiten fuer "nass"
- * - Bei bisher "nass":    Rohwert muss Clear-Schwelle unterschreiten fuer "trocken"
- *
- * Die Schwellen-Richtung wird via BAT_SEN_RAIN_LEVEL_HIGH_IS_WET
- * zur Compile-Zeit konfiguriert.
- *
- * @param raw          ADC-Rohwert (0-4095)
- * @param bisherRegen  true wenn der letzte bekannte Status "nass" war
- * @return true wenn der Rohwert "nass" bedeutet
- */
+// Aufgabe: Bewertet einen ADC-Rohwert als "nass" oder "trocken".
+// Eingabewerte:
+// - raw: ADC-Rohwert von 0 bis 4095.
+// - bisherRegen: true, wenn der letzte stabile Zustand bereits "nass" war.
+// Ausgabewert: true bedeutet "nass", false bedeutet "trocken".
+//
+// Zwei Schwellen bilden eine Hysterese und verhindern Flattern am Grenzwert:
+// Bei bisher "trocken" muss die Wet-Schwelle erreicht werden.
+// Bei bisher "nass" muss erst die Clear-Schwelle erreicht werden.
+// BAT_SEN_RAIN_LEVEL_HIGH_IS_WET legt fest, ob hohe oder niedrige Rohwerte nass bedeuten.
 bool istRegenZustand(uint16_t raw, bool bisherRegen) {
 #if BAT_SEN_RAIN_LEVEL_HIGH_IS_WET
     if (bisherRegen) {
@@ -98,19 +113,16 @@ bool istRegenZustand(uint16_t raw, bool bisherRegen) {
 }  // namespace
 
 // =============================================================================
-// CUSTOM-DEVICE-HOOKS – Werden vom BatSenRuntime-Basistyp aufgerufen
+// CUSTOM-DEVICE-HOOKS - Werden vom BatSenRuntime-Basistyp aufgerufen
 // =============================================================================
 
-/**
- * @brief Initialisiert den ADC-Pin, fuehrt erste Messung durch und setzt den lokalen Zustand.
- *
- * Wird einmalig von BatSenRuntime beim Boot aufgerufen.
- * Setzt regen_erkannt, rain_raw, rain_init_ok.
- */
+// Aufgabe: Initialisiert den ADC-Pin, fuehrt die erste Messung aus und setzt den lokalen Zustand.
+// Eingabewerte: keine; Pin und Schwellwerte kommen aus DeviceConfig.h.
+// Ausgabewert: keiner; regen_erkannt, rain_raw und rain_init_ok werden gesetzt.
+// Aufrufer: BatSenRuntime ruft diesen Hook einmal beim Boot auf.
 void device_init_io() {
     pinMode(BAT_SEN_RAIN_SIGNAL_PIN, INPUT);
-    // ADC-Pin konfigurieren (ESP32 Arduino 3.x: analogReadPin nicht mehr nötig)
-    // Attenuation wird in ESP32 Arduino 3.x automatisch gesetzt
+    // ADC-Pin konfigurieren. ESP32 Arduino 3.x setzt die Attenuation automatisch.
 
     rain_raw = leseRainRaw();
     regen_erkannt = istRegenZustand(rain_raw, false);
@@ -125,20 +137,18 @@ void device_init_io() {
          regen_erkannt ? "wet" : "dry");
 }
 
-/**
- * @brief Periodische ADC-Messung mit Hysterese und Event-Erkennung.
- *
- * Wird von BatSenRuntime im Loop aufgerufen. Misst nur wenn das
- * Sample-Intervall abgelaufen ist. Erkennt Statuswechsel (nass<->trocken)
- * und setzt event_pending.
- *
- * @return true wenn sich Werte signifikant geaendert haben → neuer STATE noetig
- */
+// Aufgabe: Fuehrt eine periodische ADC-Messung aus und erkennt relevante Aenderungen.
+// Eingabewerte: keine; der aktuelle Zeitpunkt kommt aus millis().
+// Ausgabewert: true bedeutet, ein neuer STATE-Report ist sinnvoll.
+//
+// BAT_SEN_RAIN_SAMPLE_INTERVAL_MS ist eine Millisekunden-Zeit. Beispiel:
+// 200UL bedeutet 200 Millisekunden zwischen zwei ADC-Proben. BAT_SEN_RAIN_STATE_DELTA_RAW
+// ist die minimale Rohwertdifferenz, ab der ein neuer STATE gesendet wird.
 bool device_poll_inputs() {
     if (!rain_init_ok) return false;
 
     const unsigned long jetzt = millis();
-    // Prueft ob Sample-Intervall (200ms) abgelaufen
+    // Prueft, ob das Sample-Intervall in Millisekunden abgelaufen ist.
     if ((jetzt - letzte_probe_ms) < BAT_SEN_RAIN_SAMPLE_INTERVAL_MS) {
         return false;
     }
@@ -155,7 +165,7 @@ bool device_poll_inputs() {
 
     rain_raw = neuerRaw;
 
-    // Statuswechsel: Event merken
+    // Statuswechsel: Event merken; das eigentliche Senden erledigt der Basistyp.
     if (statusGeaendert) {
         regen_erkannt = neuerRegenstatus;
         event_pending = true;
@@ -168,14 +178,13 @@ bool device_poll_inputs() {
     return true;
 }
 
-/**
- * @brief Befuellt die generischen Zustands-Channel aus den lokalen Regen-Daten.
- *
- * @param[out] channelBool1  regen_erkannt (1=nass, 0=trocken)
- * @param[out] channelU16_1  rain_raw (aktueller ADC-Rohwert)
- * @param[out] channelMask1  immer 0 (keine Maske)
- * @param[out] fault         true wenn rain_init_ok == false
- */
+// Aufgabe: Uebergibt den Regenstatus an die generischen Kanaele des Basistyps.
+// Eingabewerte: Zeiger auf Ausgabefelder; nullptr wird ignoriert.
+// Ausgabewerte:
+// - channelBool1: 1 bedeutet nass, 0 bedeutet trocken.
+// - channelU16_1: aktueller ADC-Rohwert von 0 bis 4095.
+// - channelMask1: hier ungenutzt, bleibt 0.
+// - fault: true bedeutet, die ADC-Initialisierung war nicht erfolgreich.
 void device_build_state_channels(
     uint8_t* channelBool1, uint16_t* channelU16_1,
     uint8_t* channelMask1, bool* fault)
@@ -186,17 +195,14 @@ void device_build_state_channels(
     if (fault != nullptr) *fault = !rain_init_ok;
 }
 
-/**
- * @brief Erzeugt ein Regen-Event (SH_EVENT_RAIN_DETECTED) bei Statuswechsel.
- *
- * Wird nur aufgerufen wenn event_pending == true. Setzt event_pending zurueck.
- *
- * @param[out] eventType  SH_EVENT_RAIN_DETECTED
- * @param[out] trigger    SH_TRIGGER_AUTO
- * @param[out] param1     1 bei "nass", 0 bei "trocken"
- * @param[out] param2     ADC-Rohwert zum Zeitpunkt der Erkennung
- * @return true wenn ein Event bereitsteht
- */
+// Aufgabe: Wandelt einen gemerkten Regen-Statuswechsel in ein Protokoll-Event um.
+// Eingabewerte: Zeiger auf Ausgabefelder; nullptr wird ignoriert.
+// Ausgabewerte:
+// - eventType: SH_EVENT_RAIN_DETECTED aus Protocol.h.
+// - trigger: SH_TRIGGER_AUTO, weil der Sensor das Event selbst erkannt hat.
+// - param1: 1 bei "nass", 0 bei "trocken".
+// - param2: ADC-Rohwert zum Zeitpunkt der Erkennung.
+// Rueckgabe: true bedeutet, ein Event wurde bereitgestellt.
 bool device_map_event(
     uint8_t* eventType, uint8_t* trigger,
     uint8_t* param1, uint16_t* param2)
@@ -211,10 +217,9 @@ bool device_map_event(
     return true;
 }
 
-/**
- * @brief Liefert potenzielle GPIO-Wake-Pins fuer Deep-Sleep.
- * @return Bitmaske der Wake-Pins (0 wenn GPIO-Wake deaktiviert)
- */
+// Aufgabe: Meldet dem Basistyp, welcher GPIO das Geraet aus Deep-Sleep wecken darf.
+// Eingabewerte: keine; BAT_SEN_RAIN_SIGNAL_PIN kommt aus DeviceConfig.h.
+// Ausgabewert: Bitmaske mit gesetztem Pin-Bit oder 0, wenn GPIO-Wake aus ist.
 uint64_t device_wake_candidates() {
 #if BAT_SEN_ENABLE_GPIO_WAKE
     if (BAT_SEN_RAIN_SIGNAL_PIN < 0 || BAT_SEN_RAIN_SIGNAL_PIN >= 64) return 0ULL;

@@ -1,15 +1,22 @@
-/**
- * @file ProjectVersion.h
- * @brief Zentrale Projektversion (SemVer) und Name
- *
- * @details Wird von allen Firmware-Targets eingebunden (via build_flags -include).
- *          Versionierung: MAJOR.MINOR.PATCH (Semantic Versioning).
- *          Bei Release das Datum auf den Tag der Freigabe setzen.
- *
- * @author DevOpsOfChaos
- * @date   2026-04-08
- */
+/*
+===============================================================================
+ Datei: ProjectVersion.h
+ Code-Name: ProjectVersion
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / gemeinsame Bibliothek
+ Ersteller: DevOpsOfChaos
+ Letzte Bearbeitung: 2026-05-18
 
+ Zweck: Zentrale Projektversion
+ Beschreibung: Stellt Projektname, Versionsnummer und Versionsdatum fuer die Firmware bereit.
+
+ Genutzte Bibliotheken:
+ - Keine importierte Bibliothek. Diese Datei stellt nur Projekt-Makros bereit.
+
+ Aenderungsverlauf:
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
 #pragma once
 
 #define PROJECT_NAME           "SmartHome ESP32"

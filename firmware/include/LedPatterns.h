@@ -1,31 +1,22 @@
-// =============================================================================
-// LedPatterns.h – Standardisierte LED-Blinkmuster
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/include/LedPatterns.h
-// Teil des:   Baukastensystems Block 2 – Gemeinsame Services
-//
-// Verwendung: #include "LedPatterns.h" in jedem Device-main.cpp
-//
-// Definiert EINHEITLICHE Blinkmuster für Status-LEDs aller Geräte.
-// Jedes Gerät im Feld soll die gleichen Muster zeigen, damit der Zustand
-// auf den ersten Blick erkennbar ist – unabhängig vom Gerätetyp.
-//
-// Muster-Übersicht:
-//   BOOT       LED aus           WiFi-Verbindungsaufbau läuft
-//   ONLINE     LED dauer-an      Normalbetrieb, alles ok
-//   SETUP      LED 500ms-Takt    Provisioning-Modus aktiv (von ShNodeProvisioning)
-//   WARNING    LED 200ms/800ms   Sensor-Fehler, aber Gerät läuft noch
-//   ERROR      LED 100ms/900ms   Kritischer Fehler, Gerät funktionsunfähig
-//   OFFLINE    LED 1s/3s         Keine Verbindung zum Master
-//
-// Die SETUP-LED wird direkt von ShNodeProvisioning gesteuert und ist hier
-// nur zur Dokumentation aufgeführt.
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-15
-// =============================================================================
+/*
+===============================================================================
+ Datei: LedPatterns.h
+ Code-Name: LedPatterns
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / gemeinsame Bibliothek
+ Ersteller: DevOpsOfChaos
+ Letzte Bearbeitung: 2026-05-18
 
+ Zweck: Einheitliche LED-Blinkmuster
+ Beschreibung: Definiert gemeinsame Blinkzeiten und eine kleine Blinksteuerung fuer Status-LEDs.
+
+ Genutzte Bibliotheken:
+ - stdint.h: feste Ganzzahltypen; hier fuer portable Zeit- und Zahlenwerte.
+
+ Aenderungsverlauf:
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
 #pragma once
 #include <stdint.h>
 
@@ -40,23 +31,23 @@ namespace SmartHome {
 
 namespace LedPattern {
 
-// Normalbetrieb – LED dauerhaft an (kein Blinken)
+// Normalbetrieb - LED dauerhaft an (kein Blinken)
 constexpr unsigned long ONLINE_ON_MS  = 0UL;
 constexpr unsigned long ONLINE_OFF_MS = 0UL;
 
-// Setup-Modus – 500ms an, 500ms aus (von ShNodeProvisioning verwaltet)
+// Setup-Modus - 500ms an, 500ms aus (von ShNodeProvisioning verwaltet)
 constexpr unsigned long SETUP_ON_MS  = 500UL;
 constexpr unsigned long SETUP_OFF_MS = 500UL;
 
-// Warnung (Sensor-Teilausfall) – 200ms an, 800ms aus
+// Warnung (Sensor-Teilausfall) - 200ms an, 800ms aus
 constexpr unsigned long WARNING_ON_MS  = 200UL;
 constexpr unsigned long WARNING_OFF_MS = 800UL;
 
-// Kritischer Fehler – 100ms an, 900ms aus (schnelles Fehlerblinken)
+// Kritischer Fehler - 100ms an, 900ms aus (schnelles Fehlerblinken)
 constexpr unsigned long ERROR_ON_MS  = 100UL;
 constexpr unsigned long ERROR_OFF_MS = 900UL;
 
-// Offline (kein Master) – 1s an, 3s aus (langsames Suchen)
+// Offline (kein Master) - 1s an, 3s aus (langsames Suchen)
 constexpr unsigned long OFFLINE_ON_MS  = 1000UL;
 constexpr unsigned long OFFLINE_OFF_MS = 3000UL;
 
@@ -79,7 +70,7 @@ public:
         : onMs_(0UL), offMs_(0UL), state_(false), lastToggleMs_(0UL),
           active_(false) {}
 
-    // setPattern – Blinkmuster setzen.
+    // setPattern - Blinkmuster setzen.
     //   onMs/offMs beide 0: Dauer-AUS (kein Blinken, kein Leuchten)
     //   onMs=0, offMs>0: Dauer-EIN
     //   onMs>0, offMs=0: Dauer-EIN
@@ -93,7 +84,7 @@ public:
         active_ = (onMs > 0UL || offMs > 0UL);
     }
 
-    // update – Nächsten Zustand berechnen. Muss in loop() aufgerufen werden.
+    // update - Nächsten Zustand berechnen. Muss in loop() aufgerufen werden.
     //   nowMs: aktueller millis()-Wert
     //   Rückgabe: true = LED soll leuchten, false = LED aus
     bool update(unsigned long nowMs) {
@@ -114,7 +105,7 @@ public:
         return state_;
     }
 
-    // turnOff – LED dauerhaft ausschalten (z.B. Deep-Sleep)
+    // turnOff - LED dauerhaft ausschalten (z.B. Deep-Sleep)
     void turnOff() {
         active_ = false;
         state_ = false;

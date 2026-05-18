@@ -1,18 +1,26 @@
-/**
- * @file ShNodeProvisioning.cpp
- * @brief Web-basiertes Node-Provisioning: Setup-AP, Master-MAC-Bindung, NVS-Persistenz
- *
- * @details Implementiert die NodeProvisioningController-Klasse:
- *          - WiFi-Setup-AccessPoint mit HTML-Formular (Dark-Theme CSS)
- *          - Master-MAC-Bindung per Web-Formular oder URL-Query
- *          - Persistente Speicherung in NVS (Preferences) mit Rollback
- *          - Setup-Taster mit Langdruck-Erkennung
- *          - LED-Blinkindikator im Setup-Modus
- *          - Device-Handler-Plugin fuer geraetespezifische Setup-Felder
- *
- * @author DevOpsOfChaos
- */
+/*
+===============================================================================
+ Datei: ShNodeProvisioning.cpp
+ Code-Name: ShNodeProvisioning
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / gemeinsame Bibliothek
+ Ersteller: DevOpsOfChaos
+ Letzte Bearbeitung: 2026-05-18
 
+ Zweck: Umsetzung der Node-Provisionierung
+ Beschreibung: Startet das Setup-Portal, speichert Basisdaten und verarbeitet Setup-Taster und Setup-LED.
+
+ Genutzte Bibliotheken:
+ - ShNodeProvisioning.h: eigene Schnittstelle dieser Bibliothek.
+ - WiFi.h: ESP32-WLAN-Funktionen fuer den Setup-Access-Point.
+ - stdarg.h: variable Argumentlisten fuer formatiertes Logging.
+ - stdio.h: snprintf/vsnprintf fuer sichere Textformatierung.
+ - string.h: strlen, memcpy, memset und strncpy fuer C-Strings und Speicherbereiche.
+
+ Aenderungsverlauf:
+ - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+===============================================================================
+*/
 #include "ShNodeProvisioning.h"
 
 #include <WiFi.h>
@@ -37,10 +45,10 @@ constexpr const char* SENSOR_INTERVAL_HINT_DEFAULT = "Sensorintervall in Sekunde
 constexpr unsigned long SETUP_BUTTON_HOLD_MS_DEFAULT = 5000UL;
 constexpr unsigned long SETUP_INDICATOR_BLINK_MS_DEFAULT = 500UL;
 
-/**
- * @brief HTML-Sonderzeichen maskieren (&amp; &lt; &gt; &quot; &#39;) fuer sichere Ausgabe
- * @param text Der zu maskierende Text
- * @return Maskierter Text mit HTML-Entities
+/*
+ * Kurzbeschreibung: HTML-Sonderzeichen maskieren (&amp; &lt; &gt; &quot; &#39;) fuer sichere Ausgabe
+ * Eingabewert text: Der zu maskierende Text
+ * Ausgabewert: Maskierter Text mit HTML-Entities
  */
 String htmlEscape(const String& text) {
     String escaped;
@@ -61,20 +69,20 @@ String htmlEscape(const String& text) {
     return escaped;
 }
 
-/**
- * @brief Prueft Magic und Version eines geladenen NodeBasisSettings-Blobs
- * @param settings Der zu pruefende NodeBasisSettings-Blob
- * @return true wenn Magic und Version gueltig sind
+/*
+ * Kurzbeschreibung: Prueft Magic und Version eines geladenen NodeBasisSettings-Blobs
+ * Eingabewert settings: Der zu pruefende NodeBasisSettings-Blob
+ * Ausgabewert: true, wenn Magic und Version gueltig sind
  */
 bool basisBlobValid(const NodeBasisSettings& settings) {
     return settings.magic == NODE_BASIS_MAGIC && settings.version == NODE_BASIS_VERSION;
 }
 
-/**
- * @brief Vergleich zweier NodeBasisSettings (alle Felder ausser Magic/Version)
- * @param left Erste Einstellungen
- * @param right Zweite Einstellungen
- * @return true wenn alle Felder identisch sind
+/*
+ * Kurzbeschreibung: Vergleich zweier NodeBasisSettings (alle Felder ausser Magic/Version)
+ * Eingabewert left: Erste Einstellungen
+ * Eingabewert right: Zweite Einstellungen
+ * Ausgabewert: true, wenn alle Felder identisch sind
  */
 bool basisSettingsEqual(const NodeBasisSettings& left, const NodeBasisSettings& right) {
     return left.magic == right.magic && left.version == right.version &&
@@ -83,11 +91,11 @@ bool basisSettingsEqual(const NodeBasisSettings& left, const NodeBasisSettings& 
            left.sensorSendIntervalS == right.sensorSendIntervalS;
 }
 
-/**
- * @brief Gibt text zurueck, falls nicht leer, sonst fallback
- * @param text Primaertext
- * @param fallback Fallback-Text
- * @return text wenn nicht leer, sonst fallback
+/*
+ * Kurzbeschreibung: Gibt text zurueck, falls nicht leer, sonst fallback
+ * Eingabewert text: Primaertext
+ * Eingabewert fallback: Fallback-Text
+ * Ausgabewert: text, wenn nicht leer, sonst fallback
  */
 const char* fallbackText(const char* text, const char* fallback) {
     return (text != nullptr && text[0] != '\0') ? text : fallback;
@@ -118,31 +126,31 @@ NodeProvisioningController::NodeProvisioningController()
       setupIndicatorState_(false),
       setupIndicatorLastBlinkMs_(0UL) {}
 
-/**
- * @brief Initialisiert das Provisioning: Pointer setzen, I/O konfigurieren,
+/*
+ * Kurzbeschreibung: Initialisiert das Provisioning: Pointer setzen, I/O konfigurieren,
  *        Preferences oeffnen, persistierte Daten laden
  *
- * @details Bei fehlenden/noch nicht vorhandenen Preferences werden Defaults aktiviert.
+ * Details: Bei fehlenden/noch nicht vorhandenen Preferences werden Defaults aktiviert.
  *          - Pointer-Validierung und Zuweisung
  *          - I/O-Initialisierung (Taster, LED)
  *          - Default-Werte setzen
  *          - Persistierte Daten aus NVS laden (Basis + Device)
  *          - Intervalle sanitizen
  *
- * @param config Provisioning-Konfiguration
- * @param masterMacValid Ausgabe: Zeiger auf Master-MAC-Gueltigkeits-Flag
- * @param masterMac Ausgabe: 6-Byte-Master-MAC-Puffer
- * @param statusSendIntervalS Ausgabe: Status-Sendeintervall in Sekunden
- * @param sensorSendIntervalS Ausgabe: Sensor-Sendeintervall in Sekunden
- * @param setupMode Ausgabe: Setup-Modus-aktiv-Flag
- * @param setupApActive Ausgabe: Setup-AP-aktiv-Flag
- * @param restartPending Ausgabe: Neustart-anstehend-Flag
- * @param restartRequestedAtMs Ausgabe: Zeitstempel der Neustart-Anforderung
- * @param setupApSsid Ausgabe: SSID-Puffer
- * @param setupApSsidSize Groesse des SSID-Puffers
- * @param deviceHandler Device-Provisioning-Handler
- * @param logFn Log-Callback-Funktion
- * @return true bei Erfolg, false bei NULL-Pointern oder ungueltigen Parametern
+ * Eingabewert config: Provisioning-Konfiguration
+ * Eingabe/Ausgabe masterMacValid: Zeiger auf Master-MAC-Gueltigkeits-Flag
+ * Eingabe/Ausgabe masterMac: 6-Byte-Master-MAC-Puffer
+ * Eingabe/Ausgabe statusSendIntervalS: Status-Sendeintervall in Sekunden
+ * Eingabe/Ausgabe sensorSendIntervalS: Sensor-Sendeintervall in Sekunden
+ * Eingabe/Ausgabe setupMode: Setup-Modus-aktiv-Flag
+ * Eingabe/Ausgabe setupApActive: Setup-AP-aktiv-Flag
+ * Eingabe/Ausgabe restartPending: Neustart-anstehend-Flag
+ * Eingabe/Ausgabe restartRequestedAtMs: Zeitstempel der Neustart-Anforderung
+ * Eingabe/Ausgabe setupApSsid: SSID-Puffer
+ * Eingabewert setupApSsidSize: Groesse des SSID-Puffers
+ * Eingabewert deviceHandler: Device-Provisioning-Handler
+ * Eingabewert logFn: Log-Callback-Funktion
+ * Ausgabewert: true bei Erfolg, false bei Null-Zeigern oder ungueltigen Parametern
  */
 bool NodeProvisioningController::begin(
     const NodeProvisioningConfig& config,
@@ -217,8 +225,8 @@ bool NodeProvisioningController::begin(
     return true;
 }
 
-/**
- * @brief Setzt Master-MAC zurueck und schreibt Default-Intervalle aus config
+/*
+ * Kurzbeschreibung: Setzt Master-MAC zurueck und schreibt Default-Intervalle aus config
  */
 void NodeProvisioningController::applyDefaultBasisValues() {
     clearStoredMasterMac();
@@ -226,9 +234,9 @@ void NodeProvisioningController::applyDefaultBasisValues() {
     *sensorSendIntervalS_ = config_.defaultSensorSendIntervalS;
 }
 
-/**
- * @brief Aktuelle Basis-Einstellungen in Snapshot sichern (fuer Rollback)
- * @param snapshot Ausgabe: Snapshot der aktuellen Basis-Einstellungen
+/*
+ * Kurzbeschreibung: Aktuelle Basis-Einstellungen in Snapshot sichern (fuer Rollback)
+ * Eingabe/Ausgabe snapshot: Snapshot der aktuellen Basis-Einstellungen
  */
 void NodeProvisioningController::captureBasisSnapshot(NodeBasisSnapshot& snapshot) const {
     snapshot.masterMacValid = *masterMacValid_;
@@ -237,9 +245,9 @@ void NodeProvisioningController::captureBasisSnapshot(NodeBasisSnapshot& snapsho
     snapshot.sensorSendIntervalS = *sensorSendIntervalS_;
 }
 
-/**
- * @brief Gesicherten Snapshot wiederherstellen (nach fehlgeschlagenem Save)
- * @param snapshot Wiederherzustellender Snapshot
+/*
+ * Kurzbeschreibung: Gesicherten Snapshot wiederherstellen (nach fehlgeschlagenem Save)
+ * Eingabewert snapshot: Wiederherzustellender Snapshot
  */
 void NodeProvisioningController::restoreBasisSnapshot(const NodeBasisSnapshot& snapshot) {
     *masterMacValid_ = snapshot.masterMacValid;
@@ -248,28 +256,28 @@ void NodeProvisioningController::restoreBasisSnapshot(const NodeBasisSnapshot& s
     *sensorSendIntervalS_ = snapshot.sensorSendIntervalS;
 }
 
-/**
- * @brief Prueft ob Wert innerhalb der konfigurierten Grenzen (min/max)
- * @param valueS Zu pruefender Wert in Sekunden
- * @return true wenn innerhalb [minSendIntervalS, maxSendIntervalS]
+/*
+ * Kurzbeschreibung: Prueft ob Wert innerhalb der konfigurierten Grenzen (min/max)
+ * Eingabewert valueS: Zu pruefender Wert in Sekunden
+ * Ausgabewert: true, wenn innerhalb [minSendIntervalS, maxSendIntervalS]
  */
 bool NodeProvisioningController::isSendIntervalValid(uint32_t valueS) const {
     return valueS >= config_.minSendIntervalS && valueS <= config_.maxSendIntervalS;
 }
 
-/**
- * @brief Wert auf gueltigen Bereich begrenzen, sonst Default
- * @param valueS Zu sanitizierender Wert in Sekunden
- * @return Sanitizierter Wert oder Default-Status-Intervall
+/*
+ * Kurzbeschreibung: Wert auf gueltigen Bereich begrenzen, sonst Default
+ * Eingabewert valueS: Zu sanitizierender Wert in Sekunden
+ * Ausgabewert: Sanitizierter Wert oder Default-Status-Intervall
  */
 uint32_t NodeProvisioningController::sanitizeStatusSendInterval(uint32_t valueS) const {
     return isSendIntervalValid(valueS) ? valueS : config_.defaultStatusSendIntervalS;
 }
 
-/**
- * @brief Sensor-Intervall mit ggf. abweichenden Sensor-Grenzen sanitizen
- * @param valueS Zu sanitizierender Wert in Sekunden
- * @return Sanitizierter Wert oder Default-Sensor-Intervall
+/*
+ * Kurzbeschreibung: Sensor-Intervall mit ggf. abweichenden Sensor-Grenzen sanitizen
+ * Eingabewert valueS: Zu sanitizierender Wert in Sekunden
+ * Ausgabewert: Sanitizierter Wert oder Default-Sensor-Intervall
  */
 uint32_t NodeProvisioningController::sanitizeSensorSendInterval(uint32_t valueS) const {
     return valueS >= effectiveMinSensorSendIntervalS() && valueS <= effectiveMaxSensorSendIntervalS()
@@ -277,27 +285,27 @@ uint32_t NodeProvisioningController::sanitizeSensorSendInterval(uint32_t valueS)
                : config_.defaultSensorSendIntervalS;
 }
 
-/**
- * @brief Minimales Sensor-Intervall (falls 0, wird minSendIntervalS genutzt)
- * @return Effektives minimales Sensor-Intervall in Sekunden
+/*
+ * Kurzbeschreibung: Minimales Sensor-Intervall (falls 0, wird minSendIntervalS genutzt)
+ * Ausgabewert: Effektives minimales Sensor-Intervall in Sekunden
  */
 uint32_t NodeProvisioningController::effectiveMinSensorSendIntervalS() const {
     return config_.minSensorSendIntervalS > 0UL ? config_.minSensorSendIntervalS : config_.minSendIntervalS;
 }
 
-/**
- * @brief Maximales Sensor-Intervall (falls 0, wird maxSendIntervalS genutzt)
- * @return Effektives maximales Sensor-Intervall in Sekunden
+/*
+ * Kurzbeschreibung: Maximales Sensor-Intervall (falls 0, wird maxSendIntervalS genutzt)
+ * Ausgabewert: Effektives maximales Sensor-Intervall in Sekunden
  */
 uint32_t NodeProvisioningController::effectiveMaxSensorSendIntervalS() const {
     return config_.maxSensorSendIntervalS > 0UL ? config_.maxSensorSendIntervalS : config_.maxSendIntervalS;
 }
 
-/**
- * @brief Text "AA:BB:CC:DD:EE:FF" in 6-Byte-MAC parsen (mit Trim/Hex-Parsing)
- * @param text Zu parsender MAC-Text
- * @param outMac Ausgabe: 6-Byte-MAC-Puffer
- * @return true bei erfolgreichem Parsen
+/*
+ * Kurzbeschreibung: Text "AA:BB:CC:DD:EE:FF" in 6-Byte-MAC parsen (mit Trim/Hex-Parsing)
+ * Eingabewert text: Zu parsender MAC-Text
+ * Eingabe/Ausgabe outMac: 6-Byte-MAC-Puffer
+ * Ausgabewert: true bei erfolgreichem Parsen
  */
 bool NodeProvisioningController::parseMacText(const char* text, uint8_t outMac[6]) {
     if (text == nullptr || outMac == nullptr) return false;
@@ -348,12 +356,12 @@ bool NodeProvisioningController::parseMacText(const char* text, uint8_t outMac[6
     return true;
 }
 
-/**
- * @brief 6-Byte-MAC als "AA:BB:CC:DD:EE:FF" formatieren (nur wenn gueltig)
- * @param mac 6-Byte-MAC-Array
- * @param isValid Gueltigkeits-Flag
- * @param buffer Ausgabe-Puffer
- * @param bufferSize Groesse des Ausgabe-Puffers
+/*
+ * Kurzbeschreibung: 6-Byte-MAC als "AA:BB:CC:DD:EE:FF" formatieren (nur wenn gueltig)
+ * Eingabewert mac: 6-Byte-MAC-Array
+ * Eingabewert isValid: Gueltigkeits-Flag
+ * Eingabewert buffer: Ausgabe-Puffer
+ * Eingabewert bufferSize: Groesse des Ausgabe-Puffers
  */
 void NodeProvisioningController::formatMacText(
     const uint8_t* mac,
@@ -378,16 +386,16 @@ void NodeProvisioningController::formatMacText(
         mac[5]);
 }
 
-/**
- * @brief Zeigt ob eine gueltige Master-MAC gespeichert ist
+/*
+ * Kurzbeschreibung: Zeigt ob eine gueltige Master-MAC gespeichert ist
  */
 bool NodeProvisioningController::hasStoredMasterMac() const {
     return masterMacValid_ != nullptr && *masterMacValid_;
 }
 
-/**
- * @brief Gespeicherte MAC als Text ausgeben (leer wenn ungueltig)
- * @return Formatierter MAC-Text oder leerer String
+/*
+ * Kurzbeschreibung: Gespeicherte MAC als Text ausgeben (leer wenn ungueltig)
+ * Ausgabewert: Formatierter MAC-Text oder leerer String
  */
 String NodeProvisioningController::buildStoredMasterMacText() const {
     char buffer[MASTER_MAC_TEXT_LEN] = {0};
@@ -395,17 +403,17 @@ String NodeProvisioningController::buildStoredMasterMacText() const {
     return String(buffer);
 }
 
-/**
- * @brief Master-MAC zuruecksetzen (ungueltig + nullen)
+/*
+ * Kurzbeschreibung: Master-MAC zuruecksetzen (ungueltig + nullen)
  */
 void NodeProvisioningController::clearStoredMasterMac() {
     *masterMacValid_ = false;
     memset(masterMac_, 0, 6U);
 }
 
-/**
- * @brief Master-MAC setzen (bei nullptr -> clear)
- * @param masterMac 6-Byte-MAC-Array oder nullptr zum Zuruecksetzen
+/*
+ * Kurzbeschreibung: Master-MAC setzen (bei nullptr -> clear)
+ * Eingabewert masterMac: 6-Byte-MAC-Array oder nullptr zum Zuruecksetzen
  */
 void NodeProvisioningController::setStoredMasterMac(const uint8_t masterMac[6]) {
     if (masterMac == nullptr) {
@@ -416,8 +424,8 @@ void NodeProvisioningController::setStoredMasterMac(const uint8_t masterMac[6]) 
     memcpy(masterMac_, masterMac, 6U);
 }
 
-/**
- * @brief HTTP-Routen registrieren (Root + Save + NotFound)
+/*
+ * Kurzbeschreibung: HTTP-Routen registrieren (Root + Save + NotFound)
  */
 void NodeProvisioningController::configureRoutes() {
     if (routesConfigured_) return;
@@ -428,11 +436,11 @@ void NodeProvisioningController::configureRoutes() {
     routesConfigured_ = true;
 }
 
-/**
- * @brief Setup-AP starten: WiFi auf NULL -> AP, SSID/Passwort setzen,
+/*
+ * Kurzbeschreibung: Setup-AP starten: WiFi auf NULL -> AP, SSID/Passwort setzen,
  *        HTTP-Server starten
  *
- * @details Der delay(25) zwischen WIFI_MODE_NULL und WIFI_AP ist erforderlich,
+ * Details: Der delay(25) zwischen WIFI_MODE_NULL und WIFI_AP ist erforderlich,
  *          weil der WiFi-Stack einen stabilen Zustand braucht.
  *          Bei AP-Start-Fehler: kompletter Rueckbau + Warn-Log.
  */
@@ -485,9 +493,9 @@ void NodeProvisioningController::enterSetupMode() {
         WiFi.softAPIP().toString().c_str());
 }
 
-/**
- * @brief Setup-Modus beenden: AP stoppen, WiFi-Reset, I/O zuruecksetzen
- * @param reason Grund fuer das Beenden (fuer Logging)
+/*
+ * Kurzbeschreibung: Setup-Modus beenden: AP stoppen, WiFi-Reset, I/O zuruecksetzen
+ * Eingabewert reason: Grund fuer das Beenden (fuer Logging)
  */
 void NodeProvisioningController::exitSetupMode(const char* reason) {
     if (!initialized_) return;
@@ -509,11 +517,11 @@ void NodeProvisioningController::exitSetupMode(const char* reason) {
     log("INFO", "Setup-Modus beendet (%s)", reason ? reason : "ohne grund");
 }
 
-/**
- * @brief Liest Master-MAC aus HTTP-Query (zwei moegliche Arg-Namen)
- * @param outValue Ausgabe: Gefundener MAC-Text
- * @param outSourceArg Ausgabe: Name des genutzten Query-Arguments
- * @return true wenn master_mac oder mac in der Query vorhanden
+/*
+ * Kurzbeschreibung: Liest Master-MAC aus HTTP-Query (zwei moegliche Arg-Namen)
+ * Eingabe/Ausgabe outValue: Gefundener MAC-Text
+ * Eingabe/Ausgabe outSourceArg: Name des genutzten Query-Arguments
+ * Ausgabewert: true, wenn master_mac oder mac in der Query vorhanden
  */
 bool NodeProvisioningController::readRequestedMasterMac(String& outValue, const char*& outSourceArg) {
     if (server_.hasArg(MASTER_MAC_ARG_PRIMARY)) {
@@ -533,13 +541,13 @@ bool NodeProvisioningController::readRequestedMasterMac(String& outValue, const 
     return false;
 }
 
-/**
- * @brief Text in uint32 parsen mit Bereichspruefung und Overflow-Schutz
- * @param value Zu parsender Text
- * @param minValue Minimal erlaubter Wert
- * @param maxValue Maximal erlaubter Wert
- * @param outValue Ausgabe: Geparster Wert
- * @return true bei Erfolg, outValue ist dann gesetzt
+/*
+ * Kurzbeschreibung: Text in uint32 parsen mit Bereichspruefung und Overflow-Schutz
+ * Eingabewert value: Zu parsender Text
+ * Eingabewert minValue: Minimal erlaubter Wert
+ * Eingabewert maxValue: Maximal erlaubter Wert
+ * Eingabe/Ausgabe outValue: Geparster Wert
+ * Ausgabewert: true bei Erfolg, outValue ist dann gesetzt
  */
 bool NodeProvisioningController::parseUnsignedLongText(
     String value,
@@ -573,9 +581,9 @@ bool NodeProvisioningController::parseUnsignedLongText(
     return true;
 }
 
-/**
- * @brief CSS-Stylesheet fuer Setup-Weboberflaeche anhaengen (Dark-Theme)
- * @param page Ausgabe-String fuer die HTML-Seite
+/*
+ * Kurzbeschreibung: CSS-Stylesheet fuer Setup-Weboberflaeche anhaengen (Dark-Theme)
+ * Eingabewert page: Ausgabe-String fuer die HTML-Seite
  */
 void NodeProvisioningController::appendSharedStyles(String& page) const {
     page += F(":root{--bg:#070b14;--bg2:#0b1220;--card:#101827;--card2:#0c1320;--text:#edf3ff;--muted:#8ea0bf;--line:#1e2c45;--accent:#35c486;--accent2:#1d8a61;--danger:#ff6b6b;--danger2:#c94949;--ok:#91f0c5;--error:#ffb1b1;}");
@@ -588,19 +596,19 @@ void NodeProvisioningController::appendSharedStyles(String& page) const {
     page += F(".meta{display:grid;gap:4px;margin-top:10px;font-size:.78rem;color:var(--muted)}.meta code{color:var(--text)}.footer{margin-top:2px;font-size:.75rem;color:var(--muted)}");
 }
 
-/**
- * @brief Komplette Setup-HTML-Seite bauen (Formular mit Node-Basis + Device-Bereich)
+/*
+ * Kurzbeschreibung: Komplette Setup-HTML-Seite bauen (Formular mit Node-Basis + Device-Bereich)
  *
- * @details Baut aus escaped-Templates eine vollstaendige HTML-Seite mit CSS + JS-Validierung.
+ * Details: Baut aus escaped-Templates eine vollstaendige HTML-Seite mit CSS + JS-Validierung.
  *          Aufteilung: Kopf -> Status -> Node-Basis-Felder -> Device-Felder -> Footer.
  *
- * @param masterMacText Vorausgefuellter Master-MAC-Text
- * @param statusIntervalText Vorausgefuelltes Status-Intervall
- * @param sensorIntervalText Vorausgefuelltes Sensor-Intervall
- * @param infoText Info-/Status-Text
- * @param errorText Fehlertext
- * @param sourceServer WebServer-Instanz fuer Device-Handler
- * @return Vollstaendiger HTML-String
+ * Eingabewert masterMacText: Vorausgefuellter Master-MAC-Text
+ * Eingabewert statusIntervalText: Vorausgefuelltes Status-Intervall
+ * Eingabewert sensorIntervalText: Vorausgefuelltes Sensor-Intervall
+ * Eingabewert infoText: Info-/Status-Text
+ * Eingabewert errorText: Fehlertext
+ * Eingabewert sourceServer: WebServer-Instanz fuer Device-Handler
+ * Ausgabewert: Vollstaendiger HTML-String
  */
 String NodeProvisioningController::buildPage(
     const String& masterMacText,
@@ -722,15 +730,15 @@ String NodeProvisioningController::buildPage(
     return page;
 }
 
-/**
- * @brief buildPage + HTTP-Response senden (mit Status-Code)
- * @param masterMacText Vorausgefuellter Master-MAC-Text
- * @param statusIntervalText Vorausgefuelltes Status-Intervall
- * @param sensorIntervalText Vorausgefuelltes Sensor-Intervall
- * @param infoText Info-/Status-Text
- * @param errorText Fehlertext
- * @param statusCode HTTP-Status-Code
- * @param sourceServer WebServer-Instanz fuer Device-Handler
+/*
+ * Kurzbeschreibung: buildPage + HTTP-Response senden (mit Status-Code)
+ * Eingabewert masterMacText: Vorausgefuellter Master-MAC-Text
+ * Eingabewert statusIntervalText: Vorausgefuelltes Status-Intervall
+ * Eingabewert sensorIntervalText: Vorausgefuelltes Sensor-Intervall
+ * Eingabewert infoText: Info-/Status-Text
+ * Eingabewert errorText: Fehlertext
+ * Eingabewert statusCode: HTTP-Status-Code
+ * Eingabewert sourceServer: WebServer-Instanz fuer Device-Handler
  */
 void NodeProvisioningController::sendForm(
     const String& masterMacText,
@@ -752,13 +760,13 @@ void NodeProvisioningController::sendForm(
             sourceServer));
 }
 
-/**
- * @brief Einfache Ergebnis-HTML-Seite (Erfolg/Fehler + optionaler Zurueck-Button)
- * @param titleText Seitentitel
- * @param messageText Nachrichtentext
- * @param isError Fehler-Flag (bestimmt Styling und Ueberschrift)
- * @param showBackButton Zurueck-Button anzeigen
- * @return Vollstaendiger HTML-String
+/*
+ * Kurzbeschreibung: Einfache Ergebnis-HTML-Seite (Erfolg/Fehler + optionaler Zurueck-Button)
+ * Eingabewert titleText: Seitentitel
+ * Eingabewert messageText: Nachrichtentext
+ * Eingabewert isError: Fehler-Flag (bestimmt Styling und Ueberschrift)
+ * Eingabewert showBackButton: Zurueck-Button anzeigen
+ * Ausgabewert: Vollstaendiger HTML-String
  */
 String NodeProvisioningController::buildResultPage(
     const String& titleText,
@@ -798,13 +806,13 @@ String NodeProvisioningController::buildResultPage(
     return page;
 }
 
-/**
- * @brief buildResultPage + HTTP-Response senden
- * @param titleText Seitentitel
- * @param messageText Nachrichtentext
- * @param isError Fehler-Flag
- * @param statusCode HTTP-Status-Code
- * @param showBackButton Zurueck-Button anzeigen
+/*
+ * Kurzbeschreibung: buildResultPage + HTTP-Response senden
+ * Eingabewert titleText: Seitentitel
+ * Eingabewert messageText: Nachrichtentext
+ * Eingabewert isError: Fehler-Flag
+ * Eingabewert statusCode: HTTP-Status-Code
+ * Eingabewert showBackButton: Zurueck-Button anzeigen
  */
 void NodeProvisioningController::sendResultPage(
     const String& titleText,
@@ -818,10 +826,10 @@ void NodeProvisioningController::sendResultPage(
         buildResultPage(titleText, messageText, isError, showBackButton));
 }
 
-/**
- * @brief HTTP-GET / : Setup-Formular anzeigen
+/*
+ * Kurzbeschreibung: HTTP-GET / : Setup-Formular anzeigen
  *
- * @details Bei Query-Parametern (master_mac, mac) wird die MAC vorausgefuellt.
+ * Details: Bei Query-Parametern (master_mac, mac) wird die MAC vorausgefuellt.
  *          Ungueltige MAC-Query -> Fehlermeldung im Formular.
  */
 void NodeProvisioningController::handleRoot() {
@@ -857,10 +865,10 @@ void NodeProvisioningController::handleRoot() {
         nullptr);
 }
 
-/**
- * @brief HTTP-POST /save : Validieren + Speichern + Neustart
+/*
+ * Kurzbeschreibung: HTTP-POST /save : Validieren + Speichern + Neustart
  *
- * @details Pipeline:
+ * Details: Pipeline:
  *          1) MAC validieren
  *          2) Status-Intervall validieren
  *          3) Sensor-Intervall validieren
@@ -1001,10 +1009,10 @@ void NodeProvisioningController::handleSave() {
         false);
 }
 
-/**
- * @brief Basis-Blob aus Preferences lesen und anwenden
- * @param prefs Geoeffnete Preferences-Instanz
- * @return true wenn Basis erfolgreich geladen und angewendet wurde
+/*
+ * Kurzbeschreibung: Basis-Blob aus Preferences lesen und anwenden
+ * Eingabewert prefs: Geoeffnete Preferences-Instanz
+ * Ausgabewert: true, wenn Basis erfolgreich geladen und angewendet wurde
  */
 bool NodeProvisioningController::loadBasisFromStorage(Preferences& prefs) {
     NodeBasisSettings settings = {};
@@ -1016,11 +1024,11 @@ bool NodeProvisioningController::loadBasisFromStorage(Preferences& prefs) {
     return true;
 }
 
-/**
- * @brief Rohdaten der Basis aus Preferences lesen mit Groessen- und Validitaetspruefung
- * @param prefs Geoeffnete Preferences-Instanz
- * @param outSettings Ausgabe: Gelesene NodeBasisSettings
- * @return true bei Erfolg, outSettings ist dann gefuellt
+/*
+ * Kurzbeschreibung: Rohdaten der Basis aus Preferences lesen mit Groessen- und Validitaetspruefung
+ * Eingabewert prefs: Geoeffnete Preferences-Instanz
+ * Eingabe/Ausgabe outSettings: Gelesene NodeBasisSettings
+ * Ausgabewert: true bei Erfolg, outSettings ist dann gefuellt
  */
 bool NodeProvisioningController::readBasisBlob(Preferences& prefs, NodeBasisSettings& outSettings) const {
     const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
@@ -1041,9 +1049,9 @@ bool NodeProvisioningController::readBasisBlob(Preferences& prefs, NodeBasisSett
     return true;
 }
 
-/**
- * @brief Geladene Basis-Einstellungen auf aktive Runtime-Pointer anwenden
- * @param settings Anzuwendende NodeBasisSettings
+/*
+ * Kurzbeschreibung: Geladene Basis-Einstellungen auf aktive Runtime-Pointer anwenden
+ * Eingabewert settings: Anzuwendende NodeBasisSettings
  */
 void NodeProvisioningController::applyBasisSettings(const NodeBasisSettings& settings) {
     if ((settings.flags & NODE_BASIS_FLAG_MASTER_MAC) != 0U) {
@@ -1056,9 +1064,9 @@ void NodeProvisioningController::applyBasisSettings(const NodeBasisSettings& set
     *sensorSendIntervalS_ = sanitizeSensorSendInterval(settings.sensorSendIntervalS);
 }
 
-/**
- * @brief Aktuelle Runtime-Werte in NodeBasisSettings-Struct ueberfuehren
- * @return Gefuellte NodeBasisSettings mit Magic und Version
+/*
+ * Kurzbeschreibung: Aktuelle Runtime-Werte in NodeBasisSettings-Struct ueberfuehren
+ * Ausgabewert: Gefuellte NodeBasisSettings mit Magic und Version
  */
 NodeBasisSettings NodeProvisioningController::buildBasisSettings() const {
     NodeBasisSettings settings = {};
@@ -1075,10 +1083,10 @@ NodeBasisSettings NodeProvisioningController::buildBasisSettings() const {
     return settings;
 }
 
-/**
- * @brief Aktuelle oder uebergebene Basis in Preferences schreiben
- * @param prefs Geoeffnete Preferences-Instanz
- * @return true bei Erfolg
+/*
+ * Kurzbeschreibung: Aktuelle oder uebergebene Basis in Preferences schreiben
+ * Eingabewert prefs: Geoeffnete Preferences-Instanz
+ * Ausgabewert: true bei Erfolg
  */
 bool NodeProvisioningController::writeBasisToStorage(Preferences& prefs) const {
     return writeBasisToStorage(prefs, buildBasisSettings());
@@ -1091,10 +1099,10 @@ bool NodeProvisioningController::writeBasisToStorage(
     return prefs.putBytes(basisKey, &settings, sizeof(settings)) == sizeof(settings);
 }
 
-/**
- * @brief Basis-Blob aus Preferences entfernen
- * @param prefs Geoeffnete Preferences-Instanz
- * @return true bei Erfolg
+/*
+ * Kurzbeschreibung: Basis-Blob aus Preferences entfernen
+ * Eingabewert prefs: Geoeffnete Preferences-Instanz
+ * Ausgabewert: true bei Erfolg
  */
 bool NodeProvisioningController::removeBasisFromStorage(Preferences& prefs) const {
     const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
@@ -1102,10 +1110,10 @@ bool NodeProvisioningController::removeBasisFromStorage(Preferences& prefs) cons
     return true;
 }
 
-/**
- * @brief Aktuelle Einstellungen persistent in NVS speichern
+/*
+ * Kurzbeschreibung: Aktuelle Einstellungen persistent in NVS speichern
  *
- * @details Vorgehen:
+ * Details: Vorgehen:
  *          1) Preferences im Schreibmodus oeffnen
  *          2) Basis-Blob schreiben (nur bei Aenderung)
  *          3) Device-Settings speichern (durch deviceHandler)
@@ -1113,7 +1121,7 @@ bool NodeProvisioningController::removeBasisFromStorage(Preferences& prefs) cons
  *          Rollback: Wenn Device-Save fehlschlaegt, wird Basis auf Vorzustand zurueckgesetzt.
  *          Wenn vorher keine Basis existierte, wird sie komplett entfernt.
  *
- * @return true bei Erfolg, false bei NVS-Fehler
+ * Ausgabewert: true bei Erfolg, false bei NVS-Fehler
  */
 bool NodeProvisioningController::saveCurrentState() {
     if (!initialized_) return false;
@@ -1162,17 +1170,17 @@ bool NodeProvisioningController::saveCurrentState() {
     return true;
 }
 
-/**
- * @brief Alle persistierten Einstellungen loeschen (Basis + Device)
+/*
+ * Kurzbeschreibung: Alle persistierten Einstellungen loeschen (Basis + Device)
  *
- * @details Vorgehen:
+ * Details: Vorgehen:
  *          1) Preferences oeffnen
  *          2) Basis entfernen
  *          3) Device-Settings loeschen
  *
  *          Rollback: Wenn Device-Loeschung fehlschlaegt, wird Basis wiederhergestellt.
  *
- * @return true bei Erfolg, false bei NVS-Fehler
+ * Ausgabewert: true bei Erfolg, false bei NVS-Fehler
  */
 bool NodeProvisioningController::clearStoredSettings() {
     if (!initialized_) return false;
@@ -1202,10 +1210,10 @@ bool NodeProvisioningController::clearStoredSettings() {
     return true;
 }
 
-/**
- * @brief Haupt-Loop des Provisioning-Controllers (muss regelmaessig gerufen werden)
+/*
+ * Kurzbeschreibung: Haupt-Loop des Provisioning-Controllers (muss regelmaessig gerufen werden)
  *
- * @details Tasks:
+ * Details: Tasks:
  *          1) Setup-Taster auswerten
  *          2) Web-Client bedienen (wenn AP aktiv)
  *          3) Setup-LED-Indikator aktualisieren
@@ -1232,73 +1240,73 @@ void NodeProvisioningController::update() {
     }
 }
 
-/**
- * @brief Ist der Setup-Modus aktuell aktiv?
+/*
+ * Kurzbeschreibung: Ist der Setup-Modus aktuell aktiv?
  */
 bool NodeProvisioningController::isSetupModeActive() const {
     return setupMode_ != nullptr && *setupMode_;
 }
 
-/**
- * @brief Ist ein Setup-Taster in der Konfiguration definiert?
+/*
+ * Kurzbeschreibung: Ist ein Setup-Taster in der Konfiguration definiert?
  */
 bool NodeProvisioningController::setupButtonConfigured() const {
     return config_.setupButtonPin >= 0;
 }
 
-/**
- * @brief Ist eine Setup-LED in der Konfiguration definiert?
+/*
+ * Kurzbeschreibung: Ist eine Setup-LED in der Konfiguration definiert?
  */
 bool NodeProvisioningController::setupIndicatorConfigured() const {
     return config_.setupIndicatorLedPin >= 0;
 }
 
-/**
- * @brief HTML-Formular-Feldname fuer Status-Intervall (aus Config, sonst Default)
+/*
+ * Kurzbeschreibung: HTML-Formular-Feldname fuer Status-Intervall (aus Config, sonst Default)
  */
 const char* NodeProvisioningController::statusIntervalArgName() const {
     return fallbackText(config_.statusSendIntervalFieldName, STATUS_INTERVAL_ARG_DEFAULT);
 }
 
-/**
- * @brief HTML-Formular-Feldname fuer Sensor-Intervall (aus Config, sonst Default)
+/*
+ * Kurzbeschreibung: HTML-Formular-Feldname fuer Sensor-Intervall (aus Config, sonst Default)
  */
 const char* NodeProvisioningController::sensorIntervalArgName() const {
     return fallbackText(config_.sensorSendIntervalFieldName, SENSOR_INTERVAL_ARG_DEFAULT);
 }
 
-/**
- * @brief Anzeigelabel fuer Status-Intervall (aus Config, sonst Feldname)
+/*
+ * Kurzbeschreibung: Anzeigelabel fuer Status-Intervall (aus Config, sonst Feldname)
  */
 const char* NodeProvisioningController::statusIntervalLabel() const {
     return fallbackText(config_.statusSendIntervalLabel, statusIntervalArgName());
 }
 
-/**
- * @brief Anzeigelabel fuer Sensor-Intervall (aus Config, sonst Feldname)
+/*
+ * Kurzbeschreibung: Anzeigelabel fuer Sensor-Intervall (aus Config, sonst Feldname)
  */
 const char* NodeProvisioningController::sensorIntervalLabel() const {
     return fallbackText(config_.sensorSendIntervalLabel, sensorIntervalArgName());
 }
 
-/**
- * @brief Hilfetext fuer Status-Intervall (aus Config, sonst Default-Hinweis)
+/*
+ * Kurzbeschreibung: Hilfetext fuer Status-Intervall (aus Config, sonst Default-Hinweis)
  */
 const char* NodeProvisioningController::statusIntervalHint() const {
     return fallbackText(config_.statusSendIntervalHint, STATUS_INTERVAL_HINT_DEFAULT);
 }
 
-/**
- * @brief Hilfetext fuer Sensor-Intervall (aus Config, sonst Default-Hinweis)
+/*
+ * Kurzbeschreibung: Hilfetext fuer Sensor-Intervall (aus Config, sonst Default-Hinweis)
  */
 const char* NodeProvisioningController::sensorIntervalHint() const {
     return fallbackText(config_.sensorSendIntervalHint, SENSOR_INTERVAL_HINT_DEFAULT);
 }
 
-/**
- * @brief GPIOs fuer Setup-Taster und -LED initialisieren (pinMode + Pullup-Konfig)
+/*
+ * Kurzbeschreibung: GPIOs fuer Setup-Taster und -LED initialisieren (pinMode + Pullup-Konfig)
  *
- * @details Der Taster-Pin wird als INPUT (ggf. INPUT_PULLUP) konfiguriert, die LED als OUTPUT.
+ * Details: Der Taster-Pin wird als INPUT (ggf. INPUT_PULLUP) konfiguriert, die LED als OUTPUT.
  */
 void NodeProvisioningController::initializeSetupIo() {
     if (setupButtonConfigured()) {
@@ -1311,9 +1319,9 @@ void NodeProvisioningController::initializeSetupIo() {
     }
 }
 
-/**
- * @brief LED-Zustand setzen (beruecksichtigt activeHigh-Konfiguration)
- * @param active true fuer aktiv (entsprechend activeHigh)
+/*
+ * Kurzbeschreibung: LED-Zustand setzen (beruecksichtigt activeHigh-Konfiguration)
+ * Eingabewert active: true fuer aktiv (entsprechend activeHigh)
  */
 void NodeProvisioningController::writeSetupIndicator(bool active) {
     if (!setupIndicatorConfigured()) return;
@@ -1324,10 +1332,10 @@ void NodeProvisioningController::writeSetupIndicator(bool active) {
     setupIndicatorState_ = active;
 }
 
-/**
- * @brief Taster-Entprellung und Langdruck-Erkennung
+/*
+ * Kurzbeschreibung: Taster-Entprellung und Langdruck-Erkennung
  *
- * @details Erkennt steigende/fallende Flanke und misst die Haltezeit.
+ * Details: Erkennt steigende/fallende Flanke und misst die Haltezeit.
  *          Bei ueberschreiten von setupButtonHoldMs: enterSetupMode() ausloesen.
  *          Entprellung erfolgt indirekt ueber die Haltezeit-Schwelle.
  *          Nach einmaligem Ausloesen wird setupButtonHoldConsumed gesetzt bis zum Loslassen.
@@ -1364,10 +1372,10 @@ void NodeProvisioningController::updateSetupButton() {
     setupButtonLastActive_ = active;
 }
 
-/**
- * @brief LED-Blinken im Setup-Modus (sonst aus)
+/*
+ * Kurzbeschreibung: LED-Blinken im Setup-Modus (sonst aus)
  *
- * @details Im Setup-Modus: LED im Intervall setupIndicatorBlinkMs togglen.
+ * Details: Im Setup-Modus: LED im Intervall setupIndicatorBlinkMs togglen.
  *          Blink-Startzeit wird bei jedem Eintritt in den Setup-Modus zurueckgesetzt.
  *          Ausserhalb: LED ausschalten und Blink-Zaehler zuruecksetzen.
  */
@@ -1392,14 +1400,14 @@ void NodeProvisioningController::updateSetupIndicator() {
     }
 }
 
-/**
- * @brief Formatiertes Logging ueber Callback (nur bei gesetztem logFn_)
+/*
+ * Kurzbeschreibung: Formatiertes Logging ueber Callback (nur bei gesetztem logFn_)
  *
- * @details Baut einen 240-Byte-Puffer auf und ruft den Log-Callback mit Level und Message.
+ * Details: Baut einen 240-Byte-Puffer auf und ruft den Log-Callback mit Level und Message.
  *
- * @param level Log-Level (z.B. "INFO", "WARN")
- * @param format printf-Format-String
- * @param ... Variable Argumente
+ * Eingabewert level: Log-Level (z.B. "INFO", "WARN")
+ * Eingabewert format: printf-Format-String
+ * Eingabewert: ... Variable Argumente
  */
 void NodeProvisioningController::log(const char* level, const char* format, ...) const {
     if (logFn_ == nullptr || format == nullptr) return;
