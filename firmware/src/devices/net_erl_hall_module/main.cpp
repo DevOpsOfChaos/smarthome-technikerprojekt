@@ -297,6 +297,21 @@ uint8_t netErlDeviceBuildAutoFlags() {
     return f;
 }
 
+// Aufgabe: Liefert den zuletzt gemessenen Luxwert fuer eine sofortige Auto-On-Entscheidung.
+// Eingabewert: luxOut zeigt auf den Ausgabespeicher fuer den Luxwert.
+// Ausgabewert: true bedeutet, luxOut enthaelt einen gueltigen Luxwert.
+//
+// Hintergrund: Der PIR wird schneller gepollt als der Umweltsensor. Beim ersten
+// Motion-HIGH soll die Lampe trotzdem sofort entscheiden koennen, ob es dunkel
+// genug ist. Deshalb nutzt die Runtime den letzten bekannten VEML7700-Wert.
+bool netErlDeviceGetCachedLux(uint16_t* luxOut) {
+    if (luxOut == nullptr || !veml7700_ok || lux == 0xFFFFU) {
+        return false;
+    }
+    *luxOut = lux;
+    return true;
+}
+
 // Aufgabe: Meldet dem Basistyp, ob ein Sensorfehler vorliegt.
 // Eingabewerte: keine; lokale OK-Flags werden ausgewertet.
 // Ausgabewert: true bedeutet, BME280 oder VEML7700 ist nicht verfuegbar.

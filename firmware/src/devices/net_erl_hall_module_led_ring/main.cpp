@@ -417,6 +417,22 @@ uint8_t netErlDeviceBuildAutoFlags() {
     return f;
 }
 
+// Aufgabe: Liefert den zuletzt gemessenen Luxwert fuer eine sofortige Auto-On-Entscheidung.
+// Eingabewert: luxOut zeigt auf den Ausgabespeicher fuer den Luxwert.
+// Ausgabewert: true bedeutet, luxOut enthaelt einen gueltigen Luxwert.
+//
+// Hintergrund: Der LD2410 wird mit 50 Millisekunden deutlich schneller gepollt
+// als die Umweltsensoren. Beim ersten Motion-HIGH soll die Lampe deshalb nicht
+// bis zum naechsten 2500-Millisekunden-Sensorpoll warten, sondern direkt den
+// letzten bekannten VEML7700-Wert verwenden.
+bool netErlDeviceGetCachedLux(uint16_t* luxOut) {
+    if (luxOut == nullptr || !lux_ok || lux == 0xFFFFU) {
+        return false;
+    }
+    *luxOut = lux;
+    return true;
+}
+
 // Aufgabe: Meldet dem Basistyp, ob ein Sensorfehler vorliegt.
 // Eingabewerte: keine; lokale OK-Flags werden ausgewertet.
 // Ausgabewert: true bedeutet, BME680, VEML7700 oder ENS160 ist nicht verfuegbar.

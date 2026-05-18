@@ -65,6 +65,12 @@
 #ifndef NET_ERL_WDT_TIMEOUT_S
 #define NET_ERL_WDT_TIMEOUT_S 15UL
 #endif
+#ifndef NET_ERL_MANUAL_ON_MAX_WITHOUT_MOTION_MS
+#define NET_ERL_MANUAL_ON_MAX_WITHOUT_MOTION_MS 1800000UL  // 30 Minuten ohne Motion nach manuellem Einschalten.
+#endif
+#ifndef NET_ERL_MANUAL_ON_MOTION_PROBE_MS
+#define NET_ERL_MANUAL_ON_MOTION_PROBE_MS 15000UL          // 15 Sekunden finales Motion-Prueffen.
+#endif
 #ifndef NET_ERL_SENSOR_MASK
 #define NET_ERL_SENSOR_MASK "THLXXXXXXX"
 #endif
@@ -168,8 +174,9 @@ struct NetErlRuntime {
 
     // Relais & Auto-Light
     bool relay_1, relay_auto_owned, blocked_by_lux, pending_auto_on_decision;
+    bool manual_follow_motion_active, manual_follow_motion_seen, manual_follow_motion_probe_active;
     uint16_t auto_on_lux_threshold, auto_off_delay_s;
-    unsigned long letzte_motion_ms;
+    unsigned long letzte_motion_ms, manual_follow_started_ms, manual_follow_probe_started_ms;
 
     // Sensor-Status
     bool fault;
@@ -246,6 +253,7 @@ inline void netErlDeviceFillStatePayload(void*, size_t*) {}
 inline uint8_t netErlDeviceBuildAutoFlags() { return 0; }
 inline bool netErlDeviceHasSensorFault() { return false; }
 inline void netErlDeviceLogSnapshot() {}
+inline bool netErlDeviceGetCachedLux(uint16_t*) { return false; }
 #else
 // Deklariert – Device-main.cpp liefert die Implementierung
 extern void netErlDeviceInit();
@@ -257,6 +265,7 @@ extern void netErlDeviceFillStatePayload(void* payload, size_t* payloadSize);
 extern uint8_t netErlDeviceBuildAutoFlags();
 extern bool netErlDeviceHasSensorFault();
 extern void netErlDeviceLogSnapshot();
+extern bool netErlDeviceGetCachedLux(uint16_t* luxOut);
 
 #ifdef NET_ERL_HAS_INDICATOR_UPDATE
 extern void netErlDeviceUpdateIndicators(bool relayOn);
@@ -779,6 +788,156 @@ bool sendRelayEvent(uint8_t tr) {
 }
 
 // =============================================================================
+// MANUELLES EINSCHALTEN MIT MOTION-FOLGELOGIK
+// =============================================================================
+
+// Aufgabe: Beendet den Modus "manuell eingeschaltet, danach Motion folgen".
+// Eingabewerte:
+// - reason beschreibt nur fuer Debug-Logs, warum der Modus beendet wurde.
+// Ausgabewert: keiner; alle zugehoerigen Runtime-Flags werden geloescht.
+//
+// Dieser Modus wird fuer Server-AN und kurzen Button-AN genutzt. Server- oder
+// Button-AUS bricht ihn sofort ab. Auto-Light nutzt weiterhin relay_auto_owned
+// und bleibt dadurch sauber getrennt.
+void cancelManualFollowMotion(const char* reason) {
+    if (runtime.manual_follow_motion_active || runtime.manual_follow_motion_seen || runtime.manual_follow_motion_probe_active) {
+        logMsg("INFO", "Manual-follow stop (%s)", reason ? reason : "?");
+    }
+    runtime.manual_follow_motion_active = false;
+    runtime.manual_follow_motion_seen = false;
+    runtime.manual_follow_motion_probe_active = false;
+    runtime.manual_follow_started_ms = 0UL;
+    runtime.manual_follow_probe_started_ms = 0UL;
+}
+
+// Aufgabe: Startet den Modus fuer manuelles Einschalten, das spaeter Motion folgt.
+// Eingabewerte:
+// - nowMs ist der aktuelle millis()-Zeitstempel in Millisekunden.
+// - source beschreibt den Ausloeser im Debug-Log, z.B. "master" oder "button".
+// Ausgabewert: keiner; der Modus bleibt aktiv, solange das Relais an ist.
+//
+// Verhalten:
+// - Wenn der Praesenz-Pin beim Einschalten bereits HIGH ist, gilt Motion als gesehen.
+//   Danach schaltet die Lampe aus, sobald Motion weg ist und die Nachlaufzeit
+//   abgelaufen ist.
+// - Wenn beim Einschalten keine Motion aktiv war, bleibt die Lampe an und wartet
+//   auf die erste Motion. Ab dieser ersten Motion gilt wieder "Motion weg plus
+//   Nachlaufzeit".
+// - Wenn 30 Minuten lang keine Motion gesehen wurde, startet ein 15-Sekunden-
+//   Prueffenster. Kommt in diesem Fenster kein HIGH vom Praesenzsensor, wird
+//   die Lampe ausgeschaltet.
+void startManualFollowMotion(unsigned long nowMs, const char* source) {
+    const bool motionPinHighNow = netErlDeviceReadPresence();
+
+    runtime.relay_auto_owned = false;
+    runtime.pending_auto_on_decision = false;
+    runtime.blocked_by_lux = false;
+    runtime.manual_follow_motion_active = true;
+    runtime.manual_follow_motion_seen = motionPinHighNow;
+    runtime.manual_follow_motion_probe_active = false;
+    runtime.manual_follow_started_ms = nowMs;
+    runtime.manual_follow_probe_started_ms = 0UL;
+
+    if (motionPinHighNow) {
+        runtime.motion_aktiv = true;
+        runtime.letzte_motion_ms = nowMs;
+        runtime.pending_motion_event_state = 1U;
+    }
+
+    logMsg("INFO", "Manual-follow start (%s, motion=%s)",
+        source ? source : "?",
+        runtime.manual_follow_motion_seen ? "seen" : "wait");
+}
+
+// Aufgabe: Merkt, dass nach manuellem Einschalten mindestens einmal Motion erkannt wurde.
+// Eingabewert: nowMs ist der aktuelle millis()-Zeitstempel in Millisekunden.
+// Ausgabewert: keiner; ab jetzt gilt die normale Motion-weg-plus-Nachlauf-Regel.
+//
+// Wichtig: Diese Funktion wird auch im 15-Sekunden-Prueffenster genutzt. Ein
+// einzelnes HIGH reicht, um zu beweisen, dass der Radar noch sinnvoll meldet.
+void markManualFollowMotionSeen(unsigned long nowMs) {
+    if (!runtime.manual_follow_motion_active) {
+        return;
+    }
+    if (!runtime.manual_follow_motion_seen || runtime.manual_follow_motion_probe_active) {
+        logMsg("INFO", "Manual-follow motion seen");
+    }
+    runtime.manual_follow_motion_seen = true;
+    runtime.manual_follow_motion_probe_active = false;
+    runtime.manual_follow_probe_started_ms = 0UL;
+    runtime.letzte_motion_ms = nowMs;
+}
+
+// Aufgabe: Schaltet ein manuell eingeschaltetes Relais durch die Motion-Folgelogik aus.
+// Eingabewert: reason beschreibt den Ausloeser fuer Debug-Logs und setRelay().
+// Ausgabewert: keiner; Relais wird ausgeschaltet und ein Auto-Off-Event gemeldet.
+//
+// Der Trigger bleibt SH_TRIGGER_AUTO_OFF_TIMER, weil nicht Master oder Button
+// ausschalten, sondern die interne Nachlauf-/Sicherheitslogik.
+void turnOffManualFollowRelay(const char* reason) {
+    setRelay(false, reason ? reason : "manual_follow_off");
+    sendRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER);
+    cancelManualFollowMotion(reason);
+    runtime.state_report_offen = true;
+}
+
+// Aufgabe: Sichert ein explizites AUS gegen sofortiges Wieder-Einschalten durch
+// einen bereits HIGH stehenden Praesenzsensor.
+// Eingabewert: nowMs ist der aktuelle millis()-Zeitstempel in Millisekunden.
+// Ausgabewert: keiner; bei aktuellem Motion-HIGH wird runtime.motion_aktiv gesetzt.
+//
+// Warum das noetig ist:
+// Server-AUS und Button-AUS sollen echte AUS-Entscheidungen sein. Wenn der
+// Radar-Ausgang in genau diesem Moment HIGH ist, wuerde der naechste Poll sonst
+// "neue Bewegung" sehen und Auto-Light sofort wieder einschalten. Stattdessen
+// wird die aktuelle HIGH-Phase als bereits bekannt markiert. Erst nachdem der
+// Sensor LOW war und spaeter wieder HIGH wird, darf Auto-Light erneut starten.
+void holdExplicitOffUntilNextMotionRisingEdge(unsigned long nowMs) {
+    if (!netErlDeviceReadPresence()) {
+        return;
+    }
+    runtime.motion_aktiv = true;
+    runtime.letzte_motion_ms = nowMs;
+    runtime.pending_motion_event_state = 1U;
+}
+
+// Aufgabe: Sicherheitslogik fuer manuell eingeschaltetes Licht ohne jemals erkannte Motion.
+// Eingabewert: nowMs ist der aktuelle millis()-Zeitstempel in Millisekunden.
+// Ausgabewert: true bedeutet, die Funktion hat ausgeschaltet oder wartet im
+// Prueffenster; der normale Motion-Off-Teil soll dann nichts weiter tun.
+//
+// Hintergrund: Wenn Server oder Button die Lampe einschalten und der Radar nie
+// HIGH meldet, wuerde die Lampe sonst unbegrenzt an bleiben. Nach 30 Minuten
+// startet deshalb ein 15-Sekunden-Fenster. Wird in diesem Fenster weiterhin
+// keine Motion erkannt, wird ausgeschaltet.
+bool handleManualFollowNoMotionWatchdog(unsigned long nowMs) {
+    if (!runtime.manual_follow_motion_active || runtime.manual_follow_motion_seen || !runtime.relay_1) {
+        return false;
+    }
+
+    if (!runtime.manual_follow_motion_probe_active) {
+        const bool maxWithoutMotionElapsed = runtime.manual_follow_started_ms > 0UL
+            && (nowMs - runtime.manual_follow_started_ms) >= NET_ERL_MANUAL_ON_MAX_WITHOUT_MOTION_MS;
+        if (!maxWithoutMotionElapsed) {
+            return false;
+        }
+        runtime.manual_follow_motion_probe_active = true;
+        runtime.manual_follow_probe_started_ms = nowMs;
+        logMsg("WARN", "Manual-follow probe started");
+        return true;
+    }
+
+    const bool probeElapsed = runtime.manual_follow_probe_started_ms > 0UL
+        && (nowMs - runtime.manual_follow_probe_started_ms) >= NET_ERL_MANUAL_ON_MOTION_PROBE_MS;
+    if (!probeElapsed) {
+        return true;
+    }
+
+    turnOffManualFollowRelay("manual_follow_no_motion");
+    return true;
+}
+
+// =============================================================================
 // PROTOKOLL-VERARBEITUNG
 // =============================================================================
 
@@ -828,14 +987,18 @@ void handleCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, con
             return;
         }
 
-        // Auto-Light-Steuerung deaktivieren – Master uebernimmt manuell
-        runtime.relay_auto_owned = false;
-        runtime.pending_auto_on_decision = false;
-        runtime.blocked_by_lux = false;
-
         // Relais schalten (param2 != 0 → AN, sonst AUS)
         bool relayOn = (payload.param2 != 0U);
         setRelay(relayOn, "master");
+        if (relayOn) {
+            startManualFollowMotion(millis(), "master");
+        } else {
+            runtime.relay_auto_owned = false;
+            runtime.pending_auto_on_decision = false;
+            runtime.blocked_by_lux = false;
+            cancelManualFollowMotion("master_off");
+            holdExplicitOffUntilNextMotionRisingEdge(millis());
+        }
 
         runtime.state_report_offen = true;
         sendRelayEvent(SH_TRIGGER_MASTER_CMD);
@@ -1029,6 +1192,42 @@ void initFunk() {
 // =============================================================================
 
 // =============================================================================
+// tryAutoOnFromCachedLux – Sofortige Auto-On-Entscheidung mit letztem Luxwert.
+//
+// Aufgabe: Prueft beim ersten Motion-HIGH sofort den letzten gueltigen Luxwert.
+// Eingabewerte: keine; Lux kommt ueber netErlDeviceGetCachedLux() aus dem Device.
+// Ausgabewert: true bedeutet, die Auto-On-Entscheidung ist erledigt.
+//
+// Warum diese Funktion existiert:
+// Der Umwelt-/Lux-Poll laeuft deutlich langsamer als der Praesenz-Poll. Beim
+// LED-Ring-Modul sind es 2500 Millisekunden fuer die Umweltsensoren, aber nur
+// 50 Millisekunden fuer den LD2410. Ohne gecachten Luxwert wuerde eine erkannte
+// Bewegung bis zum naechsten Lux-Poll warten. Das ist fuer Lichtsteuerung zu
+// traege. Deshalb wird der zuletzt gemessene Luxwert sofort verwendet. Nur wenn
+// noch kein gueltiger Luxwert vorhanden ist, bleibt pending_auto_on_decision
+// gesetzt und die alte Late-Lux-Logik im Device darf spaeter entscheiden.
+// =============================================================================
+bool tryAutoOnFromCachedLux() {
+    uint16_t cachedLux = 0xFFFFU;
+    if (!netErlDeviceGetCachedLux(&cachedLux) || cachedLux == 0xFFFFU) {
+        return false;
+    }
+
+    runtime.pending_auto_on_decision = false;
+    if (cachedLux <= runtime.auto_on_lux_threshold) {
+        runtime.relay_auto_owned = true;
+        runtime.blocked_by_lux = false;
+        setRelay(true, "auto_on_cached_lux");
+        sendRelayEvent(SH_TRIGGER_AUTO);
+        runtime.state_report_offen = true;
+    } else {
+        runtime.blocked_by_lux = true;
+        runtime.state_report_offen = true;
+    }
+    return true;
+}
+
+// =============================================================================
 // motionOn – Wird aufgerufen wenn Bewegung erkannt wird.
 //
 // WAS: Setzt den Runtime-Zustand auf "Praesenz erkannt".
@@ -1036,10 +1235,9 @@ void initFunk() {
 //
 // PARAM nowMs:  Aktuelle Zeit in Millisekunden (millis()).
 //
-// NEBENEFFEKT: Wenn das Relais noch AUS ist, wird pending_auto_on_decision
-//              gesetzt. Der eigentliche Lux-Schwellen-Check erfolgt erst
-//              im naechsten Sensor-Poll (pollPresence), weil dort die
-//              aktuellen Lux-Werte verfuegbar sind.
+// NEBENEFFEKT: Wenn das Relais noch AUS ist, wird Auto-On sofort mit dem letzten
+//              gueltigen Luxwert entschieden. Nur wenn kein Luxwert vorliegt,
+//              bleibt pending_auto_on_decision fuer die Late-Lux-Logik gesetzt.
 // =============================================================================
 void motionOn(unsigned long nowMs) {
     runtime.motion_aktiv = true;                    // Bewegung ist jetzt aktiv
@@ -1049,10 +1247,14 @@ void motionOn(unsigned long nowMs) {
     runtime.blocked_by_lux = false;                 // Lux-Sperre zuruecksetzen
     runtime.pending_auto_on_decision = false;       // Vorherige Auto-ON-Entscheidung loeschen
 
-    // Wenn Relais AUS: Lux-Check im naechsten Sensor-Poll nachholen
-    // (dort sind aktuelle Lux-Sensorwerte verfuegbar)
+    markManualFollowMotionSeen(nowMs);
+
+    // Wenn Relais AUS: sofort mit dem zuletzt gemessenen Luxwert entscheiden.
+    // Ist noch kein Luxwert vorhanden, entscheidet die Device-Late-Lux-Logik
+    // beim naechsten gueltigen Sensorwert.
     if (!runtime.relay_1) {
         runtime.pending_auto_on_decision = true;
+        tryAutoOnFromCachedLux();
     }
 }
 
@@ -1083,6 +1285,7 @@ void pollPresence(unsigned long nowMs) {
     bool motionDetected = netErlDeviceReadPresence();
 
     if (motionDetected) {
+        markManualFollowMotionSeen(nowMs);
         // --- BEWEGUNG ERKANNT ---
         if (!runtime.motion_aktiv) {
             // Erste Bewegung seit langer Zeit → Motion-ON ausloesen
@@ -1095,6 +1298,10 @@ void pollPresence(unsigned long nowMs) {
 #endif
         }
         return;  // Kein Motion-Off-Check waehrend Bewegung
+    }
+
+    if (handleManualFollowNoMotionWatchdog(nowMs)) {
+        return;
     }
 
     // --- KEINE BEWEGUNG → Nachlauf-Timer pruefen ---
@@ -1119,6 +1326,9 @@ void pollPresence(unsigned long nowMs) {
         setRelay(false, "auto_off");
         sendRelayEvent(SH_TRIGGER_AUTO_OFF_TIMER);
         runtime.relay_auto_owned = false;           // Relais nicht mehr unter Auto-Kontrolle
+    }
+    if (runtime.relay_1 && runtime.manual_follow_motion_active && runtime.manual_follow_motion_seen) {
+        turnOffManualFollowRelay("manual_follow_motion_off");
     }
 }
 
@@ -1173,13 +1383,19 @@ void processBtn(unsigned long nowMs) {
         return;
     }
 
-    // Short-Press → Relais toggeln
-    runtime.relay_auto_owned = false;
-    runtime.pending_auto_on_decision = false;
-    runtime.blocked_by_lux = false;
-
+    // Short-Press → Relais toggeln. Button-AN folgt danach derselben Motion-
+    // Folgelogik wie Master-AN; Button-AUS ist ein echtes AUS und bricht alles ab.
     bool newRelayState = !runtime.relay_1;
     setRelay(newRelayState, "button");
+    if (newRelayState) {
+        startManualFollowMotion(nowMs, "button");
+    } else {
+        runtime.relay_auto_owned = false;
+        runtime.pending_auto_on_decision = false;
+        runtime.blocked_by_lux = false;
+        cancelManualFollowMotion("button_off");
+        holdExplicitOffUntilNextMotionRisingEdge(nowMs);
+    }
     sendRelayEvent(SH_TRIGGER_MANUAL_BUTTON);
     runtime.state_report_offen = true;
 }
