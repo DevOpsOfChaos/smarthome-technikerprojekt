@@ -1,22 +1,31 @@
-// =============================================================================
-// PinConfig.h – GPIO-Pin-Mapping fuer Master
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/basetypes/master_firmware/PinConfig.h
-//
-// Datei-Funktion:
-//   Pin-Konfiguration fuer den ESP-NOW-Master. Der Master nutzt keine
-//   Relais und aktuell keine externe Sensorik. Feste Board-Standards
-//   bleiben trotzdem zentral hinterlegt. Optionale Status-LED zeigt
-//   Verbindungszustand an (AN=verbunden, AUS=Trennung).
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-//
-// Aenderungshistorie:
-//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch)
-// =============================================================================
+/*
+===============================================================================
+ Datei: PinConfig.h
+ Code-Name: Master Firmware Pins
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Pin-Konfiguration / ESP-NOW-MQTT-Master
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: GPIO-Zuordnung fuer die Master-Firmware
+ Beschreibung: Legt optionale Master-Pins fuer Status-LED, Button, Relais-
+ Platzhalter, I2C-Standardpins und interne Board-LED fest. Der Master arbeitet
+ primaer als Funk-/MQTT-Bruecke und nutzt normalerweise keine Relais oder
+ externe Sensorik. Werte von -1 deaktivieren optionale Hardware.
+
+ Pin-Belegung:
+ - Status-LED: -1, nicht bestueckt oder deaktiviert.
+ - Button: -1, nicht bestueckt oder deaktiviert.
+ - Relais 1/2: -1, auf dem Master nicht genutzt.
+ - I2C SDA/SCL: Board-Standard aus HardwarePinStandard.h.
+ - Interner NeoPixel: Board-Standard aus HardwarePinStandard.h.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Pin-Konfiguration fuer Master angelegt.
+ - 2026-05-18: Dateiheader an Referenzstil angepasst.
+===============================================================================
+*/
 
 #pragma once
 
@@ -54,7 +63,7 @@
 #endif
 
 // =============================================================================
-// INTERNE ALIAS-DEFINES – Mappen auf Kurznamen
+// INTERNE ALIAS-DEFINES - Mappen auf Kurznamen
 // =============================================================================
 
 constexpr int PIN_STATUS_LED = MASTER_PIN_STATUS_LED;       // Status-LED (optional)

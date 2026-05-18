@@ -1,29 +1,38 @@
-// =============================================================================
-// AppConfig.h – Master-Konfiguration (Profile, Timer, Limits)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/basetypes/master_firmware/AppConfig.h
-//
-// Datei-Funktion:
-//   Hauptkonfiguration fuer den ESP-NOW-Master. Definiert zwei Profile
-//   (Primary + Secondary) fuer verschiedene Geraete-IDs, sowie alle
-//   Timing-Parameter (WLAN-Rekonnekt, MQTT-Rekonnekt, ACK-Timeout),
-//   Node-Limits (max. Nodes, Offline-Timeouts), davon abgeleitete
-//   constexpr-Konstanten. Private Zugangsdaten (WLAN, MQTT) liegen in
-//   Secrets.h ausserhalb des Repos.
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-//
-// Aenderungshistorie:
-//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch)
-// =============================================================================
+/*
+===============================================================================
+ Datei: AppConfig.h
+ Code-Name: Master Firmware Config
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Basistyp-Konfiguration / ESP-NOW-MQTT-Master
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: Konfiguration fuer die Master-Firmware
+ Beschreibung: Definiert Master-Profile, Geraeteidentitaet, WLAN-/MQTT-Timer,
+ ACK-/Retry-Grenzen, Node-Limits, MQTT-Puffergroesse und daraus abgeleitete
+ Konstanten. Zugangsdaten werden nicht hier abgelegt, sondern ueber Secrets.h
+ ausserhalb der oeffentlichen technischen Projektlinie eingebunden.
+
+ Wichtige Werte:
+ - 10000 Millisekunden WLAN-Reconnect-Intervall entsprechen 10 Sekunden.
+ - 5000 Millisekunden MQTT-Reconnect-Intervall entsprechen 5 Sekunden.
+ - 800 Millisekunden ACK-Timeout vor einem Retry.
+ - 2 Retries bedeuten maximal 3 Sendeversuche pro bestaetigungspflichtigem Befehl.
+ - 75000 Millisekunden Netz-Node-Timeout entsprechen 75 Sekunden.
+ - 600000 Millisekunden Batterie-Node-Timeout entsprechen 10 Minuten.
+ - 16 dynamische Nodes sind maximal gleichzeitig in der Registry vorgesehen.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Master-Konfiguration angelegt.
+ - 2026-05-18: Dateiheader und Kommentare an Referenzstil angepasst.
+===============================================================================
+*/
 
 #pragma once
 
 // =============================================================================
-// PROFIL-SYSTEM – Geraete-Identitaet je nach Profil (Primary/Secondary)
+// PROFIL-SYSTEM - Geraete-Identitaet je nach Profil (Primary/Secondary)
 // =============================================================================
 
 #define SH_MASTER_PROFILE_PRIMARY    1U
@@ -60,7 +69,7 @@
 #endif
 
 // =============================================================================
-// DEBUG – Serielle Ausgaben
+// DEBUG - Serielle Ausgaben
 // =============================================================================
 
 #ifndef MASTER_DEBUG_ENABLED
@@ -68,7 +77,7 @@
 #endif
 
 // =============================================================================
-// FUNK / WLAN – Kanal und Reconnect
+// FUNK / WLAN - Kanal und Reconnect
 // =============================================================================
 
 // ESP-NOW WLAN-Kanal (muss mit Nodes uebereinstimmen)
@@ -76,18 +85,18 @@
 #define MASTER_WLAN_CHANNEL 6
 #endif
 
-// WLAN-Reconnect-Intervall (ms) – wie oft WLAN erneut verbinden
+// WLAN-Reconnect-Intervall in Millisekunden; wie oft WLAN erneut verbunden wird.
 #ifndef MASTER_WIFI_RECONNECT_INTERVAL_MS
 #define MASTER_WIFI_RECONNECT_INTERVAL_MS 10000UL
 #endif
 
-// MQTT-Reconnect-Intervall (ms) – wie oft MQTT erneut verbinden
+// MQTT-Reconnect-Intervall in Millisekunden; wie oft MQTT erneut verbunden wird.
 #ifndef MASTER_MQTT_RECONNECT_INTERVAL_MS
 #define MASTER_MQTT_RECONNECT_INTERVAL_MS 5000UL
 #endif
 
 // =============================================================================
-// ACK / PENDING – Timeout und Retries fuer Befehle an Nodes
+// ACK / PENDING - Timeout und Retries fuer Befehle an Nodes
 // =============================================================================
 
 // Timeout bis zum ersten Retry (ms)
@@ -101,7 +110,7 @@
 #endif
 
 // =============================================================================
-// NODE-MANAGEMENT – Registry-Groesse und Offline-Timeout
+// NODE-MANAGEMENT - Registry-Groesse und Offline-Timeout
 // =============================================================================
 
 // Offline-Timeout fuer Netz-Nodes (ms, 75s = 3-4 verpasste Heartbeats)
@@ -120,7 +129,7 @@
 #endif
 
 // =============================================================================
-// MQTT – Buffer-Groesse und Loop-Intervall
+// MQTT - Buffer-Groesse und Loop-Intervall
 // =============================================================================
 
 // MQTT-Puffergroesse (B) fuer eingehende Nachrichten
@@ -134,14 +143,14 @@
 #endif
 
 // =============================================================================
-// HINWEIS – Zugangsdaten (WLAN, MQTT) in Secrets.h
+// HINWEIS - Zugangsdaten (WLAN, MQTT) in Secrets.h
 // =============================================================================
 // Private Zugangsdaten stehen in Secrets.h (ausserhalb Repo, siehe .gitignore).
 // Vorlage: firmware/include/Secrets.example.h
 // =============================================================================
 
 // =============================================================================
-// ABGELEITETE KONSTANTEN – Aus #defines als constexpr
+// ABGELEITETE KONSTANTEN - Aus #defines als constexpr
 // =============================================================================
 
 constexpr char DEVICE_ID[]    = MASTER_PROFILE_DEVICE_ID;
