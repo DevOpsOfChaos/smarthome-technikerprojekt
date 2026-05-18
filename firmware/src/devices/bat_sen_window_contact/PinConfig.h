@@ -1,32 +1,33 @@
-// =============================================================================
-// PinConfig.h – GPIO-Pin-Mapping fuer BAT-SEN Window Contact
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/bat_sen_window_contact/PinConfig.h
-// Hardware:   ESP32-C3
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Pin-Belegung:
-//   Fensterkontakt:      GPIO3 – Reed-Kontakt, INPUT_PULLUP
-//                              GPIO3 ist C3-Wake-faehig (GPIO0-5),
-//                              bewusst NICHT GPIO9 (Boot-Button)
-//   Batterie-ADC:        GPIO? – HardwarePinStandard::PIN_BATTERY_ADC
-//   Setup-Button:        GPIO2 – active-LOW
-//   Setup-LED:           GPIO7 – active-HIGH
-//   Status-LED:          -1    – nicht bestueckt
-//
-// Wake-Konfiguration:
-//   GPIO-Wake:           aktiv (BAT_SEN_ENABLE_GPIO_WAKE=1)
-//   Wake-Pegel:          HIGH (BAT_SEN_GPIO_WAKE_LEVEL_HIGH=1)
-//   Fenster offen =      HIGH (BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH=1)
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/*
+===============================================================================
+ Datei: PinConfig.h
+ Code-Name: BAT-SEN Window Contact Pins
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Pin-Konfiguration / Batterie-Sensor
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: GPIO-Zuordnung fuer den batteriebetriebenen Fensterkontakt
+ Beschreibung: Ordnet Reed-Kontakt, Batterie-ADC, Setup-Button und Setup-LED
+ den konkreten ESP32-C3-Pins zu. GPIO3 ist bewusst gewaehlt, weil er Wake-faehig
+ ist und nicht mit dem Boot-Button kollidiert.
+
+ Genutzte Bibliotheken:
+ - HardwarePinStandard.h: eigene Pin-Standardbibliothek fuer gemeinsam genutzte Pins.
+
+ Pin-Belegung:
+ - Fensterkontakt: GPIO3, Reed-Kontakt mit Pullup, HIGH bedeutet offen.
+ - Batterie-ADC: HardwarePinStandard::PIN_BATTERY_ADC.
+ - Setup-Button: GPIO2, active-LOW, 5000 Millisekunden Haltezeit.
+ - Setup-LED: GPIO7, active-HIGH, 500 Millisekunden Blinkintervall.
+ - Status-LED: -1, nicht bestueckt.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Pin-Mapping fuer BAT-SEN Window Contact angelegt.
+ - 2026-05-18: Dateiheader vereinheitlicht und Platzhalter entfernt.
+===============================================================================
+*/
 
 #pragma once
 
@@ -46,12 +47,12 @@
 // Wake-Input = Fensterkontakt-Pin (GPIO-Wake bei Pegelwechsel)
 #define BAT_SEN_PIN_WAKE_INPUT BAT_SEN_WINDOW_CONTACT_PIN
 
-// Setup-Button (GPIO2, active-LOW)
+// Setup-Button: GPIO2, active-LOW, 5000 Millisekunden Haltezeit fuer Setup.
 #define SETUP_BUTTON_PIN 2
 #define SETUP_BUTTON_ACTIVE_LOW 0
 #define SETUP_BUTTON_HOLD_MS 5000UL
 
-// Setup-Indikator-LED (GPIO7, active-HIGH, blinkt 500ms)
+// Setup-Indikator-LED: GPIO7, active-HIGH, blinkt alle 500 Millisekunden.
 #define SETUP_INDICATOR_LED_PIN 7
 #define SETUP_INDICATOR_LED_ACTIVE_HIGH 1
 #define SETUP_INDICATOR_BLINK_MS 500UL

@@ -1,37 +1,32 @@
-// =============================================================================
-// DeviceConfig.h – Geraetekonfiguration fuer BAT-SEN Rain (Regensensor)
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/bat_sen_rain_sensor/DeviceConfig.h
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Geraete-Identitaet:
-//   ID:       bat_sen_02
-//   Name:     BAT-SEN Rain
-//   Variante: bat_sen_rain_sensor
-//   Caps:     BATTERY | RAIN
-//
-// Batterieprofil: 2x AA (2.0V-3.2V)
-// Wake-Intervall: 900s (15 Minuten) – Timer-basiert, kein GPIO-Wake
-// RX-Fenster:     5000ms (5s)
-//
-// Regen-Parameter:
-//   Sample-Intervall:    200ms
-//   Hysterese:          25 ADC-Stufen
-//   Nass-Schwelle:      2200 (Rohwert)
-//   Trocken-Schwelle:   2050 (Rohwert)
-//   HIGH=wet:           ja (1)
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-//
-// Aenderungshistorie:
-//   [2026-05-14] DevOpsOfChaos – Kommentierung (Deutsch)
-// =============================================================================
+/*
+===============================================================================
+ Datei: DeviceConfig.h
+ Code-Name: BAT-SEN Rain Config
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Device-Konfiguration / Batterie-Sensor
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: Geraetekonfiguration fuer den batteriebetriebenen Regensensor
+ Beschreibung: Definiert Identitaet, Faehigkeiten, Batterieprofil, Timer-Wake
+ und ADC-Schwellwerte fuer bat_sen_rain_sensor. Das Geraet bleibt bewusst
+ timer-basiert und nutzt keinen GPIO-Wake.
+
+ Genutzte Bibliotheken:
+ - DeviceTypes.h: eigene Protokollbibliothek mit Capability-Flags und Batterieprofilen.
+
+ Wichtige Werte:
+ - 900 Sekunden Wake-Intervall entsprechen 15 Minuten.
+ - 5000 Millisekunden RX-Fenster entsprechen 5 Sekunden Empfangszeit nach Wake.
+ - 200 Millisekunden Sample-Intervall begrenzen die ADC-Abfrage.
+ - 25 ADC-Stufen Hysterese reduzieren Flattern am Grenzwert.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Konfiguration fuer BAT-SEN Rain angelegt.
+ - 2026-05-18: Dateiheader vereinheitlicht und Platzhalter entfernt.
+===============================================================================
+*/
 
 #pragma once
 
@@ -46,14 +41,14 @@
 
 // Batterie: 2x AA (2000mV leer, 3200mV voll)
 #define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_2X_AA
-#define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U    // Alle 15 Min aufwachen
-#define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U      // 5s RX-Fenster nach Wake
+#define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U    // 900 Sekunden = 15 Minuten.
+#define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U      // 5000 Millisekunden = 5 Sekunden.
 
 // GPIO-Wake: deaktiviert (V1 bleibt timer-basiert)
 #define BAT_SEN_ENABLE_GPIO_WAKE 0
 
 // Regen-Parameter
-#define BAT_SEN_RAIN_SAMPLE_INTERVAL_MS 200UL   // ADC alle 200ms abfragen
+#define BAT_SEN_RAIN_SAMPLE_INTERVAL_MS 200UL   // ADC alle 200 Millisekunden abfragen.
 #define BAT_SEN_RAIN_STATE_DELTA_RAW 25U        // Hysterese: 25 ADC-Stufen
 #define BAT_SEN_RAIN_WET_THRESHOLD_RAW 2200U    // Rohwert >= 2200 = nass
 #define BAT_SEN_RAIN_CLEAR_THRESHOLD_RAW 2050U  // Rohwert <= 2050 = trocken

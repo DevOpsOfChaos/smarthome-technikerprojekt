@@ -1,31 +1,34 @@
-// =============================================================================
-// DeviceConfig.h – Geraetekonfiguration NET-SEN Env BME280+VEML+Rain
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_sen_weather_station/DeviceConfig.h
-//
-// === EINSATZZWECK ===
-// Netzbetriebene Regenstation fuer Aussenumgebung:
-// Temperatur, Feuchte, Luftdruck, Helligkeit und digitaler Nass/Trocken-Status.
-// === EINSATZZWECK ===
-//
-// Geraete-Identitaet:
-//   ID:       NET-SEN-002
-//   Name:     NET-SEN Env BME280+VEML+Rain
-//   Variante: net_sen_weather_station
-//   Caps:     TEMP | HUM | LUX | PRESSURE | RAIN
-//
-// Sensoren:
-//   BME280:      I2C, Adresse 0x76/0x77
-//   VEML7700:    I2C, Adresse 0x10
-//   Regensensor: GPIO3, digital, active-LOW mit Pullup
-//
-// Regen wird als Event gemeldet. Der Server leitet daraus den aktuellen rain-State ab.
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-16
-// =============================================================================
+/*
+===============================================================================
+ Datei: DeviceConfig.h
+ Code-Name: NET-SEN Weather Station Config
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Device-Konfiguration / Netzbetriebener Sensor
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: Geraetekonfiguration fuer die netzbetriebene Wetterstation
+ Beschreibung: Definiert Identitaet, Faehigkeiten, Meldeintervalle, Sensorzeiten,
+ Delta-Schwellen und I2C-Adressen fuer net_sen_weather_station. Regen wird als
+ Event gemeldet; der Master leitet daraus den aktuellen Regenstatus ab.
+
+ Genutzte Bibliotheken:
+ - DeviceTypes.h: eigene Protokollbibliothek mit Capability-Flags und Reporting-Modi.
+
+ Wichtige Werte:
+ - 5000 Millisekunden HELLO-Retry entsprechen 5 Sekunden.
+ - 20000 Millisekunden Heartbeat entsprechen 20 Sekunden.
+ - 2500 Millisekunden Sensor-Read-Intervall entsprechen 2,5 Sekunden.
+ - 15000 Millisekunden Fehlerlog-Intervall entsprechen 15 Sekunden.
+ - 30000 Millisekunden Snapshot-Intervall entsprechen 30 Sekunden.
+ - 1050 Millisekunden VEML7700-Startverzoegerung entsprechen 1,05 Sekunden.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Konfiguration fuer NET-SEN Weather Station angelegt.
+ - 2026-05-18: Dateiheader vereinheitlicht.
+===============================================================================
+*/
 
 #pragma once
 
@@ -39,19 +42,19 @@
 
 #define NET_SEN_ENABLE_I2C_BASE 1
 
-#define NET_SEN_HELLO_RETRY_INTERVAL_MS 5000UL
-#define NET_SEN_HEARTBEAT_INTERVAL_MS 20000UL
+#define NET_SEN_HELLO_RETRY_INTERVAL_MS 5000UL  // 5000 Millisekunden = 5 Sekunden.
+#define NET_SEN_HEARTBEAT_INTERVAL_MS 20000UL   // 20000 Millisekunden = 20 Sekunden.
 #define NET_SEN_DEFAULT_REPORT_INTERVAL_S 10U
 #define NET_SEN_DEFAULT_SENSOR_SEND_INTERVAL_S 10U
 #define NET_SEN_STATE_INTERVAL_MS (NET_SEN_DEFAULT_REPORT_INTERVAL_S * 1000UL)
 #define NET_SEN_MIN_REPORT_INTERVAL_S 5U
 #define NET_SEN_MAX_REPORT_INTERVAL_S 600U
-#define NET_SEN_LOOP_INTERVAL_MS 50UL
+#define NET_SEN_LOOP_INTERVAL_MS 50UL           // 50 Millisekunden Loop-Pause.
 
 // Sensor-Timing
-#define NET_SEN_ENV_BME280_VEML_RAIN_SENSOR_READ_INTERVAL_MS 2500UL
-#define NET_SEN_ENV_BME280_VEML_RAIN_ERROR_LOG_INTERVAL_MS 15000UL
-#define NET_SEN_ENV_BME280_VEML_RAIN_SNAPSHOT_LOG_INTERVAL_MS 30000UL
+#define NET_SEN_ENV_BME280_VEML_RAIN_SENSOR_READ_INTERVAL_MS 2500UL  // 2500 Millisekunden = 2,5 Sekunden.
+#define NET_SEN_ENV_BME280_VEML_RAIN_ERROR_LOG_INTERVAL_MS 15000UL   // 15000 Millisekunden = 15 Sekunden.
+#define NET_SEN_ENV_BME280_VEML_RAIN_SNAPSHOT_LOG_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 
 // Hysterese
 #define NET_SEN_ENV_BME280_VEML_RAIN_TEMP_DELTA_01C 10
@@ -62,4 +65,4 @@
 // I2C-Adressen
 #define NET_SEN_ENV_BME280_PRIMARY_ADDRESS 0x76
 #define NET_SEN_ENV_BME280_FALLBACK_ADDRESS 0x77
-#define NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS 1050UL
+#define NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS 1050UL // 1050 Millisekunden = 1,05 Sekunden.

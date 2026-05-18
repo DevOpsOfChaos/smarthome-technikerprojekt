@@ -1,33 +1,31 @@
-// =============================================================================
-// DeviceConfig.h – Geraetekonfiguration fuer BAT-SEN Window Contact
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/bat_sen_window_contact/DeviceConfig.h
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Geraete-Identitaet:
-//   ID:       bat_sen_01
-//   Name:     BAT-SEN Window
-//   Variante: bat_sen_window_contact
-//   Caps:     BATTERY | WINDOW
-//
-// Batterieprofil: CR2032 (2.2V-3.0V)
-// Wake-Intervall: 900s (15 Min) – Timer + GPIO-Wake bei Kontaktwechsel
-// RX-Fenster:     5000ms (5s)
-//
-// Kontakt-Parameter:
-//   Entprellzeit:             35ms
-//   Input-Pullup:             aktiv
-//   Offen-Pegel:              HIGH
-//   GPIO-Wake:                aktiv (HIGH = Wake)
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/*
+===============================================================================
+ Datei: DeviceConfig.h
+ Code-Name: BAT-SEN Window Contact Config
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Device-Konfiguration / Batterie-Sensor
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: Geraetekonfiguration fuer den batteriebetriebenen Fensterkontakt
+ Beschreibung: Definiert Identitaet, Faehigkeiten, Batterieprofil, Wake-Verhalten
+ und Kontaktparameter fuer bat_sen_window_contact. Die Runtime liest diese
+ Defines zur Compile-Zeit ein.
+
+ Genutzte Bibliotheken:
+ - DeviceTypes.h: eigene Protokollbibliothek mit Capability-Flags und Batterieprofilen.
+
+ Wichtige Werte:
+ - 900 Sekunden Wake-Intervall entsprechen 15 Minuten.
+ - 5000 Millisekunden RX-Fenster entsprechen 5 Sekunden Empfangszeit nach Wake.
+ - 35 Millisekunden Entprellzeit verhindern falsche Kontaktwechsel.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Konfiguration fuer BAT-SEN Window Contact angelegt.
+ - 2026-05-18: Dateiheader vereinheitlicht und Platzhalter entfernt.
+===============================================================================
+*/
 
 #pragma once
 
@@ -42,8 +40,8 @@
 
 // Batterie: CR2032 (2200mV leer, 3000mV voll)
 #define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_CR2032
-#define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U
-#define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U
+#define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U     // 900 Sekunden = 15 Minuten.
+#define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U       // 5000 Millisekunden = 5 Sekunden.
 
 // GPIO-Wake aktiv: wird bei Pegelwechsel am Kontakt-Pin aufgeweckt
 #define BAT_SEN_ENABLE_GPIO_WAKE 1
@@ -51,6 +49,6 @@
 #define BAT_SEN_GPIO_WAKE_LEVEL_HIGH BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH
 
 // Kontakt-Parameter
-#define BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS 35UL      // Entprellzeit (ms)
+#define BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS 35UL      // 35 Millisekunden Entprellzeit.
 #define BAT_SEN_WINDOW_CONTACT_USE_INPUT_PULLUP 1    // Pullup aktiv
 #define BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH 1     // offen = HIGH

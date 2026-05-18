@@ -1,35 +1,34 @@
-// =============================================================================
-// DeviceConfig.h – Geraetekonfiguration NET-ERL Hall Module LED Ring
-// =============================================================================
-// Projekt:    Smarthome Technikerprojekt
-// Pfad:       firmware/src/devices/net_erl_hall_module_led_ring/DeviceConfig.h
-//
-// === EINSATZZWECK ===
-// [HIER EINTRAGEN]
-// === EINSATZZWECK ===
-//
-// Geraete-Identitaet:
-//   ID:       NET-ERL-002
-//   Name:     NET-ERL Hall Module LED Ring
-//   Variante: net_erl_hall_module_led_ring
-//   Caps:     RELAY | TEMP | HUM | LUX | MOTION | AQI | PRESSURE | BUTTON | LED_RING
-//
-// Sensoren/Aktoren:
-//   BME680:     I2C, 0x76/0x77 (Temp/Feuchte/Druck/Gas)
-//   VEML7700:   I2C, 0x10 (Lux)
-//   ENS160:     I2C, 0x52/0x53 (AQI/TVOC/eCO2)
-//   LD2410C:    GPIO7 (Radar-Praesenz)
-//   NeoPixel:   GPIO8, 17 LEDs
-//   Button:     GPIO6 (active-LOW, 40ms Debounce)
-//   Relais:     GPIO10 (active-HIGH)
-//
-// Auto-Licht: wie Hall-Modul (PIR durch LD2410 ersetzt)
-// STATE: ExtendedRelayComfortGasConfigStateReportPayload (volle Sensorik + AQI)
-//
-// Autor:           DevOpsOfChaos
-// Erstelldatum:    2026-05-14
-// Letzte Aenderung: 2026-05-14
-// =============================================================================
+/*
+===============================================================================
+ Datei: DeviceConfig.h
+ Code-Name: NET-ERL Hall Module LED Ring Config
+ Projekt: SmartHome Technikerprojekt
+ Bereich: Firmware / Device-Konfiguration / Netzbetriebener Relais-Komfortaktor
+ Ersteller: DevOpsOfChaos
+ Datum: 2026-05-14
+ Letzte Bearbeitung: 2026-05-18
+
+ Zweck: Geraetekonfiguration fuer das NET-ERL Hall Module LED Ring
+ Beschreibung: Definiert Identitaet, Faehigkeiten, Funk-/Meldeintervalle,
+ Auto-Light-Parameter und Sensoradressen fuer die LED-Ring-Variante mit BME680,
+ VEML7700, ENS160, LD2410, Button und NeoPixel-Ring.
+
+ Genutzte Bibliotheken:
+ - DeviceTypes.h: eigene Protokollbibliothek mit Capability-Flags, Profilen und Modi.
+
+ Wichtige Werte:
+ - 50 Millisekunden Sensor-Poll-Intervall fuer LD2410.
+ - 2500 Millisekunden Umweltsensor-Intervall entsprechen 2,5 Sekunden.
+ - 30000 Millisekunden Recovery/Snapshot entsprechen 30 Sekunden.
+ - 180000 Millisekunden Gas-/ENS160-Warmup entsprechen 180 Sekunden oder 3 Minuten.
+ - 120000 Millisekunden ENS160-Stale-Timeout entsprechen 120 Sekunden oder 2 Minuten.
+ - 40 Millisekunden Button-Entprellzeit.
+
+ Aenderungsverlauf:
+ - 2026-05-14: Konfiguration fuer NET-ERL Hall Module LED Ring angelegt.
+ - 2026-05-18: Dateiheader vereinheitlicht und Platzhalter entfernt.
+===============================================================================
+*/
 
 #pragma once
 
@@ -47,9 +46,9 @@
 #define NET_ERL_DEBUG_ENABLED 1
 #define NET_ERL_WLAN_CHANNEL 6
 
-#define NET_ERL_HELLO_RETRY_INTERVAL_MS 5000UL
-#define NET_ERL_HEARTBEAT_INTERVAL_MS 20000UL
-#define NET_ERL_LOOP_INTERVAL_MS 20UL
+#define NET_ERL_HELLO_RETRY_INTERVAL_MS 5000UL  // 5000 Millisekunden = 5 Sekunden.
+#define NET_ERL_HEARTBEAT_INTERVAL_MS 20000UL   // 20000 Millisekunden = 20 Sekunden.
+#define NET_ERL_LOOP_INTERVAL_MS 20UL           // 20 Millisekunden Loop-Pause.
 
 #define NET_ERL_MIN_REPORT_INTERVAL_S 5U
 #define NET_ERL_MAX_REPORT_INTERVAL_S 600U
@@ -59,24 +58,24 @@
 #define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U
 
-#define NET_ERL_SENSOR_POLL_INTERVAL_MS 50UL        // LD2410-Poll
-#define NET_ERL_ENV_SAMPLE_INTERVAL_MS 2500UL       // BME680/ENS160
-#define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL
-#define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL
+#define NET_ERL_SENSOR_POLL_INTERVAL_MS 50UL        // 50 Millisekunden LD2410-Poll.
+#define NET_ERL_ENV_SAMPLE_INTERVAL_MS 2500UL       // 2500 Millisekunden = 2,5 Sekunden.
+#define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
+#define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL    // 30000 Millisekunden = 30 Sekunden.
 
 #define NET_ERL_I2C_CLOCK_HZ 5000UL
 
 // BME680
 #define NET_ERL_BME680_PRIMARY_ADDRESS 0x76
 #define NET_ERL_BME680_FALLBACK_ADDRESS 0x77
-#define NET_ERL_BME680_GAS_WARMUP_MS 180000UL      // 3min bis gas_ohm belastbar
+#define NET_ERL_BME680_GAS_WARMUP_MS 180000UL      // 180000 Millisekunden = 3 Minuten.
 #define NET_ERL_BME680_GAS_WARMUP_MIN_READS 5U
 
 // ENS160
 #define NET_ERL_ENS160_PRIMARY_ADDRESS 0x52
 #define NET_ERL_ENS160_FALLBACK_ADDRESS 0x53
-#define NET_ERL_ENS160_WARMUP_MS 180000UL
-#define NET_ERL_ENS160_STALE_TIMEOUT_MS 120000UL   // 2min ohne Daten = stale
+#define NET_ERL_ENS160_WARMUP_MS 180000UL          // 180000 Millisekunden = 3 Minuten.
+#define NET_ERL_ENS160_STALE_TIMEOUT_MS 120000UL   // 120000 Millisekunden = 2 Minuten.
 
 // Button
-#define BUTTON_DEBOUNCE_MS 40UL
+#define BUTTON_DEBOUNCE_MS 40UL                    // 40 Millisekunden Entprellzeit.
