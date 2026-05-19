@@ -111,6 +111,10 @@ static_assert(
 #define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS 0
 #endif
 
+#ifndef NET_SEN_DEVICE_HAS_CUSTOM_EVENT_SEND_RESULT_HOOK
+#define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_SEND_RESULT_HOOK 0
+#endif
+
 // =============================================================================
 // STRUKTUREN – SensorState und NodeState
 // =============================================================================
@@ -231,6 +235,24 @@ bool netSenDevicePollEvent(
     uint16_t* /*param2*/)
 {
     return false;  // Kein Event
+}
+#endif
+
+#if NET_SEN_DEVICE_HAS_CUSTOM_EVENT_SEND_RESULT_HOOK
+void netSenDeviceEventSendResult(
+    bool sent,
+    uint8_t event_type,
+    uint8_t trigger,
+    uint8_t param1,
+    uint16_t param2);
+#else
+void netSenDeviceEventSendResult(
+    bool /*sent*/,
+    uint8_t /*event_type*/,
+    uint8_t /*trigger*/,
+    uint8_t /*param1*/,
+    uint16_t /*param2*/)
+{
 }
 #endif
 
@@ -394,20 +416,23 @@ bool speichereReportIntervalMitRollback(uint32_t valueS) {
 // SENSOR-MASKE – Dynamischer Maskenaufbau aus DEVICE_CAPS
 // =============================================================================
 
-// buildSensorMask – Baut eine 10-stellige Sensor-Maske aus den Faehigkeiten
-//   Setzt Buchstaben an Position 0-3 je nach gesetzten CAPS-Bits:
-//     T = Temperatur (SH_CAP_TEMP), H = Feuchte (SH_CAP_HUM),
-//     L = Lux (SH_CAP_LUX), M = Motion (SH_CAP_MOTION)
-//   Nicht vorhandene Sensoren: 'X'
+// buildSensorMask – Baut eine 10-stellige Sensor-Maske aus den Faehigkeiten.
+//   Vorhandene Sensoren werden kompakt in Vertragsreihenfolge eingetragen:
+//   T/H/P/L/A/M/W/R, der Rest wird mit X aufgefuellt.
 void buildSensorMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
     copyText(target, targetSize, "XXXXXXXXXX");
     if (targetSize < SH_SENSOR_MASK_LEN) return;
 
-    target[0] = (DEVICE_CAPS & SH_CAP_TEMP) ? 'T' : 'X';
-    target[1] = (DEVICE_CAPS & SH_CAP_HUM) ? 'H' : 'X';
-    target[2] = (DEVICE_CAPS & SH_CAP_LUX) ? 'L' : 'X';
-    target[3] = (DEVICE_CAPS & SH_CAP_MOTION) ? 'M' : 'X';
+    size_t pos = 0U;
+    if ((DEVICE_CAPS & SH_CAP_TEMP) && pos < 10U) target[pos++] = 'T';
+    if ((DEVICE_CAPS & SH_CAP_HUM) && pos < 10U) target[pos++] = 'H';
+    if ((DEVICE_CAPS & SH_CAP_PRESSURE) && pos < 10U) target[pos++] = 'P';
+    if ((DEVICE_CAPS & SH_CAP_LUX) && pos < 10U) target[pos++] = 'L';
+    if ((DEVICE_CAPS & SH_CAP_AQI) && pos < 10U) target[pos++] = 'A';
+    if ((DEVICE_CAPS & SH_CAP_MOTION) && pos < 10U) target[pos++] = 'M';
+    if ((DEVICE_CAPS & SH_CAP_WINDOW) && pos < 10U) target[pos++] = 'W';
+    if ((DEVICE_CAPS & SH_CAP_RAIN) && pos < 10U) target[pos++] = 'R';
 }
 
 // buildInputMask – Baut Eingangs-Maske (Sensor-Only, keine Taster)
@@ -617,7 +642,8 @@ void sendeAusstehendesDeviceEvent() {
 
     if (!netSenDevicePollEvent(&eventType, &trigger, &param1, &param2)) return;
     if (eventType == 0U) return;
-    sendeDeviceEvent(eventType, trigger, param1, param2);
+    const bool gesendet = sendeDeviceEvent(eventType, trigger, param1, param2);
+    netSenDeviceEventSendResult(gesendet, eventType, trigger, param1, param2);
 }
 
 // =============================================================================

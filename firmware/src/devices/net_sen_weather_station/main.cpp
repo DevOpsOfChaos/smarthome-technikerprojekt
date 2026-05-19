@@ -13,8 +13,8 @@
  Messwerte fuer Temperatur, Feuchte und Luftdruck, VEML7700-Luxmessung und ein
  digitales Regen-Event. Sensorfehler werden gedrosselt geloggt und nach einem
  festen Intervall automatisch erneut initialisiert. 30000UL bedeutet hier
- 30000 Millisekunden, also 30 Sekunden Recovery-Abstand. 500UL bedeutet
- 500 Millisekunden, also 0,5 Sekunden Warmup vor dem ersten VEML7700-Luxwert.
+ 30000 Millisekunden, also 30 Sekunden Recovery-Abstand. 1050UL bedeutet
+ 1050 Millisekunden, also 1,05 Sekunden Warmup vor dem ersten VEML7700-Luxwert.
 
  Hardware:
  - ESP32-C3
@@ -57,17 +57,19 @@ using SmartHome::clampToU16;
 using SmartHome::clampHum01pct;
 using SmartHome::absDiffU16;
 using SmartHome::absDiffI16;
-using SmartHome::valueChangedSignificantU32;
 using SmartHome::recoveryIsDue;
+using SmartHome::updateAndCheckU32;
 
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS 1
+#define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_SEND_RESULT_HOOK 1
 void netSenDeviceSensorInit();
 bool netSenDeviceSensorPoll(int16_t*, uint16_t*, uint16_t*, uint8_t*, bool*);
 void netSenDeviceExtendedStateInit();
 bool netSenDeviceExtendedStatePoll(uint32_t*, uint32_t*, uint16_t*, uint16_t*, uint16_t*);
 bool netSenDevicePollEvent(uint8_t*, uint8_t*, uint8_t*, uint16_t*);
+void netSenDeviceEventSendResult(bool, uint8_t, uint8_t, uint8_t, uint16_t);
 
 #include "../../basetypes/net_sen/NetSenRuntime.h"
 
@@ -98,7 +100,6 @@ bool veml7700Bereit = false;
 bool regenNass = false;             // Aktueller Regen-Status
 bool regenEventOffen = false;       // true = Event noch nicht gesendet
 uint8_t regenEventStatus = 0U;      // Gemerkter Event-Status (1=nass)
-uint8_t bme280Adresse = 0U;
 
 unsigned long bootMs = 0UL;
 unsigned long letzterSensorPollMs = 0UL;
@@ -114,19 +115,6 @@ ErweiterterState erweiterterState = {
     NET_SEN_AIR_METRIC_UNGUELTIG, NET_SEN_AIR_METRIC_UNGUELTIG,
     NET_SEN_AIR_METRIC_UNGUELTIG};
 bool erweiterterStateGeaendert = true;
-
-// Aufgabe: Uebernimmt einen neuen 32-Bit-Wert und meldet nur relevante Aenderungen.
-// Eingabewerte:
-// - z: Zeiger auf den gespeicherten Wert, der aktualisiert wird.
-// - n: neuer Messwert.
-// - inv: Ungueltigkeitswert, zum Beispiel NET_SEN_PRESSURE_UNGUELTIG.
-// - d: minimale Delta-Schwelle fuer eine signifikante Aenderung.
-// Ausgabewert: true bedeutet, der Wert hat sich signifikant geaendert.
-bool uebernehmeWertU32(uint32_t* z, uint32_t n, uint32_t inv, uint32_t d) {
-    if (!z) return false;
-    const bool c = valueChangedSignificantU32(*z, n, inv, d);
-    *z = n; return c;
-}
 
 // Aufgabe: Loggt BME280-Fehler gedrosselt, damit ein Dauerfehler das Log nicht flutet.
 // Eingabewerte:
@@ -159,7 +147,7 @@ bool initialisiereBme280() {
         (uint8_t)NET_SEN_ENV_BME280_FALLBACK_ADDRESS};
     for (uint8_t a : addrs) {
         if (!sensorBme280.begin(a, &Wire)) continue;
-        bme280Adresse = a;
+        logf("INFO", "BME280 init OK (0x%02X)", a);
         return true;
     }
     return false;
@@ -312,6 +300,15 @@ bool netSenDevicePollEvent(uint8_t* et, uint8_t* tr, uint8_t* p1, uint16_t* p2) 
     return true;
 }
 
+// Aufgabe: Merkt ein Regen-Event erneut vor, wenn der Basistyp es nicht senden konnte.
+// Eingabewerte: Ergebnis und urspruengliche Eventdaten.
+// Ausgabewert: keiner; bei fehlgeschlagenem Regen-Event wird der Event erneut gepuffert.
+void netSenDeviceEventSendResult(bool gesendet, uint8_t et, uint8_t, uint8_t p1, uint16_t) {
+    if (gesendet || et != SH_EVENT_RAIN_DETECTED) return;
+    regenEventStatus = p1 ? 1U : 0U;
+    regenEventOffen = true;
+}
+
 // Aufgabe: Pollt alle Sensoren, aktualisiert Messwerte und setzt Event-/STATE-Bedarf.
 // Eingabewerte:
 // - temp_01c: Ein-/Ausgabe Temperatur in 0,1 Grad Celsius.
@@ -366,9 +363,15 @@ bool netSenDeviceSensorPoll(
             bmeOk = true;
         } else {
             bme280Bereit = false;
+            nT = INT16_MIN;
+            nH = 0xFFFFU;
             logBmeFehler(jetzt, "Messwerte unplausibel");
         }
-    } else logBmeFehler(jetzt, "Sensor nicht initialisiert");
+    } else {
+        nT = INT16_MIN;
+        nH = 0xFFFFU;
+        logBmeFehler(jetzt, "Sensor nicht initialisiert");
+    }
 
     // VEML7700-Messung: erster Luxwert erst nach Warmup, damit kein Start-Artefakt gemeldet wird.
     const bool warmup = veml7700Bereit &&
@@ -376,8 +379,11 @@ bool netSenDeviceSensorPoll(
     if (veml7700Bereit && !warmup) {
         const float l = sensorVeml7700.readLux();
         if (isfinite(l) && l >= 0.0f) { nL = clampToU16((long)lroundf(l)); vemlOk = true; }
-        else { veml7700Bereit = false; logVemlFehler(jetzt, "Lux unplausibel"); }
-    } else if (!veml7700Bereit) logVemlFehler(jetzt, "Sensor nicht initialisiert");
+        else { veml7700Bereit = false; nL = 0xFFFFU; logVemlFehler(jetzt, "Lux unplausibel"); }
+    } else if (!veml7700Bereit) {
+        nL = 0xFFFFU;
+        logVemlFehler(jetzt, "Sensor nicht initialisiert");
+    }
 
     // Regen-Digital-Eingang: jeder nass/trocken-Wechsel wird als Event gemerkt.
     const bool nRegen = leseRegenNass();
@@ -389,7 +395,7 @@ bool netSenDeviceSensorPoll(
     }
 
     // Extended State: Druck nur bei signifikanter Aenderung als Zusatzwert melden.
-    const bool extGeaendert = uebernehmeWertU32(
+    const bool extGeaendert = updateAndCheckU32(
         &erweiterterState.pressure_pa, nP, NET_SEN_PRESSURE_UNGUELTIG,
         NET_SEN_ENV_BME280_VEML_RAIN_PRESSURE_DELTA_PA);
     if (extGeaendert) erweiterterStateGeaendert = true;
