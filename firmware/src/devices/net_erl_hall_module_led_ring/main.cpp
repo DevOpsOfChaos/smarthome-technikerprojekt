@@ -6,7 +6,7 @@
  Bereich: Firmware / Device-Code / Netzbetriebener Relais-Komfortaktor
  Ersteller: DevOpsOfChaos
  Datum: 2026-05-14
- Letzte Bearbeitung: 2026-05-18
+ Letzte Bearbeitung: 2026-05-19
 
  Zweck: Flurmodul mit Radar-Praesenz, Luftqualitaet, Luxmessung, Relais und LED-Ring
  Beschreibung: Dieser Device-Adapter ist die umfangreichste NET-ERL-Variante.
@@ -47,6 +47,7 @@
  Aenderungsverlauf:
  - 2026-05-14: Device-Code fuer NET-ERL Hall Module LED Ring angelegt.
  - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
+ - 2026-05-19: Sensor-Ausfallpfade, ENS160-Warmup und Auto-Flags bereinigt.
 ===============================================================================
 */
 
@@ -103,10 +104,10 @@ Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800);
 // =============================================================================
 namespace {
     bool bme_ok = false, lux_ok = false, ens_ok = false;
-    uint8_t bme680_adresse = 0, ens160_adresse = 0;
+    uint8_t ens160_adresse = 0;
     uint8_t bme680_gueltige_messungen = 0;
     unsigned long letzter_bme_recovery_ms = 0, letzter_lux_recovery_ms = 0, letzter_ens_recovery_ms = 0;
-    unsigned long letztes_env_sample_ms = 0, letzter_ens_gueltig_ms = 0;
+    unsigned long letztes_env_sample_ms = 0, ens160_start_ms = 0, letzter_ens_gueltig_ms = 0;
     bool ring_initialized = false;
 
     // Sensor-Messwerte
@@ -114,7 +115,6 @@ namespace {
     uint16_t hum_01pct = 0xFFFFU, lux = 0xFFFFU;
     uint32_t pressure_pa = 0xFFFFFFFFUL, gas_ohm = 0xFFFFFFFFUL;
     uint16_t aqi = 0xFFFFU, tvoc_ppb = 0xFFFFU, eco2_ppm = 0xFFFFU;
-    bool ld2410_raw = false;
 
     constexpr uint32_t PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
     constexpr uint32_t GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
@@ -170,18 +170,55 @@ namespace {
             if (!bme680.begin(a, &Wire)) continue;
             bme680.setTemperatureOversampling(BME680_OS_8X); bme680.setHumidityOversampling(BME680_OS_2X);
             bme680.setPressureOversampling(BME680_OS_4X); bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
-            bme680.setGasHeater(320U, 150U); bme680_adresse = a; return true;
+            bme680.setGasHeater(320U, 150U); return true;
         }
         return false;
+    }
+
+    void resetBmeValues() {
+        temp_01c = INT16_MIN;
+        hum_01pct = 0xFFFFU;
+        pressure_pa = PRESSURE_UNGUELTIG;
+        gas_ohm = GAS_OHM_UNGUELTIG;
+        bme680_gueltige_messungen = 0;
+    }
+
+    void resetEnsValues() {
+        aqi = AIR_METRIC_UNGUELTIG;
+        tvoc_ppb = AIR_METRIC_UNGUELTIG;
+        eco2_ppm = AIR_METRIC_UNGUELTIG;
+    }
+
+    bool useEnsAddress(ScioSense_ENS160& sensor, uint8_t address) {
+        ens160 = &sensor;
+        if (!ens160->begin()) return false;
+        ens160_adresse = address;
+        ens160_start_ms = millis();
+        letzter_ens_gueltig_ms = 0;
+        resetEnsValues();
+        return true;
     }
 
     // Aufgabe: Initialisiert den ENS160 ueber primaere oder Fallback-I2C-Adresse.
     // Eingabewerte: keine; die Adressen kommen aus DeviceConfig.h.
     // Ausgabewert: true bedeutet, ein ENS160 wurde gefunden.
     bool initEns() {
-        ens160 = &ens160Addr52; if (ens160->begin()) { ens160_adresse = NET_ERL_ENS160_PRIMARY_ADDRESS; return true; }
-        ens160 = &ens160Addr53; if (ens160->begin()) { ens160_adresse = NET_ERL_ENS160_FALLBACK_ADDRESS; return true; }
-        ens160 = nullptr; return false;
+        if (useEnsAddress(ens160Addr52, NET_ERL_ENS160_PRIMARY_ADDRESS)) return true;
+        if (useEnsAddress(ens160Addr53, NET_ERL_ENS160_FALLBACK_ADDRESS)) return true;
+        ens160 = nullptr;
+        ens160_adresse = 0;
+        ens160_start_ms = 0;
+        resetEnsValues();
+        return false;
+    }
+
+    bool setEnsStandardMode() {
+        if (!ens160 || !ens160->setMode(ENS160_OPMODE_STD)) {
+            ens_ok = false;
+            resetEnsValues();
+            return false;
+        }
+        return true;
     }
 
     // Aufgabe: Prueft, ob der BME680-Gassensor ausreichend warmgelaufen ist.
@@ -191,12 +228,22 @@ namespace {
         return gasWarmupComplete(runtime.boot_ms, j, NET_ERL_BME680_GAS_WARMUP_MS, bme680_gueltige_messungen, NET_ERL_BME680_GAS_WARMUP_MIN_READS);
     }
 
+    bool ensWarmupOk(unsigned long j) {
+        return ens160_start_ms > 0 && (j - ens160_start_ms) >= NET_ERL_ENS160_WARMUP_MS;
+    }
+
     // Aufgabe: Prueft, ob die letzten ENS160-Messwerte veraltet sind.
     // Eingabewert: j ist der aktuelle millis()-Zeitstempel in Millisekunden.
     // Ausgabewert: true bedeutet, AQI/TVOC/eCO2 sollen auf ungueltig gesetzt werden.
     bool ensStale(unsigned long j) {
         if (!ens_ok || !ens160) return true;
+        if (!ensWarmupOk(j)) return true;
+        if (letzter_ens_gueltig_ms == 0) return true;
         return letzter_ens_gueltig_ms > 0 && (j - letzter_ens_gueltig_ms) > NET_ERL_ENS160_STALE_TIMEOUT_MS;
+    }
+
+    bool ensFault(unsigned long j) {
+        return !ens_ok || !ens160 || (ensWarmupOk(j) && letzter_ens_gueltig_ms == 0);
     }
 }
 
@@ -221,7 +268,7 @@ void netErlDeviceInit() {
 
     ens_ok = initEns();
     if (!ens_ok) { logMsg("WARN", "ENS160 init fail"); }
-    else if (!ens160->setMode(ENS160_OPMODE_STD)) { ens_ok = false; logMsg("WARN", "ENS160 mode fail"); }
+    else if (!setEnsStandardMode()) { logMsg("WARN", "ENS160 mode fail"); }
 
     pinMode(PIN_LD2410_OUT, INPUT);
 }
@@ -230,17 +277,16 @@ void netErlDeviceInit() {
 // Eingabewerte: keine.
 // Ausgabewert: keiner; INT16_MIN, 0xFFFFU und 0xFFFFFFFFUL markieren ungueltige Werte.
 void netErlDeviceResetSensorDefaults() {
-    temp_01c = INT16_MIN; hum_01pct = 0xFFFFU; lux = 0xFFFFU;
-    pressure_pa = PRESSURE_UNGUELTIG; gas_ohm = GAS_OHM_UNGUELTIG;
-    aqi = AIR_METRIC_UNGUELTIG; tvoc_ppb = AIR_METRIC_UNGUELTIG; eco2_ppm = AIR_METRIC_UNGUELTIG;
+    resetBmeValues();
+    lux = 0xFFFFU;
+    resetEnsValues();
 }
 
 // Aufgabe: Liest den LD2410-Radar-Praesenzstatus vom digitalen Pin.
 // Eingabewerte: keine; PIN_LD2410_OUT kommt aus PinConfig.h.
 // Ausgabewert: true bedeutet, der Radar-Ausgang steht auf HIGH und Praesenz wurde erkannt.
 bool netErlDeviceReadPresence() {
-    ld2410_raw = (digitalRead(PIN_LD2410_OUT) == HIGH);
-    return ld2410_raw;
+    return digitalRead(PIN_LD2410_OUT) == HIGH;
 }
 
 // Aufgabe: Schaltet den Relaisausgang.
@@ -298,50 +344,62 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     }
     if (!ens_ok && recoveryIsDue(letzter_ens_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
         letzter_ens_recovery_ms = nowMs; ens_ok = initEns();
-        if (ens_ok) ens160->setMode(ENS160_OPMODE_STD);
+        if (ens_ok && !setEnsStandardMode()) logMsg("WARN", "ENS160 mode fail");
     }
 
     // BME680 lesen: Temperatur, Feuchte und Druck werden plausibilisiert.
-    if (bme_ok && bme680.performReading()) {
-        float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
-        uint32_t g = bme680.gas_resistance;
-        if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
-            temp_01c = (int16_t)lroundf(t * 10.0f);
-            hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
-            pressure_pa = (uint32_t)lroundf(p);
-            if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++;
-            gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
-        } else { bme_ok = false; logMsg("WARN", "BME680 unplausibel"); }
+    bool bme_read_valid = false;
+    if (bme_ok) {
+        if (bme680.performReading()) {
+            float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
+            uint32_t g = bme680.gas_resistance;
+            if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
+                temp_01c = (int16_t)lroundf(t * 10.0f);
+                hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
+                pressure_pa = (uint32_t)lroundf(p);
+                if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++;
+                gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
+                bme_read_valid = true;
+            } else {
+                bme_ok = false;
+                resetBmeValues();
+                logMsg("WARN", "BME680 unplausibel");
+            }
+        } else {
+            bme_ok = false;
+            resetBmeValues();
+            logMsg("WARN", "BME680 read fail");
+        }
     }
 
     // VEML7700 lesen: Lux wird auf uint16_t begrenzt, damit der Protokoll-Payload passt.
     if (lux_ok) {
         float l = veml.readLux();
         if (!isnan(l) && l >= 0) lux = clampToU16((long)lroundf(l));
-        else { lux_ok = false; logMsg("WARN", "VEML7700 read fail"); }
+        else { lux_ok = false; lux = 0xFFFFU; logMsg("WARN", "VEML7700 read fail"); }
     }
 
     // ENS160-Kompensation schreiben: BME680-Temperatur und -Feuchte verbessern die Luftwerte.
-    if (ens_ok && ens160 && bme_ok) {
+    if (ens_ok && ens160 && bme_read_valid) {
         int r = writeEnsEnv(ens160_adresse, bme680.temperature, bme680.humidity);
-        if (r != 0) logMsg("WARN", "ENS160 comp fail err=%d", r);
+        if (r != 0) { ens_ok = false; resetEnsValues(); logMsg("WARN", "ENS160 comp fail err=%d", r); }
     }
 
     // ENS160-Messwerte lesen: AQI500 bevorzugt, AQI 1-5 als Fallback auf 0-500 skaliert.
     if (ens_ok && ens160 && ens160->measure(false)) {
         uint16_t aq5 = ens160->getAQI500(), aq = ens160->getAQI();
         uint16_t maq = (aq5 > 0 && aq5 <= 500) ? aq5 : mapAqi500(aq);
-        if (maq > 0) {
+        if (maq > 0 && ensWarmupOk(nowMs)) {
             aqi = maq; tvoc_ppb = ens160->getTVOC();
             eco2_ppm = ens160->geteCO2(); letzter_ens_gueltig_ms = nowMs;
         }
     }
 
     // Stale-Detection: alte ENS160-Werte nicht weiter als gueltig melden.
-    if (ensStale(nowMs)) { aqi = AIR_METRIC_UNGUELTIG; tvoc_ppb = AIR_METRIC_UNGUELTIG; eco2_ppm = AIR_METRIC_UNGUELTIG; }
+    if (ensStale(nowMs)) resetEnsValues();
 
     // Status aktualisieren: fault=true sobald ein benoetigter Sensor nicht verfuegbar ist.
-    runtime.fault = !(bme_ok && lux_ok) || !ens_ok;
+    runtime.fault = !(bme_ok && lux_ok) || ensFault(nowMs);
 
     // Late-Lux: Auto-On-Entscheidung erst ausfuehren, wenn ein Lux-Wert verfuegbar ist.
     if (runtime.motion_aktiv && runtime.pending_auto_on_decision && !runtime.relay_1 && lux != 0xFFFFU) {
@@ -414,6 +472,7 @@ uint8_t netErlDeviceBuildAutoFlags() {
     f |= SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED;
     if (runtime.relay_auto_owned) f |= SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED;
     if (runtime.blocked_by_lux) f |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_LUX;
+    if (runtime.pending_auto_on_decision && lux == 0xFFFFU) f |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_MISSING_LUX;
     return f;
 }
 
@@ -437,7 +496,7 @@ bool netErlDeviceGetCachedLux(uint16_t* luxOut) {
 // Eingabewerte: keine; lokale OK-Flags werden ausgewertet.
 // Ausgabewert: true bedeutet, BME680, VEML7700 oder ENS160 ist nicht verfuegbar.
 bool netErlDeviceHasSensorFault() {
-    return !(bme_ok && lux_ok) || !ens_ok;
+    return !(bme_ok && lux_ok) || ensFault(millis());
 }
 
 // Aufgabe: Schreibt einen kompakten Snapshot der aktuellen Sensor- und Relaiswerte ins Log.
