@@ -2415,6 +2415,12 @@ static uint8_t verarbeiteCmdTyp(const SmartHome::CmdPayload& payload) {
         return SH_ACK_OK;
     }
 
+    // --- HELLO_REQUEST ---
+    if (payload.cmd_type == SH_CMD_HELLO_REQUEST) {
+        sendeHello();
+        return SH_ACK_OK;
+    }
+
     // --- COVER-KOMMANDO ---
     if (payload.cmd_type != SH_CMD_COVER) {
         return SH_ACK_REJECTED;  // Unbekannter Kommando-Typ

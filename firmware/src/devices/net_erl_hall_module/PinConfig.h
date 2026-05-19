@@ -15,11 +15,11 @@
 
  Pin-Belegung:
  - Relais: GPIO10, active-HIGH.
- - PIR-Sensor: GPIO6, HIGH bedeutet Bewegung.
+ - PIR-Sensor: GPIO7, HIGH bedeutet Bewegung.
  - I2C SDA: GPIO0 fuer BME280 und VEML7700.
  - I2C SCL: GPIO1.
  - Setup-Button: GPIO2, active-LOW, 5000 Millisekunden Haltezeit.
- - Setup-LED: GPIO7, active-HIGH, 500 Millisekunden Blinkintervall.
+ - Setup-LED: GPIO6, active-HIGH, 500 Millisekunden Blinkintervall.
  - Status-LED: -1, nicht bestueckt.
 
  Aenderungsverlauf:
@@ -34,7 +34,7 @@
 #define PIN_SENSOR_SDA 0
 #define PIN_SENSOR_SCL 1
 #define PIN_PIR 7
-#define PIN_STATUS_LED 6
+#define PIN_STATUS_LED -1
 #define RELAY_1_ACTIVE_HIGH 1
 
 #define SETUP_BUTTON_PIN 2

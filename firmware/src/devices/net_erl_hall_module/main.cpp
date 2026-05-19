@@ -14,7 +14,8 @@
  fuer die Auto-Light-Entscheidung, der BME280 liefert Temperatur und Feuchte.
  Die Late-Lux-Logik wartet bei Bedarf auf den ersten gueltigen Lux-Wert, bevor
  das Relais automatisch eingeschaltet oder wegen zu hoher Helligkeit blockiert
- wird. Der Nachlauf wird bei diesem Modul nicht durch erneute Bewegung verlaengert.
+ wird. Jede erneute PIR-Erkennung innerhalb der Nachlaufzeit startet den
+ Auto-Off-Timer neu.
 
  Hardware:
  - ESP32-C3
@@ -60,7 +61,7 @@
 
 // Hall-Modul-spezifische Unterschiede zum LED-Ring-Modul.
 #define NET_ERL_USE_ISR_CMD_QUEUE       1   // CMD-Queue darf aus Interrupt-Kontext genutzt werden.
-#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 0  // Nachlauf wird durch neue Bewegung nicht verlaengert.
+#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 1  // Neue PIR-Erkennung setzt den Nachlauf-Timer zurueck.
 #define NET_ERL_WDT_TIMEOUT_S           8UL // Watchdog-Zeit in Sekunden.
 
 // Aktiviert die Device-Hooks in dieser Datei.

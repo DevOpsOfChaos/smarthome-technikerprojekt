@@ -662,6 +662,13 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::CmdPayload& payloa
     // STATE_REQUEST: dirty-Flag setzen
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         nodeStatus.state_report_offen = true;
+        return;
+    }
+
+    // HELLO_REQUEST: Master fordert ein HELLO an
+    if (payload.cmd_type == SH_CMD_HELLO_REQUEST) {
+        sendeHello();
+        return;
     }
 }
 

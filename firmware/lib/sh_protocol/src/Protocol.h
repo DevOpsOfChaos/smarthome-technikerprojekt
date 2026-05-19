@@ -86,8 +86,9 @@
 #define SH_CMD_COVER           0x02U
 #define SH_CMD_STATE_REQUEST   0x03U
 #define SH_CMD_REBOOT          0x04U
-
 #define SH_CMD_SET_RELAY       SH_CMD_RELAY
+// Master an Node: Fordert die Node auf, ein HELLO zu senden (wenn vorhanden)
+#define SH_CMD_HELLO_REQUEST   0x06U
 
 // ============================================================
 // COVER-KOMMANDOS - Unterkommandos fuer SH_CMD_COVER

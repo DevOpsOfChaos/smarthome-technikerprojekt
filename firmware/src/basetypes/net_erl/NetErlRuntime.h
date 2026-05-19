@@ -29,7 +29,7 @@
 //   #define NET_ERL_HAS_INDICATOR_UPDATE → void netErlDeviceUpdateIndicators(bool relayOn)
 //
 // KONFIGURATION (in DeviceConfig.h vor dem Include setzbar):
-//   NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION  (1=LED-Ring-Modul-Stil, 0=Hall-Modul-Stil)
+//   NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION  (1=jede erkannte Bewegung setzt den Nachlauf zurueck, 0=nur erste Bewegung)
 //   NET_ERL_USE_ISR_CMD_QUEUE           (0=direkt, 1=ISR-safe Queue)
 //   NET_ERL_WDT_TIMEOUT_S               (Watchdog-Timeout, Default 15)
 //   NET_ERL_SENSOR_MASK                 (Hello-Sensor-Maske, z.B. "THLPGAMXXX")
@@ -57,7 +57,7 @@
 // KONFIGURIERBARE DEFAULTS (per DeviceConfig.h überschreibbar)
 // =============================================================================
 #ifndef NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
-#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 1   // 1=verlaengert Nachlauf bei erneuter Bewegung, 0=nicht
+#define NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION 1   // 1=setzt Nachlauf bei erneuter Bewegung zurueck, 0=nicht
 #endif
 #ifndef NET_ERL_USE_ISR_CMD_QUEUE
 #define NET_ERL_USE_ISR_CMD_QUEUE 0             // 0=direkte Verarbeitung, 1=ISR-safe Queue (Hall)
@@ -122,7 +122,6 @@ using SmartHome::clampHum01pct;
 using SmartHome::absDiffU16;
 using SmartHome::recoveryIsDue;
 using SmartHome::gasWarmupComplete;
-using SmartHome::sensorValueStale;
 using SmartHome::intervalElapsed;
 
 // Forward-Deklaration – wird weiter unten als globale Variable definiert
@@ -195,20 +194,13 @@ struct NetErlRuntime {
     bool motion_aktiv;
     uint8_t pending_motion_event_state;
 
-    // Sensor-Recovery (für alle I2C-Sensoren)
-    unsigned long letzter_recovery_ms[4];  // Index 0=BME, 1=LUX, 2=ENS, 3=reserve
-    bool sensor_ok[4];                     // Index parallel zu letzter_recovery_ms
-
 #if NET_ERL_USE_ISR_CMD_QUEUE
     // ISR-safe CMD/CFG-Pending-Queue (Hall-Stil)
     portMUX_TYPE runtimeMux = portMUX_INITIALIZER_UNLOCKED;
-    bool pendingCmdReady, pendingCfgReady;
+    bool pendingCmdReady;
     SmartHome::CmdPayload pendingCmd;
     SmartHome::MsgHeader pendingCmdHeader;
     uint8_t pendingCmdSrc[6];
-    SmartHome::CfgPayload pendingCfg;
-    SmartHome::MsgHeader pendingCfgHeader;
-    uint8_t pendingCfgSrc[6];
 #endif
 
     // Button (optional)
@@ -977,6 +969,13 @@ void handleCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header, con
         return;
     }
 
+    // --- HELLO_REQUEST: Master fordert ein echtes HELLO vom Node ---
+    if (payload.cmd_type == SH_CMD_HELLO_REQUEST) {
+        // sendHello() sendet ein HELLO und setzt letzteres Hello-Timestamp
+        sendHello();
+        return;
+    }
+
     // --- RELAIS SCHALTEN ---
     if (payload.cmd_type == SH_CMD_SET_RELAY) {
         // Subcommand != 0 ist nicht unterstuetzt → ablehnen
@@ -1023,6 +1022,18 @@ bool saveReportIntCfg(uint32_t v) {
     restoreBasisAndDevice(bs, ds); return false;
 }
 
+bool saveDeviceCfgWithRollback(
+    const SmartHome::ShNodeProvisioning::NodeBasisSnapshot& basisSnapshot,
+    const NetErlSnapshot& deviceSnapshot
+) {
+    runtime.state_report_offen = true;
+    if (nodeProvisioning.saveCurrentState()) {
+        return true;
+    }
+    restoreBasisAndDevice(basisSnapshot, deviceSnapshot);
+    return false;
+}
+
 // =============================================================================
 // handleCfg – ESP-NOW CFG-Nachricht verarbeiten (Konfigurationsaenderung).
 //
@@ -1049,14 +1060,7 @@ bool handleCfg(const SmartHome::CfgPayload& payload) {
 
             // Neuen Wert setzen
             runtime.auto_on_lux_threshold = (uint16_t)payload.value;
-            runtime.state_report_offen = true;
-
-            // Persistent speichern – bei Fehler Rollback
-            if (nodeProvisioning.saveCurrentState()) {
-                return true;
-            }
-            restoreBasisAndDevice(basisSnapshot, deviceSnapshot);
-            return false;
+            return saveDeviceCfgWithRollback(basisSnapshot, deviceSnapshot);
         }
 
         // --- Auto-OFF-Nachlaufzeit aendern ---
@@ -1066,13 +1070,7 @@ bool handleCfg(const SmartHome::CfgPayload& payload) {
             snapshotBasisAndDevice(basisSnapshot, deviceSnapshot);
 
             runtime.auto_off_delay_s = (uint16_t)payload.value;
-            runtime.state_report_offen = true;
-
-            if (nodeProvisioning.saveCurrentState()) {
-                return true;
-            }
-            restoreBasisAndDevice(basisSnapshot, deviceSnapshot);
-            return false;
+            return saveDeviceCfgWithRollback(basisSnapshot, deviceSnapshot);
         }
 
         default:
@@ -1263,7 +1261,7 @@ void motionOn(unsigned long nowMs) {
 //
 // WAS: Liest den Bewegungssensor (via Device-Hook) und entscheidet:
 //      - Bei neuer Bewegung: motionOn() ausloesen
-//      - Bei wiederholter Bewegung: Nachlauf-Timer verlaengern (optional)
+//      - Bei wiederholter Bewegung: Nachlauf-Timer je nach Device-Konfig zuruecksetzen
 //      - Bei Ablauf der Nachlaufzeit: Motion-Off, Relais ausschalten
 //
 // WARUM: Kern der Auto-Light-Logik. Verbindet Praesenz-Erkennung mit
@@ -1272,8 +1270,8 @@ void motionOn(unsigned long nowMs) {
 // PARAM nowMs: Aktuelle Zeit in Millisekunden (millis()).
 //
 // KONFIG: NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
-//         1 = "LED-Ring-Modul-Stil": Jede neue Bewegung setzt Nachlauf zurueck
-//         0 = "Hall-Modul-Stil":     Nur die ERSTE Bewegung startet Nachlauf
+//         1 = Jede erkannte Bewegung setzt den Nachlauf-Timer zurueck
+//         0 = Nur die erste Bewegung startet den Nachlauf-Timer
 // =============================================================================
 void pollPresence(unsigned long nowMs) {
     // Sensor nur im konfigurierten Intervall abfragen
@@ -1293,7 +1291,7 @@ void pollPresence(unsigned long nowMs) {
         } else {
             // Bewegung dauert noch an
 #if NET_ERL_OFF_TIMER_EXTENDS_ON_MOTION
-            // LED-Ring-Modul-Stil: Nachlauf-Timer bei jeder Bewegung verlaengern
+            // Nachlauf-Timer bei jeder erneuten Erkennung zuruecksetzen.
             runtime.letzte_motion_ms = nowMs;
 #endif
         }

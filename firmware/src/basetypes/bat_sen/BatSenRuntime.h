@@ -737,6 +737,13 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::CmdPayload& payloa
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         nodeStatus.state_report_offen = true;
         aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+        return;
+    }
+
+    if (payload.cmd_type == SH_CMD_HELLO_REQUEST) {
+        sendeHello();
+        aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+        return;
     }
 }
 
