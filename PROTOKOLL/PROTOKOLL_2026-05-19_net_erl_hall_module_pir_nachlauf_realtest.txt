@@ -1,0 +1,68 @@
+Protokoll: NET-ERL Hall Module PIR-Nachlauf Realtest
+Datum: 2026-05-19
+Geraet: NET-ERL-001 / NET-ERL Hall Module
+Firmware-Umgebung: net_erl_hall_module
+
+Ausgangslage
+------------
+- Der PIR-Nachlauf sollte so arbeiten:
+  - PIR erkennt Bewegung.
+  - Relais schaltet bei passender Lux-Schwelle automatisch ein.
+  - Die konfigurierte Nachlaufzeit startet.
+  - Jede erneute PIR-Erkennung innerhalb dieser Nachlaufzeit setzt den Timer neu.
+  - Erst wenn nach der letzten PIR-Erkennung die Nachlaufzeit abgelaufen ist, schaltet Auto-Off das Relais aus.
+- Vorher war im Hall-Modul der Nachlauf-Reset durch erneute Bewegung deaktiviert.
+
+Umsetzung
+---------
+- Die Hall-Modul-Firmware wurde so angepasst, dass neue PIR-Erkennungen den Auto-Off-Timer zuruecksetzen.
+- In der gemeinsamen NET-ERL-Runtime wurden ungenutzte Zustandsfelder entfernt und doppelte Rollback-Logik reduziert.
+- Der bereits vorhandene HELLO_REQUEST-Pfad wurde fuer die betroffenen Node-Typen plausibilisiert und mitgebaut.
+- Die Pinbelegung des Hall-Moduls ist konsistent:
+  - PIR: GPIO7
+  - Setup-LED: GPIO6
+  - Status-LED: nicht bestueckt
+
+Build- und Flash-Nachweis
+-------------------------
+- Erfolgreich gebaut:
+  - master_firmware
+  - bat_sen
+  - net_sen_weather_station
+  - net_erl
+  - net_erl_hall_module
+  - net_erl_hall_module_led_ring
+  - net_zrl
+- Das Hall-Modul wurde auf den angeschlossenen ESP32-C3 geflasht.
+- Der Flashvorgang wurde vollstaendig geschrieben und verifiziert.
+- Erkanntes Geraet:
+  - Chip: ESP32-C3
+  - MAC: 20:6e:f1:6a:df:5c
+
+Serielle Beobachtung
+--------------------
+- Firmware startet als:
+  - NET-ERL-001
+  - NET-ERL Hall Module
+  - net_erl_hall_module
+- Beispielhafte Messwerte nach Start:
+  - Temperatur: ca. 24,5 bis 24,7 Grad Celsius
+  - relative Feuchte: ca. 33 bis 34 Prozent
+  - Lux: ca. 27 bis 28
+- Auto-On wurde beobachtet:
+  - Relay ON (auto_on_cached_lux)
+- Auto-Off ohne erneute PIR-Erkennung wurde beobachtet:
+  - Relay OFF (auto_off)
+  - Abschaltung nach rund 15 bis 16 Sekunden, passend zur konfigurierten Nachlaufzeit.
+
+Realtest-Ergebnis
+-----------------
+- Der anschliessende manuelle PIR-Test war erfolgreich.
+- Bei erneuter PIR-Erkennung innerhalb der Nachlaufzeit blieb das Relais an, weil der Nachlauf-Timer korrekt neu gestartet wurde.
+- Ohne weitere PIR-Erkennung schaltete das Relais nach Ablauf der Nachlaufzeit korrekt ab.
+
+Bewertung
+---------
+- PIR-Erkennung, Auto-On, Nachlauf-Reset und Auto-Off sind fuer das Hall-Modul im Realtest bestaetigt.
+- Das urspruengliche Logikproblem ist damit behoben.
+- Kein weiterer Firmware-Fix ist aus diesem Testlauf offen.
