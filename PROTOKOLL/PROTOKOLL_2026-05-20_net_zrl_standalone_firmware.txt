@@ -1,0 +1,72 @@
+Protokoll: NET-ZRL Standalone-Firmware
+Datum: 2026-05-20
+Geraet: NET-ZRL / Rollladenaktor
+Firmware-Umgebung: net_zrl_shutter_module
+Commit: 84734c4 Promote NET-ZRL shutter firmware
+
+Ausgangslage
+------------
+- Das NET-ZRL Shutter Module war vorher als duennes Device-Modul an den
+  gemeinsamen NET-ZRL-Basistyp angebunden.
+- Fuer den naechsten Entwicklungsschritt wurde die konkrete Device-Firmware
+  eigenstaendig aufgebaut.
+- Die bestehende Hardwarebelegung und der bestehende Vertragsgedanke sollten
+  dabei erhalten bleiben.
+- Die Aenderung betrifft die ESP-NOW-/Firmware-Hauptlinie, nicht den neuen
+  ESPHome-Zweitpfad.
+
+Umsetzung
+---------
+- `firmware/src/devices/net_zrl_shutter_module/main.cpp` wurde zu einer
+  eigenstaendigen Rollladen-Firmware ausgebaut.
+- Die konkrete Device-Konfiguration liegt weiter in
+  `firmware/src/devices/net_zrl_shutter_module/DeviceConfig.h`.
+- Die alte separate `PinConfig.h` wurde entfernt, weil die Pinbelegung nun
+  direkt ueber die Device-Konfiguration abgebildet wird.
+- `NetZrlProvisioning.h` wurde als Provisioning-Konfiguration fuer das
+  NodeProvisioning-Framework ergaenzt.
+- Die README des Device-Moduls wurde an die eigenstaendige Firmware-Struktur
+  angepasst.
+
+Technische Bewertung
+--------------------
+- Der Patch ist gross, aber fachlich zusammenhaengend: Es handelt sich nicht um
+  mehrere vermischte Themen, sondern um die Umstellung dieses einen Device-Moduls.
+- Das generische Setup-AP-Passwort `net-zrl-setup` ist kein privates Secret,
+  sondern entspricht dem vorhandenen Muster der Provisioning-Module.
+- Es wurden keine WLAN-, MQTT-, Broker-, Token- oder API-Zugangsdaten ergaenzt.
+- Es wurden keine internen Arbeitsmittel im oeffentlichen Projekt dokumentiert.
+
+Build-Nachweis
+--------------
+Erfolgreich gebaut:
+
+- `pio run -e net_zrl_shutter_module`
+
+Ergebnis:
+
+- Build-Status: SUCCESS
+- RAM-Nutzung: 38116 Byte von 327680 Byte, ca. 11,6 Prozent
+- Flash-Nutzung: 1043641 Byte von 1310720 Byte, ca. 79,6 Prozent
+
+Zusaetzliche Pruefungen
+----------------------
+- Der gestagte Patch wurde auf Whitespace-Fehler geprueft.
+- Der relevante Firmware-Block wurde auf offensichtliche Secret-Treffer
+  geprueft.
+- Der Git-Stand war nach Commit und Push sauber.
+
+Noch offen
+----------
+- Kein Flash auf reale NET-ZRL-Hardware in diesem Schritt.
+- Kein Realtest der Relaisverriegelung, Tasterlogik, Kalibrierung,
+  Fahrzeitgrenzen und Positionssemantik in diesem Schritt.
+- Vor produktivem Einsatz muss ein Hardwaretest mit angeschlossenem Rollladen
+  oder sicherer Lastsimulation erfolgen.
+
+Bewertung
+---------
+- Die Aenderung ist als Firmware-Integrationsschritt plausibel und gebaut.
+- Sie ersetzt aber keinen Realtest. Gerade bei Rollladenaktorik bleibt der
+  Hardwaretest zwingend, weil falsche Fahrtrichtung, Relaislogik oder fehlende
+  Abschaltung mechanische Folgen haben koennen.
