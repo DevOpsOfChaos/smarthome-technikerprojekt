@@ -9,9 +9,9 @@
  Letzte Bearbeitung: 2026-05-18
 
  Zweck: Geraetekonfiguration fuer das NET-ZRL Shutter Module
- Beschreibung: Ueberschreibt die Defaults aus dem net_zrl-Basistyp fuer den
- konkreten Rollo-Aktor. Alle nicht gesetzten Werte werden weiterhin aus dem
- Basistyp geerbt.
+ Beschreibung: Enthalten sind nur Werte fuer dieses konkrete Device. Das Modul
+ bindet keinen Basistyp ein; alle hier gesetzten Defines werden direkt von
+ main.cpp ausgewertet.
 
  Hardware:
  - ESP32-C3
@@ -20,11 +20,12 @@
  - Zwei Status-LEDs
 
  Genutzte Bibliotheken:
- - Keine zusaetzlichen Header in dieser Datei; der Basistyp wertet die Defines aus.
+ - Keine zusaetzlichen Header in dieser Datei.
 
  Aenderungsverlauf:
  - 2026-05-14: Konfiguration fuer NET-ZRL Shutter Module angelegt.
  - 2026-05-18: Dateiheader vereinheitlicht.
+ - 2026-05-19: Konfiguration fuer eigenstaendige Device-Firmware bereinigt.
 ===============================================================================
 */
 
@@ -56,3 +57,6 @@
 
 // Pegel-Logik.
 #define NET_ZRL_BUTTON_ACTIVE_LOW   0
+
+// Fahrzeit-Fallback, bis reale Kalibrierwerte vorliegen.
+#define NET_ZRL_DEFAULT_ESTIMATED_TRAVEL_TIME_MS 100000UL
