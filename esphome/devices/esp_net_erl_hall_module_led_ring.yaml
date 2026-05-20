@@ -1,29 +1,29 @@
-# NET-ERL-001 - ESPHome MQTT-only Ersatzlinie
-#
-# Ziel: Node-RED sieht denselben MQTT-Vertrag wie beim bisherigen Geraet.
-# Wichtig: device_id bleibt absichtlich "NET-ERL-001". Der ESPHome-Name ist
-# separat, weil ESPHome intern kleingeschriebene Namen erwartet.
+# NET-ERL-002 - Hall Module LED Ring als ESPHome MQTT-only Ersatzlinie
 
 substitutions:
-  node_name: net-erl-001-esphome
-  device_id: NET-ERL-001
-  device_name: NET-ERL Hall Module
+  node_name: net-erl-002-esphome
+  device_id: NET-ERL-002
+  device_name: NET-ERL Hall Module LED Ring
   device_class: net_erl
   power_type: mains
-  fw_version: esphome-net-erl-hall
-  caps: "93"
+  fw_version: esphome-net-erl-led-ring
+  caps: "38013"
   meta_schema_version: "1"
   control_mode: relay_light
-  config_profile: hall_light
+  config_profile: hall_module_led_ring
   reporting_mode: hybrid
-  sensor_mask: THXLXXXXXX
-  input_mask: XXXXX
+  sensor_mask: THPLAMXXXX
+  input_mask: BXXXX
   relay_pin: GPIO10
-  pir_pin: GPIO7
+  button_pin: GPIO6
+  presence_pin: GPIO7
+  led_ring_pin: GPIO8
+  led_ring_count: "17"
   i2c_sda_pin: GPIO0
   i2c_scl_pin: GPIO1
-  bme280_address: "0x76"
+  bme680_address: "0x76"
   veml7700_address: "0x10"
+  ens160_address: "0x52"
 
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
@@ -38,10 +38,10 @@ esphome:
       - lambda: |-
           id(contract_online) = true;
           id(relay_1_state) = id(relay_1_output).state;
-          id(motion_state) = id(pir_sensor).state;
+          id(motion_state) = id(presence_input).state;
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
-      - script.execute: publish_net_erl_state
+      - script.execute: publish_net_erl_led_state
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -73,7 +73,7 @@ mqtt:
           id(contract_online) = true;
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
-      - script.execute: publish_net_erl_state
+      - script.execute: publish_net_erl_led_state
   on_disconnect:
     then:
       - lambda: |-
@@ -109,7 +109,7 @@ mqtt:
 
             if (command == "get_state") {
               id(clear_contract_fault).execute();
-              id(publish_net_erl_state).execute();
+              id(publish_net_erl_led_state).execute();
               queue_ack("ok", 0, "esphome_state");
               return;
             }
@@ -149,7 +149,7 @@ mqtt:
               }
               id(relay_1_state) = relay_value;
               id(clear_contract_fault).execute();
-              id(publish_net_erl_state).execute();
+              id(publish_net_erl_led_state).execute();
               queue_ack("ok", 0, "esphome_command");
               return;
             }
@@ -173,6 +173,14 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
+  - id: button_flags_value
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: button_last_action_value
+    type: std::string
+    restore_value: no
+    initial_value: '""'
   - id: env_has_temp
     type: bool
     restore_value: no
@@ -181,7 +189,19 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
+  - id: env_has_pressure
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_gas
+    type: bool
+    restore_value: no
+    initial_value: "false"
   - id: env_has_lux
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_air
     type: bool
     restore_value: no
     initial_value: "false"
@@ -193,13 +213,33 @@ globals:
     type: int
     restore_value: no
     initial_value: "0"
+  - id: env_pressure_pa
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_gas_ohm
+    type: int
+    restore_value: no
+    initial_value: "0"
   - id: env_lux
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_aqi
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_tvoc_ppb
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_eco2_ppm
     type: int
     restore_value: no
     initial_value: "0"
 
 script:
-  - id: publish_net_erl_state
+  - id: publish_net_erl_led_state
     then:
       - mqtt.publish_json:
           topic: smarthome/device/${device_id}/state
@@ -210,12 +250,15 @@ script:
             if (id(env_has_temp)) root["temp_01c"] = id(env_temp_01c); else root["temp_01c"] = nullptr;
             if (id(env_has_hum)) root["hum_01pct"] = id(env_hum_01pct); else root["hum_01pct"] = nullptr;
             if (id(env_has_lux)) root["lux"] = id(env_lux); else root["lux"] = nullptr;
-            root["pressure_pa"] = nullptr;
-            root["gas_ohm"] = nullptr;
-            root["aqi"] = nullptr;
-            root["tvoc_ppb"] = nullptr;
-            root["eco2_ppm"] = nullptr;
+            if (id(env_has_pressure)) root["pressure_pa"] = id(env_pressure_pa); else root["pressure_pa"] = nullptr;
+            if (id(env_has_gas)) root["gas_ohm"] = id(env_gas_ohm); else root["gas_ohm"] = nullptr;
+            if (id(env_has_air)) root["aqi"] = id(env_aqi); else root["aqi"] = nullptr;
+            if (id(env_has_air)) root["tvoc_ppb"] = id(env_tvoc_ppb); else root["tvoc_ppb"] = nullptr;
+            if (id(env_has_air)) root["eco2_ppm"] = id(env_eco2_ppm); else root["eco2_ppm"] = nullptr;
             root["motion"] = id(motion_state);
+            root["presence"] = id(motion_state);
+            root["button_flags"] = id(button_flags_value);
+            if (id(button_last_action_value).empty()) root["button_last_action"] = nullptr; else root["button_last_action"] = id(button_last_action_value).c_str();
             root["fault"] = id(contract_fault);
 
 switch:
@@ -227,18 +270,25 @@ switch:
     on_turn_on:
       then:
         - lambda: 'id(relay_1_state) = true;'
-        - script.execute: publish_net_erl_state
+        - light.turn_on:
+            id: led_ring_light
+            brightness: 45%
+            red: 100%
+            green: 80%
+            blue: 35%
+        - script.execute: publish_net_erl_led_state
     on_turn_off:
       then:
         - lambda: 'id(relay_1_state) = false;'
-        - script.execute: publish_net_erl_state
+        - light.turn_off: led_ring_light
+        - script.execute: publish_net_erl_led_state
 
 binary_sensor:
   - platform: gpio
-    id: pir_sensor
-    name: "${device_name} Motion"
+    id: presence_input
+    name: "${device_name} Presence"
     pin:
-      number: ${pir_pin}
+      number: ${presence_pin}
       mode:
         input: true
         pulldown: false
@@ -246,14 +296,40 @@ binary_sensor:
     on_state:
       then:
         - lambda: 'id(motion_state) = x;'
-        - script.execute: publish_net_erl_state
+        - script.execute: publish_net_erl_led_state
+  - platform: gpio
+    id: local_button
+    name: "${device_name} Button"
+    pin:
+      number: ${button_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 40ms
+    on_press:
+      then:
+        - lambda: |-
+            id(button_flags_value) = 1;
+            id(button_last_action_value) = "press";
+        - switch.toggle: relay_1_output
+        - script.execute: publish_net_erl_led_state
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: led_ring_light
+    name: "${device_name} LED Ring"
+    pin: ${led_ring_pin}
+    num_leds: ${led_ring_count}
+    rgb_order: GRB
+    chipset: WS2812
 
 sensor:
-  - platform: bme280_i2c
-    address: ${bme280_address}
+  - platform: bme680
+    address: ${bme680_address}
     update_interval: 10s
     temperature:
-      id: env_temperature_sensor
       name: "${device_name} Temperature"
       oversampling: 16x
       on_value:
@@ -262,9 +338,8 @@ sensor:
               id(env_temp_01c) = (int) lroundf(x * 10.0f);
               id(env_has_temp) = true;
           - script.execute: clear_contract_fault
-          - script.execute: publish_net_erl_state
+          - script.execute: publish_net_erl_led_state
     humidity:
-      id: env_humidity_sensor
       name: "${device_name} Humidity"
       oversampling: 16x
       on_value:
@@ -273,11 +348,29 @@ sensor:
               id(env_hum_01pct) = (int) lroundf(x * 10.0f);
               id(env_has_hum) = true;
           - script.execute: clear_contract_fault
-          - script.execute: publish_net_erl_state
+          - script.execute: publish_net_erl_led_state
+    pressure:
+      name: "${device_name} Pressure"
+      oversampling: 16x
+      on_value:
+        then:
+          - lambda: |-
+              id(env_pressure_pa) = (int) lroundf(x * 100.0f);
+              id(env_has_pressure) = true;
+          - script.execute: clear_contract_fault
+          - script.execute: publish_net_erl_led_state
+    gas_resistance:
+      name: "${device_name} Gas Resistance"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_gas_ohm) = (int) lroundf(x);
+              id(env_has_gas) = true;
+          - script.execute: clear_contract_fault
+          - script.execute: publish_net_erl_led_state
   - platform: veml7700
     address: ${veml7700_address}
     update_interval: 10s
-    id: env_veml7700_sensor
     ambient_light:
       name: "${device_name} Illuminance"
       on_value:
@@ -286,11 +379,38 @@ sensor:
               id(env_lux) = (int) lroundf(x);
               id(env_has_lux) = true;
           - script.execute: clear_contract_fault
-          - script.execute: publish_net_erl_state
+          - script.execute: publish_net_erl_led_state
+  - platform: ens160_i2c
+    address: ${ens160_address}
+    update_interval: 10s
+    eco2:
+      name: "${device_name} eCO2"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_eco2_ppm) = (int) lroundf(x);
+              id(env_has_air) = true;
+          - script.execute: publish_net_erl_led_state
+    tvoc:
+      name: "${device_name} TVOC"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_tvoc_ppb) = (int) lroundf(x);
+              id(env_has_air) = true;
+          - script.execute: publish_net_erl_led_state
+    aqi:
+      name: "${device_name} AQI"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_aqi) = (int) lroundf(x);
+              id(env_has_air) = true;
+          - script.execute: publish_net_erl_led_state
 
 interval:
   - interval: 5min
     then:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
-      - script.execute: publish_net_erl_state
+      - script.execute: publish_net_erl_led_state

@@ -1,221 +1,71 @@
-# ESPHome Zweitlinie
+# ESPHome MQTT-Linie
 
-Dieser Pfad bereitet einen separaten, additiven ESPHome-Geraetepfad vor, der denselben MQTT-/JSON-Vertrag wie der bestehende kompatible Firmwarepfad spricht.
+Diese Linie ist fuer dein ESPHome-Addon in Home Assistant vorbereitet. Die Geraete sprechen direkt MQTT mit dem Serververtrag. Es gibt hier keinen ESP-NOW-Master und keine MQTT-Bridge.
 
-Wichtig:
-- Der Kern des Technikerprojekts bleibt unveraendert.
-- Der bestehende Masterpfad bleibt die Hauptlinie fuer die eigene Firmware.
-- Das bestehende ESP-NOW-Protokoll bleibt unberuehrt.
-- Der Serververtrag bleibt unveraendert.
-- Dieser ESPHome-Pfad ist vorbereitet, aber nicht hardwarevalidiert.
-- **Diese Geraete arbeiten nur mit dem neuen `master_compat` MQTT-Bridge-Pfad** (nicht mit dem Legacy ESP-NOW Master).
+Die harte Regel: `device_id`, Topics und Payload-Felder bleiben kompatibel zur bisherigen Firmware, damit Node-RED nicht erkennen muss, ob ein altes Firmware-Geraet oder ein neues ESPHome-Geraet sendet.
 
-## Zweck
+## Import in Home Assistant
 
-Die Dateien unter `esphome/` zeigen, wie vertragskompatible MQTT-Geraete als alternativer Geraetepfad aufgebaut werden koennen, ohne den bisherigen Firmware-, Master- oder Serverkern umzubauen.
+Kopiere den kompletten Ordner `esphome/` in die ESPHome-Konfiguration von Home Assistant, damit die relativen `packages/`-Includes funktionieren.
 
-Geeignet als:
-- kompatibler Firmwarepfad fuer einfache MQTT-Geraete
-- alternativer Geraetepfad fuer getrennte ESPHome-Linien
-- Beispielbasis fuer vertragskompatible MQTT-Geraete
+Danach kannst du die Dateien aus `devices/` im ESPHome-Dashboard importieren oder als neue YAML anlegen. Die benoetigten Secret-Werte liegen in Home Assistant in der zentralen ESPHome-Secret-Datei:
 
-Nicht gemeint als:
-- Ersatz fuer den bestehenden Master
-- Eingriff in die bestehende ESP-NOW-Linie
-- Behauptung produktiver Hardwarefreigabe
-- Direkte Kommunikation mit dem Legacy ESP-NOW Master (benoetigt `master_compat`)
+```yaml
+wifi_ssid: <dein-wlan-name>
+wifi_password: <dein-wlan-passwort>
+mqtt_broker: <broker-host-oder-ip>
+mqtt_username: <mqtt-benutzer>
+mqtt_password: <mqtt-passwort>
+```
 
-## Topic-Uebersicht
+Wenn dein MQTT-Broker keine Zugangsdaten nutzt, muessen die `username`/`password`-Zeilen in den Device-YAMLs entfernt oder passend ersetzt werden. ESPHome akzeptiert leere Secrets nicht immer sauber.
 
-- `smarthome/master/<master_id>/status`
-- `smarthome/device/<device_id>/meta`
-- `smarthome/device/<device_id>/availability`
-- `smarthome/device/<device_id>/state`
+## Produktive Ersatz-YAMLs
+
+| Datei | MQTT-Device-ID | Zweck |
+|---|---:|---|
+| `devices/esp_net_erl_light_example.yaml` | `NET-ERL-001` | Hall-Modul mit Relais, BME280, VEML7700 und PIR |
+| `devices/esp_net_erl_hall_module_led_ring.yaml` | `NET-ERL-002` | Hall-Modul LED-Ring mit Relais, Sensorik, Button und LED-Ring |
+| `devices/esp_net_sen_env_bme280_veml.yaml` | `NET-SEN-002` | Wetterstation mit BME280, VEML7700 und Regen-Digitalpin |
+| `devices/esp_net_zrl_cover_example.yaml` | `NET-ZRL-002` | Rollladenmodul mit zwei Relais, lokalen Tastern, LEDs und Kalibrierung |
+| `devices/bat_sen_window_contact_example.yaml` | `bat_sen_01` | Batterie-Fensterkontakt |
+| `devices/bat_sen_rain_sensor_example.yaml` | `bat_sen_02` | Batterie-Regensensor |
+
+Die Dateinamen sind noch teilweise historisch. Entscheidend fuer Node-RED ist nicht der Dateiname, sondern das MQTT-Feld `device_id` und der Topic-Pfad.
+
+## MQTT-Vertrag
+
+Alle Geraete senden direkt:
+
+- `smarthome/device/<device_id>/meta` retained
+- `smarthome/device/<device_id>/availability` retained
+- `smarthome/device/<device_id>/state` retained
+- `smarthome/device/<device_id>/ack` nicht retained
+
+Aktoren hoeren auf:
+
 - `smarthome/device/<device_id>/command`
-- `smarthome/device/<device_id>/ack`
 
-## Vertragsregeln
+Commands brauchen `request_id`. ACKs geben dieselbe `request_id` zurueck.
 
-- `meta`, `availability` und `state` werden retained publiziert.
-- `ack` wird nicht retained publiziert.
-- Commands muessen `request_id` enthalten.
-- ACKs geben `request_id` wieder zurueck.
-- Commands ohne `request_id` werden nicht als erfolgreicher Befehl behandelt.
+## Wichtige Abgrenzung
 
-## Beispielpayloads
+Diese Linie nutzt:
 
-### Meta
+- kein ESP-NOW
+- keinen Master
+- keine `master_compat`-Bridge
+- keine internen Arbeitsmittel
 
-```json
-{
-  "device_id": "esp_net_erl_light_01",
-  "device_name": "ESP NET ERL Light Example",
-  "device_class": "net_erl",
-  "power_type": "mains",
-  "fw_version": "esphome-example",
-  "caps": 1,
-  "meta_schema_version": 1,
-  "control_mode": "relay_light",
-  "config_profile": "none",
-  "reporting_mode": "hybrid",
-  "sensor_mask": "XXXXXXXXXX",
-  "input_mask": "XXXXX"
-}
-```
+Home Assistant/ESPHome baut und flasht die Geraete. Node-RED sieht nur MQTT.
 
-### Availability
+## Offene Hardware-Validierung
 
-```json
-{
-  "device_id": "esp_net_erl_light_01",
-  "availability": "online",
-  "online": true,
-  "power_type": "mains"
-}
-```
+Die YAMLs sind vertraglich und pinseitig vorbereitet. Vor produktivem Einsatz musst du trotzdem je Board testen:
 
-### State Relay
-
-```json
-{
-  "device_id": "esp_net_erl_light_01",
-  "relay_1": true,
-  "fault": false
-}
-```
-
-### State Sensor
-
-```json
-{
-  "device_id": "esp_net_sen_env_01",
-  "temp_01c": 231,
-  "hum_01pct": 487,
-  "fault": false
-}
-```
-
-### State Cover
-
-```json
-{
-  "device_id": "esp_net_zrl_cover_01",
-  "cover_state": "stopped",
-  "cover_calibrated": false,
-  "fault": false
-}
-```
-
-Wenn `cover_calibrated = true` und eine belastbare Position vorliegt, kommt zusaetzlich `cover_position` als Ganzzahl `0..100` dazu.
-
-### State Battery Sensor (Window Contact)
-
-```json
-{
-  "device_id": "bat_sen_window_contact_01",
-  "contact_open": false,
-  "fault": false
-}
-```
-
-### State Battery Sensor (Rain)
-
-```json
-{
-  "device_id": "bat_sen_rain_sensor_01",
-  "rain_detected": true,
-  "fault": false
-}
-```
-
-### Command
-
-```json
-{
-  "device_id": "esp_net_erl_light_01",
-  "request_id": "req-123",
-  "command": "set_relay",
-  "relay_1": true
-}
-```
-
-### ACK
-
-```json
-{
-  "device_id": "esp_net_erl_light_01",
-  "request_id": "req-123",
-  "channel": "command",
-  "status": "ok",
-  "status_code": 0,
-  "ack_msg_type": 5,
-  "ack_seq": 1,
-  "source": "esphome_command"
-}
-```
-
-## Retained-Hinweis
-
-Der Serverpfad arbeitet mit Snapshot-Daten. Deshalb muessen `meta`, `availability` und `state` retained bleiben. `ack` bleibt absichtlich nicht retained, damit technische Rueckmeldungen nicht als aktueller Geraetezustand missverstanden werden.
-
-## Cover-Kalibrierung (NEU)
-
-Der Cover-Vertrag unterstuetzt jetzt eine manuelle Kalibrierung der Fahrzeiten:
-
-1. **Kalibrierung starten**: Command `calibrate` senden
-2. **Auffahrt messen**: Cover faehrt hoch (max. 180s). Sobald die obere Endlage erreicht ist, `stop` senden
-3. **Abfahrt messen**: Erneut `calibrate` senden, Cover faehrt runter. Bei Erreichen der unteren Endlage erneut `stop` senden
-4. **Speichern**: Erneut `calibrate` senden, die gemessenen Fahrzeiten werden persistent gespeichert und `cover_calibrated = true` gesetzt
-5. **Kalibrierung loeschen**: Command `clear_calibration` setzt den Cover zurueck
-
-Nach erfolgreicher Kalibrierung:
-- `cover_position` (0-100) wird im State-Payload mitgeliefert
-- `set_position` mit Zielposition 0-100 funktioniert (zeitbasierte Positionsschaetzung)
-- Endlagen (0/100) funktionieren auch unkalibriert
-
-**WARNUNG**: Waehrend der Kalibrierung muss der Benutzer die Cover-Bewegung ueberwachen und manuell stoppen. Es gibt keinen automatischen Endlagenschutz - mechanische Endschalter sind fuer den Produktiveinsatz notwendig.
-
-## Dateien
-
-### Packages (gemeinsame Vertragsbausteine)
-- `packages/smarthome_contract_base.yaml`: gemeinsame Vertragsbasis fuer Meta, Availability und Statusfehler
-- `packages/smarthome_command_ack.yaml`: ACK-Helfer fuer den Command-Pfad
-- `packages/smarthome_relay_contract.yaml`: Relais-Beispielvertrag mit `set_relay` und `get_state`
-- `packages/smarthome_cover_contract.yaml`: Cover-Vertrag mit `open`, `close`, `stop`, `set_position`, Kalibrierung und Positionsregel
-
-### Devices - Mains (netzbetrieben)
-- `devices/esp_net_erl_light_example.yaml`: einfacher Relais-Beispielpfad
-- `devices/esp_net_sen_env_example.yaml`: einfacher Temperatur-/Feuchte-Beispielpfad (DHT22)
-- `devices/esp_net_sen_env_bme280.yaml`: BME280 (Temperatur, Feuchte, Luftdruck)
-- `devices/esp_net_sen_env_bme680.yaml`: BME680 (Temperatur, Feuchte, Luftdruck, Gaswiderstand)
-- `devices/esp_net_sen_env_bme280_veml.yaml`: BME280 + VEML7700 (Temperatur, Feuchte, Luftdruck, Helligkeit)
-- `devices/esp_net_zrl_cover_example.yaml`: Cover mit Kalibrierung und Positionssteuerung (zeitbasiert)
-
-### Devices - Battery (batteriebetrieben)
-- `devices/bat_sen_window_contact_example.yaml`: Fensterkontakt, GPIO-Wake bei Kontaktwechsel, Deep Sleep
-- `devices/bat_sen_rain_sensor_example.yaml`: Regensensor, periodischer Wake (900s), ADC-basierte Nasserkennung
-
-## Abgrenzung
-
-Diese Zweitlinie ist absichtlich getrennt gehalten:
-- kein Eingriff in `firmware/`
-- kein Eingriff in den bestehenden Masterpfad
-- kein Eingriff in ESP-NOW
-- kein Eingriff in die Serverarchitektur
-- **Kommunikation ausschliesslich ueber MQTT**
-- **Erfordert `master_compat` MQTT-Bridge fuer die Integration mit dem bestehenden System**
-
-Wer diesen Pfad produktiv nutzen will, muss die jeweiligen Pins, Sensoren, Fahrzeiten, Endlagen und Fehlersituationen am Zielgeraet sauber validieren.
-
-## Status
-
-| Geraet | Vertrag | Hardware-Logik | Kalibrierung | Validierung |
-|--------|---------|----------------|--------------|-------------|
-| net_erl_light | ✅ | ✅ | N/A | ❌ |
-| net_sen_env (DHT22) | ✅ | ✅ (nur Temp/Hum) | N/A | ❌ |
-| net_sen_env (BME280) | ✅ | ✅ (Temp/Hum/Druck) | N/A | ❌ |
-| net_sen_env (BME680) | ✅ | ✅ (Temp/Hum/Druck/Gas) | N/A | ❌ |
-| net_sen_env (BME280+VEML) | ✅ | ✅ (Temp/Hum/Druck/Lux) | N/A | ❌ |
-| net_zrl_cover | ✅ | ✅ (zeitbasiert) | ✅ (manuell) | ❌ |
-| bat_sen_window_contact | ✅ | ✅ (GPIO-Wake) | N/A | ❌ |
-| bat_sen_rain_sensor | ✅ | ✅ (ADC, periodisch) | N/A | ❌ |
+- Relaisrichtung und Active-Level
+- Rollo-Auf/Ab-Verriegelung und Endlagen
+- Taster-Pegel beim NET-ZRL
+- Batterie-ADC-Kalibrierung
+- Regen-ADC-Schwellwerte
+- Sensoradressen bei BME/VEML/ENS160

@@ -40,11 +40,12 @@
 # caps="8195" → Bit 0 (Relais) + Bit 13 (Cover)
 # control_mode="cover", config_profile="cover_basic"
 substitutions:
-  device_id: esp_net_zrl_cover_01
-  device_name: ESP NET ZRL Cover Example
+  node_name: net-zrl-002-esphome
+  device_id: NET-ZRL-002
+  device_name: NET-ZRL Shutter
   device_class: net_zrl
   power_type: mains
-  fw_version: esphome-example
+  fw_version: esphome-net-zrl-shutter
   caps: "8195"
   meta_schema_version: "1"
   control_mode: cover
@@ -52,8 +53,14 @@ substitutions:
   reporting_mode: hybrid
   sensor_mask: XXXXXXXXXX
   input_mask: XXXXX
-  relay_up_pin: GPIO4                # GPIO-Pin für Aufwaerts-Relais
-  relay_down_pin: GPIO5              # GPIO-Pin für Abwaerts-Relais
+  relay_up_pin: GPIO10               # bestehende Firmware: NET_ZRL_RELAY_UP_PIN
+  relay_down_pin: GPIO5              # bestehende Firmware: NET_ZRL_RELAY_DOWN_PIN
+  default_cover_travel_ms: "100000"
+  button_up_pin: GPIO2
+  button_down_pin: GPIO4
+  button_stop_pin: GPIO3
+  led_up_pin: GPIO6
+  led_down_pin: GPIO7
 
 # =============================================================================
 # PACKAGES – Eingebundene Contract-Bausteine
@@ -67,7 +74,7 @@ packages:
 # ESPHOME – Basis-Konfiguration und Boot-Verhalten
 # =============================================================================
 esphome:
-  name: ${device_id}
+  name: ${node_name}
   friendly_name: ${device_name}
   comment: Vertragskompatibles MQTT-Cover mit Kalibrierung und Positionssteuerung
   on_boot:
@@ -76,6 +83,10 @@ esphome:
       - lambda: |-
           id(contract_online) = true;
           id(cover_contract_state) = "stopped";
+          if (!id(cover_contract_calibrated)) {
+            id(cover_contract_travel_up_ms) = atoi("${default_cover_travel_ms}");
+            id(cover_contract_travel_down_ms) = atoi("${default_cover_travel_ms}");
+          }
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_cover_contract_state
@@ -98,7 +109,7 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: ""
+  topic_prefix: smarthome/device/${device_id}/esphome
   birth_message:
     topic: smarthome/device/${device_id}/availability
     retain: true
@@ -129,11 +140,88 @@ switch:
     pin: ${relay_up_pin}
     restore_mode: ALWAYS_OFF
     name: "Cover Relay Up"
+    on_turn_on:
+      then:
+        - switch.turn_on: cover_led_up
+    on_turn_off:
+      then:
+        - switch.turn_off: cover_led_up
   - platform: gpio
     id: cover_relay_down
     pin: ${relay_down_pin}
     restore_mode: ALWAYS_OFF
     name: "Cover Relay Down"
+    on_turn_on:
+      then:
+        - switch.turn_on: cover_led_down
+    on_turn_off:
+      then:
+        - switch.turn_off: cover_led_down
+  - platform: gpio
+    id: cover_led_up
+    pin: ${led_up_pin}
+    restore_mode: ALWAYS_OFF
+    name: "Cover LED Up"
+    internal: true
+  - platform: gpio
+    id: cover_led_down
+    pin: ${led_down_pin}
+    restore_mode: ALWAYS_OFF
+    name: "Cover LED Down"
+    internal: true
+
+binary_sensor:
+  - platform: gpio
+    id: cover_button_up
+    name: "Cover Button Up"
+    internal: true
+    pin:
+      number: ${button_up_pin}
+      mode:
+        input: true
+        pulldown: true
+        pullup: false
+    filters:
+      - delayed_on: 35ms
+    on_press:
+      then:
+        - script.execute: cover_hw_open
+        - lambda: 'id(cover_contract_state) = "opening";'
+        - script.execute: publish_cover_contract_state
+  - platform: gpio
+    id: cover_button_down
+    name: "Cover Button Down"
+    internal: true
+    pin:
+      number: ${button_down_pin}
+      mode:
+        input: true
+        pulldown: true
+        pullup: false
+    filters:
+      - delayed_on: 35ms
+    on_press:
+      then:
+        - script.execute: cover_hw_close
+        - lambda: 'id(cover_contract_state) = "closing";'
+        - script.execute: publish_cover_contract_state
+  - platform: gpio
+    id: cover_button_stop
+    name: "Cover Button Stop"
+    internal: true
+    pin:
+      number: ${button_stop_pin}
+      mode:
+        input: true
+        pulldown: true
+        pullup: false
+    filters:
+      - delayed_on: 35ms
+    on_press:
+      then:
+        - script.execute: cover_hw_stop
+        - lambda: 'id(cover_contract_state) = "stopped";'
+        - script.execute: publish_cover_contract_state
 
 # =============================================================================
 # GLOBALE VARIABLEN – Teil-Positionierung (Partial Movement)
@@ -182,26 +270,8 @@ cover:
     stop_action:
       - switch.turn_off: cover_relay_up
       - switch.turn_off: cover_relay_down
-    open_duration: !lambda |-
-      // Prueft ob eine Teil-Positionsfahrt aktiv ist → nur Teilzeit fahren
-      if (id(cover_partial_active)) {
-        return id(cover_partial_duration_ms);
-      }
-      // Prueft ob Kalibrier-Phase 1 (Hochfahrt) → max. 180s fahren
-      if (id(cover_calib_phase) == 1) {
-        return 180000;
-      }
-      return id(cover_contract_travel_up_ms);
-    close_duration: !lambda |-
-      // Prueft ob eine Teil-Positionsfahrt aktiv ist → nur Teilzeit fahren
-      if (id(cover_partial_active)) {
-        return id(cover_partial_duration_ms);
-      }
-      // Prueft ob Kalibrier-Phase 3 (Runterfahrt) → max. 180s fahren
-      if (id(cover_calib_phase) == 3) {
-        return 180000;
-      }
-      return id(cover_contract_travel_down_ms);
+    open_duration: ${default_cover_travel_ms}ms
+    close_duration: ${default_cover_travel_ms}ms
     on_open:
       then:
         - lambda: |-
@@ -221,7 +291,7 @@ cover:
             }
             id(cover_contract_state) = "stopped";
         - script.execute: publish_cover_contract_state
-    on_close:
+    on_closed:
       then:
         - lambda: |-
             // Prueft ob eine Teilfahrt beendet wurde → Zielposition uebernehmen
@@ -320,6 +390,12 @@ script:
                 else:
                   - lambda: 'id(cover_contract_state) = "closing";'
                   - cover.close: zrl_cover
+            - delay: !lambda 'return id(cover_partial_duration_ms);'
+            - cover.stop: zrl_cover
+            - lambda: |-
+                id(cover_partial_active) = false;
+                id(cover_contract_position) = id(cover_contract_target_position);
+                id(cover_contract_state) = "stopped";
             - script.execute: publish_cover_contract_state
 
 # =============================================================================

@@ -1,152 +1,41 @@
-# =============================================================================
-# esp_net_sen_env_bme280_veml.yaml
-# =============================================================================
-# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
-# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
-# Lizenz:     Proprietär – nur für Projektzwecke
-# Pfad:       esphome/devices/esp_net_sen_env_bme280_veml.yaml
-#
-# Datei-Funktion:
-#   Beispiel: Netzbetriebener Umweltsensor mit BME280 (Temperatur,
-#   Luftfeuchte, Luftdruck) und VEML7700 (Umgebungslicht).
-#   I2C-Anbindung (BME280: 0x76, VEML7700: 0x10).
-#   Publiziert temp_01c, hum_01pct, pressure_pa, lux via MQTT.
-#
-# MQTT-Topics:
-#   smarthome/device/{device_id}/meta         – Geraete-Metadaten
-#   smarthome/device/{device_id}/availability – Online/Offline
-#   smarthome/device/{device_id}/state        – Sensorwerte (temp_01c, hum_01pct,
-#                                                pressure_pa, lux, fault)
-#   smarthome/device/{device_id}/ack          – Kommando-Bestaetigung
-#   smarthome/device/{device_id}/command      – Eingehende Kommandos (get_state)
-#
-# Autor:           DevOpsOfChaos
-# Erstelldatum:    2026-05-14
-# Letzte Änderung: 2026-05-14
-#
-# Aenderungshistorie:
-#   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
-#
-# Abhaengigkeiten:
-#   Importiert: smarthome_contract_base.yaml
-#              smarthome_command_ack.yaml
-#   Wird importiert von: (keine – Device-Datei)
-# =============================================================================
+# NET-SEN-002 - Wetterstation als ESPHome MQTT-only Ersatzlinie
 
-# =============================================================================
-# SUBSTITUTIONS – Geraetespezifische Konfiguration
-# =============================================================================
-# caps="15" → Bit 1 (Temp) + Bit 2 (Feuchte) + Bit 3 (Druck) + Bit 6 (Lux)
-# sensor_mask="THPLXXXXXX" → T=Temp, H=Feuchte, P=Druck, L=Lux (Positionen 1-4)
 substitutions:
-  device_id: esp_net_sen_env_bme280_veml_01
-  device_name: ESP NET SEN Env BME280 VEML
+  node_name: net-sen-002-esphome
+  device_id: NET-SEN-002
+  device_name: NET-SEN Env BME280+VEML+Rain
   device_class: net_sen
   power_type: mains
-  fw_version: esphome-bme280-veml
-  caps: "15"
+  fw_version: esphome-net-sen-weather
+  caps: "33052"
   meta_schema_version: "1"
   control_mode: none
   config_profile: none
   reporting_mode: hybrid
-  sensor_mask: THPLXXXXXX
+  sensor_mask: THPLRXXXXX
   input_mask: XXXXX
+  i2c_sda_pin: GPIO0
+  i2c_scl_pin: GPIO1
+  rain_pin: GPIO3
+  bme280_address: "0x76"
+  veml7700_address: "0x10"
 
-# =============================================================================
-# PACKAGES – Eingebundene Contract-Bausteine
-# =============================================================================
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
   command_ack: !include ../packages/smarthome_command_ack.yaml
 
-# =============================================================================
-# I2C – Bus-Konfiguration für BME280 (0x76) und VEML7700 (0x10)
-# =============================================================================
-i2c:
-  sda: GPIO4
-  scl: GPIO5
-  scan: true
-
-# =============================================================================
-# GLOBALE VARIABLEN – Sensor-Zwischenspeicher
-# =============================================================================
-globals:
-  - id: env_has_temp              # true = Temperatur mindestens einmal gemessen
-    type: bool
-    restore_value: no
-    initial_value: "false"
-  - id: env_has_hum               # true = Feuchte mindestens einmal gemessen
-    type: bool
-    restore_value: no
-    initial_value: "false"
-  - id: env_has_pressure          # true = Druck mindestens einmal gemessen
-    type: bool
-    restore_value: no
-    initial_value: "false"
-  - id: env_has_lux               # true = Lichtstaerke mindestens einmal gemessen
-    type: bool
-    restore_value: no
-    initial_value: "false"
-  - id: env_temp_01c              # Temperatur in Zehntel-Grad (z.B. 235 = 23,5°C)
-    type: int
-    restore_value: no
-    initial_value: "0"
-  - id: env_hum_01pct             # Luftfeuchte in Zehntel-Prozent (z.B. 455 = 45,5%)
-    type: int
-    restore_value: no
-    initial_value: "0"
-  - id: env_pressure_pa           # Luftdruck in Pascal (z.B. 101325 = 1013,25 hPa)
-    type: int
-    restore_value: no
-    initial_value: "0"
-  - id: env_lux                   # Umgebungslicht in Lux (lx)
-    type: int
-    restore_value: no
-    initial_value: "0"
-
-# =============================================================================
-# SKRIPTE – Sensor-Status publishen
-# =============================================================================
-script:
-  # publish_env_contract_state – Veroeffentlicht Sensorwerte auf .../state (retain)
-  #   Sendet nur Werte, die bereits gemessen wurden (has_*-Prüfung)
-  #   Topic: smarthome/device/{device_id}/state
-  #   Parameter: keine  |  Rückgabe: keine
-  - id: publish_env_contract_state
-    then:
-      - mqtt.publish_json:
-          topic: smarthome/device/${device_id}/state
-          retain: true
-          payload: |-
-            root["device_id"] = "${device_id}";
-            if (id(env_has_temp)) {
-              root["temp_01c"] = id(env_temp_01c);
-            }
-            if (id(env_has_hum)) {
-              root["hum_01pct"] = id(env_hum_01pct);
-            }
-            if (id(env_has_pressure)) {
-              root["pressure_pa"] = id(env_pressure_pa);
-            }
-            if (id(env_has_lux)) {
-              root["lux"] = id(env_lux);
-            }
-            root["fault"] = id(contract_fault);
-
-# =============================================================================
-# ESPHOME – Basis-Konfiguration und Boot-Verhalten
-# =============================================================================
 esphome:
-  name: ${device_id}
+  name: ${node_name}
   friendly_name: ${device_name}
   on_boot:
     priority: -10
     then:
       - lambda: |-
           id(contract_online) = true;
+          id(rain_state) = id(rain_input).state;
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
-      - script.execute: publish_env_contract_state
+      - script.execute: publish_net_sen_state
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -163,7 +52,7 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: ""
+  topic_prefix: smarthome/device/${device_id}/esphome
   birth_message:
     topic: smarthome/device/${device_id}/availability
     retain: true
@@ -178,7 +67,7 @@ mqtt:
           id(contract_online) = true;
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
-      - script.execute: publish_env_contract_state
+      - script.execute: publish_net_sen_state
   on_disconnect:
     then:
       - lambda: |-
@@ -188,28 +77,22 @@ mqtt:
     - topic: smarthome/device/${device_id}/command
       then:
         - lambda: |-
-            // request_id aus JSON extrahieren und validieren
             std::string request_id = "";
-            // Prueft ob "request_id"-Schluessel im JSON vorhanden und nicht null ist
             if (x.containsKey("request_id") && !x["request_id"].isNull()) {
               request_id = x["request_id"].as<std::string>();
             }
-            // Prueft ob request_id leer ist → Fehler -20, Kommando ignorieren
             if (request_id.empty()) {
               id(contract_fault) = true;
               id(contract_last_status_code) = -20;
               id(contract_last_status_text) = "missing_request_id";
-              ESP_LOGW("contract", "Ignoring BME280+VEML command without request_id");
               return;
             }
 
-            // command aus JSON extrahieren
             std::string command = "";
             if (x.containsKey("command") && !x["command"].isNull()) {
               command = x["command"].as<std::string>();
             }
 
-            // queue_ack – Hilfsfunktion für ACK-Antwort
             auto queue_ack = [&](const char *status, int status_code, const char *source) {
               id(ack_request_id) = request_id;
               id(ack_status) = status;
@@ -218,30 +101,103 @@ mqtt:
               id(flush_command_ack).execute();
             };
 
-            // "get_state" – Aktuelle Sensorwerte publishen
             if (command == "get_state") {
               id(clear_contract_fault).execute();
-              id(publish_env_contract_state).execute();
+              id(publish_net_sen_state).execute();
               queue_ack("ok", 0, "esphome_state");
               return;
             }
 
-            // Fallback: unbekanntes Kommando → Fehler -2
             id(contract_fault) = true;
             id(contract_last_status_code) = -2;
             id(contract_last_status_text) = "unsupported";
             queue_ack("unsupported", -2, "esphome_validation");
 
-# =============================================================================
-# SENSOREN – BME280 + VEML7700 via I2C
-# =============================================================================
-# BME280: Temperatur, Feuchte, Druck (Adresse 0x76, 30s Intervall)
-# VEML7700: Umgebungslicht in Lux (Adresse 0x10)
-# Bei erfolgreicher Messung: has_*-Flag setzen, Fehler löschen, Status publishen
+i2c:
+  sda: ${i2c_sda_pin}
+  scl: ${i2c_scl_pin}
+  scan: true
+
+globals:
+  - id: env_has_temp
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_hum
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_pressure
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_lux
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_temp_01c
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_hum_01pct
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_pressure_pa
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_lux
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: rain_state
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+script:
+  - id: publish_net_sen_state
+    then:
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/state
+          retain: true
+          payload: |-
+            root["device_id"] = "${device_id}";
+            if (id(env_has_temp)) root["temp_01c"] = id(env_temp_01c); else root["temp_01c"] = nullptr;
+            if (id(env_has_hum)) root["hum_01pct"] = id(env_hum_01pct); else root["hum_01pct"] = nullptr;
+            if (id(env_has_lux)) root["lux"] = id(env_lux); else root["lux"] = nullptr;
+            if (id(env_has_pressure)) root["pressure_pa"] = id(env_pressure_pa); else root["pressure_pa"] = nullptr;
+            root["gas_ohm"] = nullptr;
+            root["aqi"] = nullptr;
+            root["tvoc_ppb"] = nullptr;
+            root["eco2_ppm"] = nullptr;
+            root["motion"] = false;
+            root["rain"] = id(rain_state);
+            root["fault"] = id(contract_fault);
+
+binary_sensor:
+  - platform: gpio
+    id: rain_input
+    name: "${device_name} Rain"
+    pin:
+      number: ${rain_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 35ms
+      - delayed_off: 35ms
+    on_state:
+      then:
+        - lambda: 'id(rain_state) = x;'
+        - script.execute: publish_net_sen_state
+
 sensor:
-  - platform: bme280
-    address: 0x76
-    update_interval: 30s
+  - platform: bme280_i2c
+    address: ${bme280_address}
+    update_interval: 10s
     temperature:
       id: env_temperature_sensor
       name: "${device_name} Temperature"
@@ -252,7 +208,7 @@ sensor:
               id(env_temp_01c) = (int) lroundf(x * 10.0f);
               id(env_has_temp) = true;
           - script.execute: clear_contract_fault
-          - script.execute: publish_env_contract_state
+          - script.execute: publish_net_sen_state
     humidity:
       id: env_humidity_sensor
       name: "${device_name} Humidity"
@@ -263,7 +219,7 @@ sensor:
               id(env_hum_01pct) = (int) lroundf(x * 10.0f);
               id(env_has_hum) = true;
           - script.execute: clear_contract_fault
-          - script.execute: publish_env_contract_state
+          - script.execute: publish_net_sen_state
     pressure:
       id: env_pressure_sensor
       name: "${device_name} Pressure"
@@ -271,32 +227,27 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              id(env_pressure_pa) = (int) lroundf(x);
+              id(env_pressure_pa) = (int) lroundf(x * 100.0f);
               id(env_has_pressure) = true;
           - script.execute: clear_contract_fault
-          - script.execute: publish_env_contract_state
-
-  # VEML7700 – Umgebungslichtsensor (Adresse 0x10)
-  # lux-Wert wird direkt als float vom Sensor übernommen (lroundf)
+          - script.execute: publish_net_sen_state
   - platform: veml7700
-    address: 0x10
-    update_interval: 30s
+    address: ${veml7700_address}
+    update_interval: 10s
     id: env_veml7700_sensor
-    name: "${device_name} Illuminance"
-    on_value:
-      then:
-        - lambda: |-
-            id(env_lux) = (int) lroundf(x);
-            id(env_has_lux) = true;
-        - script.execute: clear_contract_fault
-        - script.execute: publish_env_contract_state
+    ambient_light:
+      name: "${device_name} Illuminance"
+      on_value:
+        then:
+          - lambda: |-
+              id(env_lux) = (int) lroundf(x);
+              id(env_has_lux) = true;
+          - script.execute: clear_contract_fault
+          - script.execute: publish_net_sen_state
 
-# =============================================================================
-# INTERVAL – Regelmaessiger Refresh aller Status-Topics (alle 5 Minuten)
-# =============================================================================
 interval:
   - interval: 5min
     then:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
-      - script.execute: publish_env_contract_state
+      - script.execute: publish_net_sen_state

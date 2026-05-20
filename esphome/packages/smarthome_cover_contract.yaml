@@ -33,6 +33,9 @@
 # =============================================================================
 # GLOBALE VARIABLEN – Cover-Zustand, Kalibrierung, Fahrzeiten
 # =============================================================================
+substitutions:
+  default_cover_travel_ms: "30000"
+
 # Kalibrierungs-State-Machine (cover_calib_phase):
 #   0 = Idle – nicht in Kalibrierung
 #   1 = Faehrt hoch (misst Zeit bis STOP-Kommando)
@@ -61,11 +64,11 @@ globals:
   - id: cover_contract_travel_up_ms    # Gemessene Fahrzeit hoch in ms (Default: 30000 = 30s)
     type: int                          # Wird im RTC-Speicher gehalten
     restore_value: yes
-    initial_value: "30000"
+    initial_value: ${default_cover_travel_ms}
   - id: cover_contract_travel_down_ms  # Gemessene Fahrzeit runter in ms (Default: 30000 = 30s)
     type: int                          # Wird im RTC-Speicher gehalten
     restore_value: yes
-    initial_value: "30000"
+    initial_value: ${default_cover_travel_ms}
   - id: cover_calib_phase              # Aktuelle Phase der Kalibrierungs-State-Machine (0-5)
     type: int
     restore_value: no
@@ -115,11 +118,16 @@ script:
           retain: true
           payload: |-
             root["device_id"] = "${device_id}";
+            root["relay_1"] = id(cover_relay_up).state;
+            root["relay_2"] = id(cover_relay_down).state;
+            root["cover_mode"] = true;
             root["cover_state"] = id(cover_contract_state).c_str();
             root["cover_calibrated"] = id(cover_contract_calibrated);
             root["fault"] = id(contract_fault);
             if (id(cover_contract_calibrated)) {
               root["cover_position"] = id(cover_contract_position);
+            } else {
+              root["cover_position"] = nullptr;
             }
 
   # start_cover_calibration – State-Machine: Fuehrt Kalibrierung Schritt für Schritt aus
@@ -245,8 +253,8 @@ script:
     then:
       - lambda: |-
           id(cover_contract_calibrated) = false;
-          id(cover_contract_travel_up_ms) = 30000;
-          id(cover_contract_travel_down_ms) = 30000;
+          id(cover_contract_travel_up_ms) = atoi("${default_cover_travel_ms}");
+          id(cover_contract_travel_down_ms) = atoi("${default_cover_travel_ms}");
           id(cover_calib_phase) = 0;
           id(cover_calib_up_measured) = false;
           id(cover_calib_temp_up_ms) = 0;
