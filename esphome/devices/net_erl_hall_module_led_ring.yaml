@@ -1,0 +1,658 @@
+# NET-ERL-020 - Hall Module LED Ring als MQTT-only Ersatzlinie
+
+substitutions:
+  node_name: net-erl-020
+  device_id: NET-ERL-020
+  device_name: NET-ERL Hall Module LED Ring
+  device_class: net_erl
+  power_type: mains
+  fw_version: "1"
+  caps: "38013"
+  meta_schema_version: "1"
+  control_mode: relay_light
+  config_profile: hall_module_led_ring
+  reporting_mode: hybrid
+  sensor_mask: THLPGAMXXX
+  input_mask: BXXXX
+  report_interval_s: "10"
+  auto_on_lux_threshold: "250"
+  auto_off_delay_s: "15"
+  relay_pin: GPIO10
+  button_pin: GPIO6
+  presence_pin: GPIO7
+  led_ring_pin: GPIO8
+  led_ring_count: "17"
+  i2c_sda_pin: GPIO0
+  i2c_scl_pin: GPIO1
+  bme680_address: "0x76"
+  veml7700_address: "0x10"
+  ens160_address: "0x52"
+
+packages:
+  contract_base: !include ../packages/smarthome_contract_base.yaml
+  command_ack: !include ../packages/smarthome_command_ack.yaml
+
+esphome:
+  name: ${node_name}
+  friendly_name: ${device_name}
+  on_boot:
+    priority: -10
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          id(contract_online) = true;
+          id(relay_1_state) = id(relay_1_output).state;
+          id(motion_state) = id(presence_input).state;
+          if (id(motion_state)) {
+            id(last_motion_ms) = now;
+            if (!id(relay_1_state)) {
+              id(pending_auto_on_decision) = true;
+            }
+          }
+      - script.execute: publish_contract_meta
+      - script.execute: publish_contract_availability
+      - script.execute: publish_net_erl_led_state
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: smarthome/device/${device_id}/internal
+  discovery: false
+  log_topic: null
+  shutdown_message: null
+  birth_message:
+    topic: smarthome/device/${device_id}/availability
+    retain: true
+    payload: '{"device_id":"${device_id}","availability":"online","online":true,"power_type":"${power_type}"}'
+  will_message:
+    topic: smarthome/device/${device_id}/availability
+    retain: true
+    payload: '{"device_id":"${device_id}","availability":"offline","online":false,"power_type":"${power_type}"}'
+  on_connect:
+    then:
+      - lambda: |-
+          id(contract_online) = true;
+      - script.execute: publish_contract_meta
+      - script.execute: publish_contract_availability
+      - script.execute: publish_net_erl_led_state
+  on_disconnect:
+    then:
+      - lambda: |-
+          id(contract_online) = false;
+      - script.execute: publish_contract_availability
+  on_json_message:
+    - topic: smarthome/device/${device_id}/command
+      then:
+        - lambda: |-
+            std::string request_id = "";
+            if (x["request_id"].is<const char*>()) {
+              request_id = x["request_id"].as<std::string>();
+            }
+            if (request_id.empty()) {
+              id(contract_last_status_code) = -20;
+              id(contract_last_status_text) = "missing_request_id";
+              return;
+            }
+
+            std::string command = "";
+            if (x["command"].is<const char*>()) {
+              command = x["command"].as<std::string>();
+            }
+
+            auto queue_ack = [&](const char *status, int status_code, const char *source) {
+              id(ack_request_id) = request_id;
+              id(ack_status) = status;
+              id(ack_status_code) = status_code;
+              id(ack_source) = source;
+              id(flush_command_ack).execute();
+            };
+
+            if (command == "get_state") {
+              id(clear_contract_fault).execute();
+              id(publish_net_erl_led_state).execute();
+              queue_ack("ok", 0, "node_ack");
+              return;
+            }
+
+            if (command == "set_relay") {
+              bool relay_value = false;
+              bool relay_value_ok = false;
+              if (x["relay_1"].is<bool>()) {
+                relay_value = x["relay_1"].as<bool>();
+                relay_value_ok = true;
+              } else if (x["relay_1"].is<int>()) {
+                relay_value = x["relay_1"].as<int>() != 0;
+                relay_value_ok = true;
+              } else if (x["relay_1"].is<const char*>()) {
+                std::string relay_text = x["relay_1"].as<std::string>();
+                if (relay_text == "true" || relay_text == "1" || relay_text == "on") {
+                  relay_value = true;
+                  relay_value_ok = true;
+                } else if (relay_text == "false" || relay_text == "0" || relay_text == "off") {
+                  relay_value = false;
+                  relay_value_ok = true;
+                }
+              }
+              if (!relay_value_ok) {
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "master_validation");
+                return;
+              }
+
+              const uint32_t now = millis();
+              id(relay_auto_owned) = false;
+              id(pending_auto_on_decision) = false;
+              id(blocked_by_lux) = false;
+              if (relay_value) {
+                id(manual_follow_motion_active) = true;
+                id(manual_follow_motion_seen) = id(presence_input).state;
+                id(manual_follow_motion_probe_active) = false;
+                id(manual_follow_started_ms) = now;
+                id(manual_follow_probe_started_ms) = 0;
+                if (id(presence_input).state) {
+                  id(motion_state) = true;
+                  id(last_motion_ms) = now;
+                }
+                id(relay_1_output).turn_on();
+              } else {
+                id(manual_follow_motion_active) = false;
+                id(manual_follow_motion_seen) = false;
+                id(manual_follow_motion_probe_active) = false;
+                id(manual_follow_started_ms) = 0;
+                id(manual_follow_probe_started_ms) = 0;
+                id(explicit_off_hold) = id(presence_input).state;
+                if (id(explicit_off_hold)) {
+                  id(motion_state) = true;
+                  id(last_motion_ms) = now;
+                }
+                id(relay_1_output).turn_off();
+              }
+              id(clear_contract_fault).execute();
+              id(publish_net_erl_led_state).execute();
+              queue_ack("ok", 0, "node_ack");
+              return;
+            }
+
+            id(contract_last_status_code) = -2;
+            id(contract_last_status_text) = "unsupported";
+            queue_ack("unsupported", -2, "master_validation");
+
+i2c:
+  sda: ${i2c_sda_pin}
+  scl: ${i2c_scl_pin}
+  scan: true
+
+globals:
+  - id: relay_1_state
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: motion_state
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: relay_auto_owned
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: blocked_by_lux
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: pending_auto_on_decision
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: manual_follow_motion_active
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: manual_follow_motion_seen
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: manual_follow_motion_probe_active
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: explicit_off_hold
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: last_motion_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: manual_follow_started_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: manual_follow_probe_started_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: button_pressed_at_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: bme680_gas_read_count
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: env_has_temp
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_hum
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_pressure
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_lux
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_air
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_temp_01c
+    type: int
+    restore_value: no
+    initial_value: "-32768"
+  - id: env_hum_01pct
+    type: int
+    restore_value: no
+    initial_value: "65535"
+  - id: env_pressure_pa
+    type: uint32_t
+    restore_value: no
+    initial_value: "4294967295UL"
+  - id: env_gas_ohm
+    type: uint32_t
+    restore_value: no
+    initial_value: "4294967295UL"
+  - id: env_lux
+    type: int
+    restore_value: no
+    initial_value: "65535"
+  - id: env_aqi
+    type: int
+    restore_value: no
+    initial_value: "65535"
+  - id: env_tvoc_ppb
+    type: int
+    restore_value: no
+    initial_value: "65535"
+  - id: env_eco2_ppm
+    type: int
+    restore_value: no
+    initial_value: "65535"
+
+script:
+  - id: publish_net_erl_led_state
+    then:
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/state
+          retain: true
+          payload: |-
+            const bool sensor_fault =
+              !id(env_has_temp) ||
+              !id(env_has_hum) ||
+              !id(env_has_lux) ||
+              (millis() >= 180000UL && !id(env_has_air));
+            root["device_id"] = "${device_id}";
+            root["relay_1"] = id(relay_1_state);
+            root["temp_01c"] = id(env_temp_01c);
+            root["hum_01pct"] = id(env_hum_01pct);
+            root["lux"] = id(env_lux);
+            root["pressure_pa"] = id(env_pressure_pa);
+            root["gas_ohm"] = id(env_gas_ohm);
+            root["aqi"] = id(env_aqi);
+            root["tvoc_ppb"] = id(env_tvoc_ppb);
+            root["eco2_ppm"] = id(env_eco2_ppm);
+            root["motion"] = id(motion_state);
+            root["fault"] = sensor_fault;
+
+  - id: evaluate_auto_on_from_lux
+    then:
+      - lambda: |-
+          if (!id(motion_state) || !id(pending_auto_on_decision) || id(relay_1_state) || id(env_lux) == 65535) {
+            return;
+          }
+          id(pending_auto_on_decision) = false;
+          if (id(env_lux) <= atoi("${auto_on_lux_threshold}")) {
+            id(relay_auto_owned) = true;
+            id(blocked_by_lux) = false;
+            id(relay_1_output).turn_on();
+          } else {
+            id(blocked_by_lux) = true;
+            id(publish_net_erl_led_state).execute();
+          }
+
+  - id: handle_motion_on
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          if (id(explicit_off_hold)) {
+            id(motion_state) = true;
+            id(last_motion_ms) = now;
+            id(publish_net_erl_led_state).execute();
+            return;
+          }
+          id(motion_state) = true;
+          id(last_motion_ms) = now;
+          id(blocked_by_lux) = false;
+          if (id(manual_follow_motion_active)) {
+            id(manual_follow_motion_seen) = true;
+            id(manual_follow_motion_probe_active) = false;
+            id(manual_follow_probe_started_ms) = 0;
+          }
+          if (!id(relay_1_state)) {
+            id(pending_auto_on_decision) = true;
+            id(evaluate_auto_on_from_lux).execute();
+          }
+          id(publish_net_erl_led_state).execute();
+
+  - id: handle_manual_relay_toggle
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          const bool new_relay_state = !id(relay_1_state);
+          id(relay_auto_owned) = false;
+          id(pending_auto_on_decision) = false;
+          id(blocked_by_lux) = false;
+          if (new_relay_state) {
+            id(manual_follow_motion_active) = true;
+            id(manual_follow_motion_seen) = id(presence_input).state;
+            id(manual_follow_motion_probe_active) = false;
+            id(manual_follow_started_ms) = now;
+            id(manual_follow_probe_started_ms) = 0;
+            if (id(presence_input).state) {
+              id(motion_state) = true;
+              id(last_motion_ms) = now;
+            }
+            id(relay_1_output).turn_on();
+          } else {
+            id(manual_follow_motion_active) = false;
+            id(manual_follow_motion_seen) = false;
+            id(manual_follow_motion_probe_active) = false;
+            id(manual_follow_started_ms) = 0;
+            id(manual_follow_probe_started_ms) = 0;
+            id(explicit_off_hold) = id(presence_input).state;
+            if (id(explicit_off_hold)) {
+              id(motion_state) = true;
+              id(last_motion_ms) = now;
+            }
+            id(relay_1_output).turn_off();
+          }
+          id(publish_net_erl_led_state).execute();
+
+switch:
+  - platform: gpio
+    id: relay_1_output
+    name: ${device_name}
+    internal: true
+    pin: ${relay_pin}
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      then:
+        - lambda: 'id(relay_1_state) = true;'
+        - light.turn_on:
+            id: led_ring_light
+            brightness: 100%
+            red: 9%
+            green: 9%
+            blue: 9%
+        - script.execute: publish_net_erl_led_state
+    on_turn_off:
+      then:
+        - lambda: 'id(relay_1_state) = false;'
+        - light.turn_off: led_ring_light
+        - script.execute: publish_net_erl_led_state
+
+binary_sensor:
+  - platform: gpio
+    id: presence_input
+    name: "${device_name} Presence"
+    internal: true
+    pin:
+      number: ${presence_pin}
+      mode:
+        input: true
+        pulldown: false
+        pullup: false
+    on_press:
+      then:
+        - script.execute: handle_motion_on
+  - platform: gpio
+    id: local_button
+    name: "${device_name} Button"
+    internal: true
+    pin:
+      number: ${button_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 40ms
+      - delayed_off: 40ms
+    on_press:
+      then:
+        - lambda: 'id(button_pressed_at_ms) = millis();'
+    on_release:
+      then:
+        - if:
+            condition:
+              lambda: |-
+                const uint32_t pressed_at = id(button_pressed_at_ms);
+                const uint32_t held_ms = pressed_at > 0 ? millis() - pressed_at : 0;
+                id(button_pressed_at_ms) = 0;
+                return held_ms < 5000UL;
+            then:
+              - script.execute: handle_manual_relay_toggle
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: led_ring_light
+    name: "${device_name} LED Ring"
+    internal: true
+    pin: ${led_ring_pin}
+    num_leds: ${led_ring_count}
+    rgb_order: GRB
+    chipset: WS2812
+
+sensor:
+  - platform: bme680
+    address: ${bme680_address}
+    update_interval: 2.5s
+    temperature:
+      name: "${device_name} Temperature"
+      internal: true
+      oversampling: 8x
+      on_value:
+        then:
+          - lambda: |-
+              id(env_temp_01c) = (int) lroundf(x * 10.0f);
+              id(env_has_temp) = true;
+          - script.execute: publish_net_erl_led_state
+    humidity:
+      name: "${device_name} Humidity"
+      internal: true
+      oversampling: 2x
+      on_value:
+        then:
+          - lambda: |-
+              id(env_hum_01pct) = (int) lroundf(x * 10.0f);
+              id(env_has_hum) = true;
+          - script.execute: publish_net_erl_led_state
+    pressure:
+      name: "${device_name} Pressure"
+      internal: true
+      oversampling: 4x
+      on_value:
+        then:
+          - lambda: |-
+              id(env_pressure_pa) = (uint32_t) lroundf(x * 100.0f);
+              id(env_has_pressure) = true;
+          - script.execute: publish_net_erl_led_state
+    gas_resistance:
+      name: "${device_name} Gas Resistance"
+      internal: true
+      on_value:
+        then:
+          - lambda: |-
+              if (id(bme680_gas_read_count) < 255) id(bme680_gas_read_count)++;
+              if (millis() >= 180000UL && id(bme680_gas_read_count) >= 5 && x > 0) {
+                id(env_gas_ohm) = (uint32_t) lroundf(x);
+              } else {
+                id(env_gas_ohm) = 4294967295UL;
+              }
+          - script.execute: publish_net_erl_led_state
+    iir_filter: 3x
+  - platform: veml7700
+    address: ${veml7700_address}
+    update_interval: 2.5s
+    gain: 1X
+    integration_time: 400ms
+    ambient_light:
+      name: "${device_name} Illuminance"
+      internal: true
+      on_value:
+        then:
+          - lambda: |-
+              id(env_lux) = (int) lroundf(x);
+              if (id(env_lux) < 0) id(env_lux) = 65535;
+              id(env_has_lux) = id(env_lux) != 65535;
+          - script.execute: evaluate_auto_on_from_lux
+          - script.execute: publish_net_erl_led_state
+  - platform: ens160_i2c
+    address: ${ens160_address}
+    update_interval: 2.5s
+    eco2:
+      name: "${device_name} eCO2"
+      internal: true
+      on_value:
+        then:
+          - lambda: |-
+              if (millis() >= 180000UL && x > 0) {
+                id(env_eco2_ppm) = (int) lroundf(x);
+                id(env_has_air) = true;
+              } else {
+                id(env_eco2_ppm) = 65535;
+              }
+          - script.execute: publish_net_erl_led_state
+    tvoc:
+      name: "${device_name} TVOC"
+      internal: true
+      on_value:
+        then:
+          - lambda: |-
+              if (millis() >= 180000UL && x >= 0) {
+                id(env_tvoc_ppb) = (int) lroundf(x);
+                id(env_has_air) = true;
+              } else {
+                id(env_tvoc_ppb) = 65535;
+              }
+          - script.execute: publish_net_erl_led_state
+    aqi:
+      name: "${device_name} AQI"
+      internal: true
+      on_value:
+        then:
+          - lambda: |-
+              if (millis() >= 180000UL) {
+                int raw_aqi = (int) lroundf(x);
+                id(env_aqi) = (raw_aqi >= 1 && raw_aqi <= 5) ? raw_aqi * 100 : raw_aqi;
+                if (id(env_aqi) <= 0 || id(env_aqi) > 500) id(env_aqi) = 65535;
+                id(env_has_air) = id(env_aqi) != 65535;
+              } else {
+                id(env_aqi) = 65535;
+              }
+          - script.execute: publish_net_erl_led_state
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          const bool presence_high = id(presence_input).state;
+
+          if (!presence_high && id(explicit_off_hold)) {
+            id(explicit_off_hold) = false;
+          }
+
+          if (presence_high) {
+            if (!id(explicit_off_hold)) {
+              if (!id(motion_state)) {
+                id(handle_motion_on).execute();
+              } else {
+                id(last_motion_ms) = now;
+                if (id(manual_follow_motion_active)) {
+                  id(manual_follow_motion_seen) = true;
+                  id(manual_follow_motion_probe_active) = false;
+                  id(manual_follow_probe_started_ms) = 0;
+                }
+              }
+            } else {
+              id(motion_state) = true;
+              id(last_motion_ms) = now;
+            }
+            return;
+          }
+
+          if (id(manual_follow_motion_active) && !id(manual_follow_motion_seen) && id(relay_1_state)) {
+            if (!id(manual_follow_motion_probe_active)) {
+              if (id(manual_follow_started_ms) > 0 && now - id(manual_follow_started_ms) >= 1800000UL) {
+                id(manual_follow_motion_probe_active) = true;
+                id(manual_follow_probe_started_ms) = now;
+              }
+              return;
+            }
+            if (id(manual_follow_probe_started_ms) > 0 && now - id(manual_follow_probe_started_ms) >= 15000UL) {
+              id(manual_follow_motion_active) = false;
+              id(manual_follow_motion_probe_active) = false;
+              id(relay_1_output).turn_off();
+            }
+            return;
+          }
+
+          if (id(motion_state) && id(last_motion_ms) > 0 && now - id(last_motion_ms) >= (uint32_t) atoi("${auto_off_delay_s}") * 1000UL) {
+            id(motion_state) = false;
+            id(blocked_by_lux) = false;
+            id(pending_auto_on_decision) = false;
+            if (id(relay_1_state) && id(relay_auto_owned)) {
+              id(relay_auto_owned) = false;
+              id(relay_1_output).turn_off();
+            } else if (id(relay_1_state) && id(manual_follow_motion_active) && id(manual_follow_motion_seen)) {
+              id(manual_follow_motion_active) = false;
+              id(manual_follow_motion_seen) = false;
+              id(relay_1_output).turn_off();
+            }
+            id(publish_net_erl_led_state).execute();
+          }
+  - interval: ${report_interval_s}s
+    then:
+      - script.execute: publish_net_erl_led_state
+  - interval: 5min
+    then:
+      - script.execute: publish_contract_meta
+      - script.execute: publish_contract_availability
+      - script.execute: publish_net_erl_led_state

@@ -1,12 +1,12 @@
-# bat_sen_01 - Fensterkontakt als ESPHome MQTT-only Ersatzlinie
+# bat_sen_010 - Fensterkontakt als MQTT-only Ersatzlinie
 
 substitutions:
-  node_name: bat-sen-01-esphome
-  device_id: bat_sen_01
+  node_name: bat-sen-010
+  device_id: bat_sen_010
   device_name: BAT-SEN Window
   device_class: bat_sen
   power_type: battery
-  fw_version: esphome-bat-sen-window
+  fw_version: "1"
   caps: "640"
   meta_schema_version: "1"
   control_mode: none
@@ -52,7 +52,10 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: smarthome/device/${device_id}/esphome
+  topic_prefix: smarthome/device/${device_id}/internal
+  discovery: false
+  log_topic: null
+  shutdown_message: null
   birth_message:
     topic: smarthome/device/${device_id}/availability
     retain: true

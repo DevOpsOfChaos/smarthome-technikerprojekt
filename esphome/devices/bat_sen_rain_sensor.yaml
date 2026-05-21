@@ -1,12 +1,12 @@
-# bat_sen_02 - Regensensor als ESPHome MQTT-only Ersatzlinie
+# bat_sen_020 - Regensensor als MQTT-only Ersatzlinie
 
 substitutions:
-  node_name: bat-sen-02-esphome
-  device_id: bat_sen_02
+  node_name: bat-sen-020
+  device_id: bat_sen_020
   device_name: BAT-SEN Rain
   device_class: bat_sen
   power_type: battery
-  fw_version: esphome-bat-sen-rain
+  fw_version: "1"
   caps: "768"
   meta_schema_version: "1"
   control_mode: none
@@ -54,7 +54,10 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: smarthome/device/${device_id}/esphome
+  topic_prefix: smarthome/device/${device_id}/internal
+  discovery: false
+  log_topic: null
+  shutdown_message: null
   birth_message:
     topic: smarthome/device/${device_id}/availability
     retain: true
@@ -102,7 +105,6 @@ script:
             if (id(battery_has_value)) root["battery_pct"] = id(battery_pct_value); else root["battery_pct"] = nullptr;
             if (id(battery_has_value)) root["battery_mv"] = id(battery_mv_value); else root["battery_mv"] = nullptr;
             root["window_open"] = nullptr;
-            root["rain"] = id(rain_detected_state);
             root["rain_raw"] = id(rain_raw_value);
             root["button_flags"] = 0;
             root["fault"] = id(contract_fault);

@@ -1,12 +1,12 @@
-# NET-SEN-002 - Wetterstation als ESPHome MQTT-only Ersatzlinie
+# NET-SEN-020 - Wetterstation als MQTT-only Ersatzlinie
 
 substitutions:
-  node_name: net-sen-002-esphome
-  device_id: NET-SEN-002
+  node_name: net-sen-020
+  device_id: NET-SEN-020
   device_name: NET-SEN Env BME280+VEML+Rain
   device_class: net_sen
   power_type: mains
-  fw_version: esphome-net-sen-weather
+  fw_version: "1"
   caps: "33052"
   meta_schema_version: "1"
   control_mode: none
@@ -52,7 +52,10 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: smarthome/device/${device_id}/esphome
+  topic_prefix: smarthome/device/${device_id}/internal
+  discovery: false
+  log_topic: null
+  shutdown_message: null
   birth_message:
     topic: smarthome/device/${device_id}/availability
     retain: true
@@ -104,14 +107,14 @@ mqtt:
             if (command == "get_state") {
               id(clear_contract_fault).execute();
               id(publish_net_sen_state).execute();
-              queue_ack("ok", 0, "esphome_state");
+              queue_ack("ok", 0, "node_ack");
               return;
             }
 
             id(contract_fault) = true;
             id(contract_last_status_code) = -2;
             id(contract_last_status_text) = "unsupported";
-            queue_ack("unsupported", -2, "esphome_validation");
+            queue_ack("unsupported", -2, "master_validation");
 
 i2c:
   sda: ${i2c_sda_pin}
@@ -173,7 +176,6 @@ script:
             root["tvoc_ppb"] = nullptr;
             root["eco2_ppm"] = nullptr;
             root["motion"] = false;
-            root["rain"] = id(rain_state);
             root["fault"] = id(contract_fault);
 
 binary_sensor:

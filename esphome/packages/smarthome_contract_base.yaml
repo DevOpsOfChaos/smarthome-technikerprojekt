@@ -1,14 +1,14 @@
 # =============================================================================
 # smarthome_contract_base.yaml
 # =============================================================================
-# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
-# Zweck:      MQTT-basierte ESPHome-Firmware fuer Smarthome-Geraete
+# Projekt:    Smarthome Technikerprojekt – alternative MQTT-Linie
+# Zweck:      MQTT-basierte Firmware fuer Smarthome-Geraete
 #             ohne ESP-NOW-Master und ohne Bridge.
 # Lizenz:     Proprietär – nur für Projektzwecke
-# Pfad:       esphome/packages/smarthome_contract_base.yaml
+# Pfad:       packages/smarthome_contract_base.yaml
 #
 # Datei-Funktion:
-#   Basis-Contract für alle ESPHome-Geraete. Stellt Meta-Daten,
+#   Basis-Contract für alle Geraete. Stellt Meta-Daten,
 #   Verfuegbarkeits-Status und Fehlerbehandlung bereit.
 #   Wird von jedem Device-Code über !include eingebunden.
 #   Enthaelt keine geraetespezifische Logik.
@@ -25,14 +25,7 @@
 #   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
 #
 # Abhaengigkeiten:
-#   Wird importiert von: esp_net_erl_light_example.yaml
-#                       esp_net_sen_env_example.yaml
-#                       esp_net_sen_env_bme280.yaml
-#                       esp_net_sen_env_bme680.yaml
-#                       esp_net_sen_env_bme280_veml.yaml
-#                       esp_net_zrl_cover_example.yaml
-#                       bat_sen_window_contact_example.yaml
-#                       bat_sen_rain_sensor_example.yaml
+#   Wird importiert von: Device-Dateien
 #   Importiert selbst:   (keine – reines Basis-Package)
 # =============================================================================
 
@@ -40,12 +33,13 @@
 # SUBSTITUTIONS – Geraetekonfiguration (wird pro Device ueberschrieben)
 # =============================================================================
 substitutions:
-  device_id: esp_device_example            # Eindeutige MQTT-Geraete-ID (z.B. NET-ERL-001)
-  device_name: ESPHome Example Device      # Anzeigename für Home Assistant / MQTT
+  device_id: device_template               # Eindeutige MQTT-Geraete-ID (z.B. NET-ERL-010)
+  device_name: Smarthome Template Device   # Anzeigename für Home Assistant / MQTT
   device_class: net_erl                    # Geraeteklasse: net_erl=Relais, net_sen=Sensor, net_zrl=Cover, bat_sen=Batterie
   power_type: mains                        # Stromversorgung: mains (Netz) oder battery (Batterie)
-  fw_version: esphome-example             # Firmware-Version für Meta-Report
+  fw_version: "0"                         # Firmware-Version für Meta-Report
   caps: "0"                               # Faehigkeiten als Bitmaske (Bit 0=Relais, 1=Temp, 2=Feuchte, 3=Druck, 4=Gas, 6=Lux, 7=Fensterkontakt, 8-9=Regen)
+  mac_address: ""                         # MAC-Adresse, falls sie explizit gesetzt wird
   meta_schema_version: "1"                # Version des Meta-Daten-Schemas
   control_mode: none                      # Steuerungsmodus: none, relay_light, cover, …
   config_profile: none                    # Konfigurationsprofil
@@ -108,8 +102,18 @@ script:
             root["device_name"] = "${device_name}";
             root["device_class"] = "${device_class}";
             root["power_type"] = "${power_type}";
-            root["fw_version"] = "${fw_version}";
+            const char *fw_version_text = "${fw_version}";
+            bool fw_version_is_numeric = fw_version_text[0] != '\0';
+            for (const char *p = fw_version_text; *p != '\0'; p++) {
+              if (*p < '0' || *p > '9') {
+                fw_version_is_numeric = false;
+                break;
+              }
+            }
+            if (fw_version_is_numeric) root["fw_version"] = atoi(fw_version_text);
+            else root["fw_version"] = fw_version_text;
             root["caps"] = atoi("${caps}");
+            root["mac_address"] = "${mac_address}";
             root["meta_schema_version"] = atoi("${meta_schema_version}");
             root["control_mode"] = "${control_mode}";
             root["config_profile"] = "${config_profile}";

@@ -1,16 +1,12 @@
-# NET-ERL-001 - ESPHome MQTT-only Ersatzlinie
-#
-# Ziel: Node-RED sieht denselben MQTT-Vertrag wie beim bisherigen Geraet.
-# Wichtig: device_id bleibt absichtlich "NET-ERL-001". Der ESPHome-Name ist
-# separat, weil ESPHome intern kleingeschriebene Namen erwartet.
+# NET-ERL-010 - Hall Module als MQTT-only Ersatzlinie
 
 substitutions:
-  node_name: net-erl-001-esphome
-  device_id: NET-ERL-001
+  node_name: net-erl-010
+  device_id: NET-ERL-010
   device_name: NET-ERL Hall Module
   device_class: net_erl
   power_type: mains
-  fw_version: esphome-net-erl-hall
+  fw_version: "1"
   caps: "93"
   meta_schema_version: "1"
   control_mode: relay_light
@@ -58,7 +54,10 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: smarthome/device/${device_id}/esphome
+  topic_prefix: smarthome/device/${device_id}/internal
+  discovery: false
+  log_topic: null
+  shutdown_message: null
   birth_message:
     topic: smarthome/device/${device_id}/availability
     retain: true
@@ -110,7 +109,7 @@ mqtt:
             if (command == "get_state") {
               id(clear_contract_fault).execute();
               id(publish_net_erl_state).execute();
-              queue_ack("ok", 0, "esphome_state");
+              queue_ack("ok", 0, "node_ack");
               return;
             }
 
@@ -139,7 +138,7 @@ mqtt:
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -21;
                 id(contract_last_status_text) = "invalid_payload";
-                queue_ack("invalid_payload", -21, "esphome_validation");
+                queue_ack("invalid_payload", -21, "master_validation");
                 return;
               }
               if (relay_value) {
@@ -150,14 +149,14 @@ mqtt:
               id(relay_1_state) = relay_value;
               id(clear_contract_fault).execute();
               id(publish_net_erl_state).execute();
-              queue_ack("ok", 0, "esphome_command");
+              queue_ack("ok", 0, "node_ack");
               return;
             }
 
             id(contract_fault) = true;
             id(contract_last_status_code) = -2;
             id(contract_last_status_text) = "unsupported";
-            queue_ack("unsupported", -2, "esphome_validation");
+            queue_ack("unsupported", -2, "master_validation");
 
 i2c:
   sda: ${i2c_sda_pin}

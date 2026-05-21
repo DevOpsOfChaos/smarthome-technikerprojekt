@@ -1,10 +1,10 @@
 # =============================================================================
-# esp_net_zrl_cover_example.yaml
+# net_zrl_shutter_module.yaml
 # =============================================================================
-# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Projekt:    Smarthome Technikerprojekt – alternative MQTT-Linie
 # Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
 # Lizenz:     Proprietär – nur für Projektzwecke
-# Pfad:       esphome/devices/esp_net_zrl_cover_example.yaml
+# Pfad:       devices/net_zrl_shutter_module.yaml
 #
 # Datei-Funktion:
 #   Beispiel: Netzbetriebener Rollladen mit 2 Relais (auf/ab) und
@@ -40,12 +40,12 @@
 # caps="8195" → Bit 0 (Relais) + Bit 13 (Cover)
 # control_mode="cover", config_profile="cover_basic"
 substitutions:
-  node_name: net-zrl-002-esphome
-  device_id: NET-ZRL-002
+  node_name: net-zrl-020
+  device_id: NET-ZRL-020
   device_name: NET-ZRL Shutter
   device_class: net_zrl
   power_type: mains
-  fw_version: esphome-net-zrl-shutter
+  fw_version: "1"
   caps: "8195"
   meta_schema_version: "1"
   control_mode: cover
@@ -71,7 +71,7 @@ packages:
   cover_contract: !include ../packages/smarthome_cover_contract.yaml
 
 # =============================================================================
-# ESPHOME – Basis-Konfiguration und Boot-Verhalten
+# BASIS – Basis-Konfiguration und Boot-Verhalten
 # =============================================================================
 esphome:
   name: ${node_name}
@@ -109,7 +109,10 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: smarthome/device/${device_id}/esphome
+  topic_prefix: smarthome/device/${device_id}/internal
+  discovery: false
+  log_topic: null
+  shutdown_message: null
   birth_message:
     topic: smarthome/device/${device_id}/availability
     retain: true
@@ -239,7 +242,7 @@ globals:
 # =============================================================================
 # COVER – Zeitbasierte Cover-Plattform
 # =============================================================================
-# platform: time_based – ESPHome steuert die Fahrzeit selbst
+# platform: time_based – lokale Fahrzeitsteuerung
 # device_class: shutter – Wird als Rollladen klassifiziert
 # open_action:   Schaltet down-Relais AUS, up-Relais EIN
 # close_action:  Schaltet up-Relais AUS, down-Relais EIN
@@ -315,19 +318,19 @@ cover:
 # SKRIPTE – Hardware-Zugriff (Wrapper für Cover-Aktionen)
 # =============================================================================
 script:
-  # cover_hw_open – Startet Aufwaertsfahrt via ESPHome-Cover-API
+  # cover_hw_open – Startet Aufwaertsfahrt
   #   Parameter: keine  |  Rückgabe: keine
   - id: cover_hw_open
     then:
       - cover.open: zrl_cover
 
-  # cover_hw_close – Startet Abwaertsfahrt via ESPHome-Cover-API
+  # cover_hw_close – Startet Abwaertsfahrt
   #   Parameter: keine  |  Rückgabe: keine
   - id: cover_hw_close
     then:
       - cover.close: zrl_cover
 
-  # cover_hw_stop – Stoppt die Fahrt via ESPHome-Cover-API
+  # cover_hw_stop – Stoppt die Fahrt
   #   Setzt partial_active=false falls eine Teilfahrt unterbrochen wurde
   #   Parameter: keine  |  Rückgabe: keine
   - id: cover_hw_stop

@@ -1,10 +1,10 @@
 # =============================================================================
 # smarthome_command_ack.yaml
 # =============================================================================
-# Projekt:    Smarthome Technikerprojekt – ESPHome-Zweitlinie
+# Projekt:    Smarthome Technikerprojekt – alternative MQTT-Linie
 # Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
 # Lizenz:     Proprietär – nur für Projektzwecke
-# Pfad:       esphome/packages/smarthome_command_ack.yaml
+# Pfad:       packages/smarthome_command_ack.yaml
 #
 # Datei-Funktion:
 #   ACK-Bestaetigungs-Mechanismus für alle eingehenden Kommandos.
@@ -23,14 +23,8 @@
 #   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
 #
 # Abhaengigkeiten:
-#   Wird importiert von: smarthome_relay_contract.yaml
-#                       smarthome_cover_contract.yaml
-#                       esp_net_erl_light_example.yaml
-#                       esp_net_sen_env_example.yaml
-#                       esp_net_sen_env_bme280.yaml
-#                       esp_net_sen_env_bme680.yaml
-#                       esp_net_sen_env_bme280_veml.yaml
-#                       esp_net_zrl_cover_example.yaml
+#   Wird importiert von: smarthome_cover_contract.yaml
+#                       Device-Dateien
 #   Importiert selbst:   (keine)
 # =============================================================================
 
@@ -46,10 +40,10 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '"ok"'
-  - id: ack_source                 # Quell-Contract: "esphome_command", "esphome_state", "esphome_validation"
+  - id: ack_source                 # Quell-Contract: "node_ack", "master_validation", "master_send"
     type: std::string
     restore_value: no
-    initial_value: '"esphome_command"'
+    initial_value: '"node_ack"'
   - id: ack_status_code            # Status-Code: 0=ok, negative=Fehler
     type: int
     restore_value: no

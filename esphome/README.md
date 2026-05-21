@@ -1,14 +1,14 @@
-# ESPHome MQTT-Linie
+# Alternative MQTT-Linie
 
-Diese Linie ist fuer dein ESPHome-Addon in Home Assistant vorbereitet. Die Geraete sprechen direkt MQTT mit dem Serververtrag. Es gibt hier keinen ESP-NOW-Master und keine MQTT-Bridge.
+Diese Linie ist fuer direkt angebundene MQTT-Geraete vorbereitet. Die Geraete sprechen direkt MQTT mit dem Serververtrag. Es gibt hier keinen ESP-NOW-Master und keine MQTT-Bridge.
 
-Die harte Regel: `device_id`, Topics und Payload-Felder bleiben kompatibel zur bisherigen Firmware, damit Node-RED nicht erkennen muss, ob ein altes Firmware-Geraet oder ein neues ESPHome-Geraet sendet.
+Die harte Regel: Topics und Payload-Felder bleiben kompatibel zur bisherigen Firmware, damit Node-RED nur den MQTT-Vertrag sieht.
 
 ## Import in Home Assistant
 
-Kopiere den kompletten Ordner `esphome/` in die ESPHome-Konfiguration von Home Assistant, damit die relativen `packages/`-Includes funktionieren.
+Kopiere den kompletten Ordner in die passende Home-Assistant-Konfiguration, damit die relativen `packages/`-Includes funktionieren.
 
-Danach kannst du die Dateien aus `devices/` im ESPHome-Dashboard importieren oder als neue YAML anlegen. Die benoetigten Secret-Werte liegen in Home Assistant in der zentralen ESPHome-Secret-Datei:
+Danach kannst du die Dateien aus `devices/` importieren oder als neue YAML anlegen. Die benoetigten Secret-Werte liegen in Home Assistant in der zentralen Secret-Datei:
 
 ```yaml
 wifi_ssid: <dein-wlan-name>
@@ -18,20 +18,20 @@ mqtt_username: <mqtt-benutzer>
 mqtt_password: <mqtt-passwort>
 ```
 
-Wenn dein MQTT-Broker keine Zugangsdaten nutzt, muessen die `username`/`password`-Zeilen in den Device-YAMLs entfernt oder passend ersetzt werden. ESPHome akzeptiert leere Secrets nicht immer sauber.
+Wenn dein MQTT-Broker keine Zugangsdaten nutzt, muessen die `username`/`password`-Zeilen in den Device-YAMLs entfernt oder passend ersetzt werden.
 
 ## Produktive Ersatz-YAMLs
 
 | Datei | MQTT-Device-ID | Zweck |
 |---|---:|---|
-| `devices/esp_net_erl_light_example.yaml` | `NET-ERL-001` | Hall-Modul mit Relais, BME280, VEML7700 und PIR |
-| `devices/esp_net_erl_hall_module_led_ring.yaml` | `NET-ERL-002` | Hall-Modul LED-Ring mit Relais, Sensorik, Button und LED-Ring |
-| `devices/esp_net_sen_env_bme280_veml.yaml` | `NET-SEN-002` | Wetterstation mit BME280, VEML7700 und Regen-Digitalpin |
-| `devices/esp_net_zrl_cover_example.yaml` | `NET-ZRL-002` | Rollladenmodul mit zwei Relais, lokalen Tastern, LEDs und Kalibrierung |
-| `devices/bat_sen_window_contact_example.yaml` | `bat_sen_01` | Batterie-Fensterkontakt |
-| `devices/bat_sen_rain_sensor_example.yaml` | `bat_sen_02` | Batterie-Regensensor |
+| `devices/net_erl_hall_module.yaml` | `NET-ERL-010` | Hall-Modul mit Relais, BME280, VEML7700 und PIR |
+| `devices/net_erl_hall_module_led_ring.yaml` | `NET-ERL-020` | Hall-Modul LED-Ring mit Relais, Sensorik, Button und LED-Ring |
+| `devices/net_sen_weather_station.yaml` | `NET-SEN-020` | Wetterstation mit BME280, VEML7700 und Regen-Digitalpin |
+| `devices/net_zrl_shutter_module.yaml` | `NET-ZRL-020` | Rollladenmodul mit zwei Relais, lokalen Tastern, LEDs und Kalibrierung |
+| `devices/bat_sen_window_contact.yaml` | `bat_sen_010` | Batterie-Fensterkontakt |
+| `devices/bat_sen_rain_sensor.yaml` | `bat_sen_020` | Batterie-Regensensor |
 
-Die Dateinamen sind noch teilweise historisch. Entscheidend fuer Node-RED ist nicht der Dateiname, sondern das MQTT-Feld `device_id` und der Topic-Pfad.
+Entscheidend fuer Node-RED ist der MQTT-Vertrag: Topic-Pfad und Payload-Felder.
 
 ## MQTT-Vertrag
 
@@ -57,7 +57,7 @@ Diese Linie nutzt:
 - keine `master_compat`-Bridge
 - keine internen Arbeitsmittel
 
-Home Assistant/ESPHome baut und flasht die Geraete. Node-RED sieht nur MQTT.
+Home Assistant baut und flasht die Geraete. Node-RED sieht nur MQTT.
 
 ## Offene Hardware-Validierung
 
