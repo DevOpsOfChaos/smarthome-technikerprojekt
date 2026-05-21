@@ -14,6 +14,7 @@ Im Serverbereich ist aktuell eine belastbare Serverlinie sichtbar:
 - separater Masterpfad für Statusdiagnose
 - minimales SQLite-Schema für aktuelle Zustände und Persistenz
 - Dashboard mit Geräteübersicht und Detailpfad
+- direktes MQTT-Gerätemodell als Grundlage für die ESPHome-Alternative
 
 ## Bereits real nachgewiesen
 Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Protokolle und Testläufe belegt:
@@ -37,6 +38,11 @@ Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Pro
 - real nachgewiesener Setup-Pfad über den konkreten Gerätepfad
 - Provisioning und Rückkehr in den Normalmodus praktisch belegt
 
+### NET-ERL Hall-Modul mit LED-Ring
+- konkreter Gerätepfad `net_erl_hall_module_led_ring`
+- Firmware-Umgebung mit Relais, Sensorik, Button und LED-Ring vorbereitet
+- ESPHome-Alternative als `NET-ERL-020` vorbereitet
+
 ### NET-SEN Außensensor
 - realer Gerätepfad `net_sen_weather_station`
 - enger Device-ID-Fix auf protokollgültigen Gerätepfad
@@ -46,6 +52,13 @@ Folgende Punkte sind im Repo inzwischen nicht nur beschrieben, sondern durch Pro
 - digitaler Regenpfad real belegt
 - MQTT-State real belegt
 - Setup-Pfad real belegt
+
+### ESPHome-Alternative
+- eigener Ordner `esphome/` mit direkt angebundenen MQTT-Geräten
+- kompatible Topics für `meta`, `availability`, `state`, `ack` und `command`
+- vorbereitete YAMLs für Hall-Modul, LED-Ring-Modul, Wetterstation, Rollladenmodul, Fensterkontakt und Regensensor
+- keine ESP-NOW-Strecke und kein Master in diesem Pfad
+- offene Pflicht vor produktivem Einsatz: Board-, Pin-, Relais-, Sensor- und Batterievalidierung je Gerät
 
 Damit ist der öffentliche Stand kein bloßer Strukturentwurf mehr, sondern ein bereits belastbar nachgewiesener technischer Kern aus Server, Master und konkreten Gerätepfaden.
 
@@ -65,6 +78,7 @@ Wichtig ist dabei:
 - aktueller Server für Ingest, Zustandsmodell, Snapshot-Persistenz und kleines Dashboard
 - reale Nachweise für Hall-Modul, `net_zrl` und `net_sen`
 - bestätigte Setup-Pfade für Hall-Modul und `net_sen`
+- ESPHome-YAMLs als alternative direkte MQTT-Gerätelinie
 - host-unabhängiger Server-Contract-Smoke-Test unter `tests/server/server_contract_smoke.ps1`
 - offizielle Nachweis- und Teststruktur
 
@@ -74,14 +88,16 @@ Wichtig ist dabei:
 - breite Command-Welt über den engen Kern hinaus
 - Komfortfunktionen, Automationen oder Zusatzwelten
 - endgültiger `bat_sen`-Hardwarepfad
+- produktive Hardware-Freigabe aller ESPHome-YAMLs ohne Einzeltest
 
 Das ist keine Schwäche, sondern bewusste Scope-Kontrolle.
 
 ## Nächste sinnvolle technische Schritte
 1. belegten Hauptkern weiter konsolidieren
 2. dokumentierte Gerätepfade und Nachweise sauber verdichten
-3. `bat_sen` erst wieder öffnen, wenn die passende Versorgung real vorliegt
-4. danach weitere Gerätepfade kontrolliert und nachweisbar ergänzen
+3. ESPHome-Alternative pro Gerät real gegen Broker und Dashboard prüfen
+4. `bat_sen` erst wieder öffnen, wenn die passende Versorgung real vorliegt
+5. danach weitere Gerätepfade kontrolliert und nachweisbar ergänzen
 
 ## Öffentliche Repo-Perspektive
 Für Außenstehende soll das Repo jetzt schon professionell lesbar sein:
@@ -93,6 +109,7 @@ Für Außenstehende soll das Repo jetzt schon professionell lesbar sein:
 ## Empfehlung für Leser
 Wer den aktuellen technischen Kern verstehen will, liest als Nächstes:
 - `04_server_schnellstart_phase1.md`
+- `18_firmware_oder_esphome.md`
 - `docs/public/server/01_server_v1_ueberblick.md`
 - `docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md`
 - `tests/server/phase1_ingest_checkliste.md`

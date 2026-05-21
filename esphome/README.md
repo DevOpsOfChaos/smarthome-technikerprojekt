@@ -1,8 +1,10 @@
-# Alternative MQTT-Linie
+# ESPHome-Alternative mit direktem MQTT
 
-Diese Linie ist fuer direkt angebundene MQTT-Geraete vorbereitet. Die Geraete sprechen direkt MQTT mit dem Serververtrag. Es gibt hier keinen ESP-NOW-Master und keine MQTT-Bridge.
+Diese Linie ist fuer Nutzer gedacht, die ihre ESP32-Geraete lieber mit ESPHome und Home Assistant bauen. Die Geraete sprechen direkt MQTT mit dem Serververtrag. Es gibt hier keinen ESP-NOW-Master und keine MQTT-Bridge.
 
 Die harte Regel: Topics und Payload-Felder bleiben kompatibel zur bisherigen Firmware, damit Node-RED nur den MQTT-Vertrag sieht.
+
+Diese Linie ist eine Alternative zur eigenen Firmware, nicht die Architektur-Hauptlinie des Technikerprojekts. Die Hauptlinie bleibt `firmware/` mit ESP-NOW, Master und MQTT-Bruecke.
 
 ## Import in Home Assistant
 

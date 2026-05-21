@@ -12,6 +12,7 @@ Im Mittelpunkt stehen:
 - **ein Master** als einzige Brücke zwischen Funknetz und Server
 - **MQTT** ausschließlich zwischen Master und Server
 - **Node-RED** als Server- und Visualisierungskern
+- **ESPHome als alternative MQTT-Linie** für Nutzer, die lieber mit Home Assistant/ESPHome arbeiten
 - eine Architektur, die **lehrerlesbar, modular und begründbar** bleibt
 
 ## Systemarchitektur in Kurzform
@@ -49,7 +50,7 @@ Der Server bildet die aktuelle öffentliche Serverlinie für:
 
 ## Verbindliche technische Leitplanken
 
-Dieses Repo folgt bewusst einigen harten Architekturregeln:
+Die eigene Firmware-Linie folgt bewusst einigen harten Architekturregeln:
 
 - **Nodes sprechen nicht direkt mit dem Server.**
 - **MQTT ist kein zweiter Gerätebus**, sondern nur die Verbindung zwischen Master und Server.
@@ -57,6 +58,8 @@ Dieses Repo folgt bewusst einigen harten Architekturregeln:
 - **Sondergeräte werden nicht durch neue Server-Spezialarchitekturen erschlagen**, sondern sauber über Basistypen, Geräteebene und Fähigkeiten eingeordnet.
 - **Kleine, begründete Änderungen** sind wichtiger als breite Umbauten.
 - Öffentliche Doku und Code sollen **technisch sauber, nachvollziehbar und präsentierbar** bleiben.
+
+Daneben enthält `esphome/` eine bewusst getrennte Alternative. Diese Geräte sprechen direkt MQTT mit dem Serververtrag. Das ist kein Ersatz für die Architektur-Hauptlinie, sondern ein praktischer Weg für Anwender, die ESPHome bevorzugen.
 
 ## Aktueller öffentlicher Stand
 
@@ -69,9 +72,12 @@ Bereits sichtbar und nachweisbar sind unter anderem:
 - minimales SQLite-Schema für aktuelle Zustände und Persistenz
 - Dashboard als belastbare öffentliche Serverlinie
 - realer Gerätepfad `net_erl_hall_module` mit überprüftem Normalbetrieb
+- vorbereiteter Gerätepfad `net_erl_hall_module_led_ring`
 - real nachgewiesener Setup-Pfad für Hall-Modul
+- realer Gerätepfad `net_zrl_shutter_module` als Rolladenpfad
 - realer Gerätepfad `net_sen_weather_station` mit BME280, VEML7700 und digitalem Regenpfad
 - real nachgewiesener Setup-Pfad für `net_sen`
+- vorbereitete ESPHome-YAMLs für Hall-Modul, LED-Ring-Modul, Wetterstation, Rollladenmodul, Fensterkontakt und Regensensor
 - reale Entwicklungs- und Verifikationsnachweise unter `PROTOKOLL/`
 
 Wichtig:
@@ -85,7 +91,8 @@ Wer das Projekt strukturiert verstehen will, startet hier:
 2. [Projektüberblick](docs/public/01_projektueberblick.md)
 3. [Architektur und Kommunikation](docs/public/02_architektur_und_kommunikation.md)
 4. [Aktueller Status und nächste Schritte](docs/public/03_aktueller_status_und_naechste_schritte.md)
-5. [Server-Schnellstart](docs/public/04_server_schnellstart_phase1.md)
+5. [Eigene Firmware oder ESPHome?](docs/public/18_firmware_oder_esphome.md)
+6. [Server-Schnellstart](docs/public/04_server_schnellstart_phase1.md)
 
 Für den aktuellen Serverkern zusätzlich sinnvoll:
 - [Server Überblick](docs/public/server/01_server_v1_ueberblick.md)
@@ -95,6 +102,7 @@ Für den aktuellen Serverkern zusätzlich sinnvoll:
 
 - `docs/public/` – öffentliche technische Dokumentation und Einstiegspunkte
 - `firmware/` – Firmware für Basistypen und konkrete Geräte
+- `esphome/` – ESPHome-Alternative mit direktem MQTT-Vertrag zum Server
 - `server/` – Node-RED-, MQTT- und Datenhaltungsstruktur
 - `hardware/` – Hardware-Unterlagen, Schaltpläne und Layoutdaten
 - `tests/` – Tests, Checklisten und technische Nachweise
