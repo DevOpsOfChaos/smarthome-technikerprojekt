@@ -14,7 +14,9 @@
  und NeoPixel-LED-Ring. Der BME680 liefert Temperatur, Feuchte, Luftdruck und
  Gaswiderstand. Der ENS160 nutzt Temperatur und Feuchte als Kompensation und
  liefert AQI, TVOC und eCO2. Der VEML7700 liefert Lux fuer die Auto-Light-
- Entscheidung. Der LED-Ring zeigt den Relaiszustand an.
+ Entscheidung. Der LED-Ring zeigt als lokale Komfort-Erweiterung Bewegungsstatus
+ und Umweltdaten an. Diese Anzeige ist nicht Bestandteil der bewerteten
+ Technikerarbeits-Architektur.
 
  Wichtige Zeitwerte:
  - 400 ms VEML7700-Integrationszeit: laengere Lichtmessung fuer stabilere Luxwerte.
@@ -48,6 +50,7 @@
  - 2026-05-14: Device-Code fuer NET-ERL Hall Module LED Ring angelegt.
  - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
  - 2026-05-19: Sensor-Ausfallpfade, ENS160-Warmup und Auto-Flags bereinigt.
+ - 2026-05-21: LED-Ring-Komfortanzeige fuer AQI, Temperatur, Feuchte und Fehler ergaenzt.
 ===============================================================================
 */
 
@@ -109,6 +112,9 @@ namespace {
     unsigned long letzter_bme_recovery_ms = 0, letzter_lux_recovery_ms = 0, letzter_ens_recovery_ms = 0;
     unsigned long letztes_env_sample_ms = 0, ens160_start_ms = 0, letzter_ens_gueltig_ms = 0;
     bool ring_initialized = false;
+    bool letzter_blocked_by_lux = false;
+    unsigned long ring_sequence_started_ms = 0, ring_display_until_ms = 0;
+    unsigned long ring_lux_blocked_until_ms = 0, letzter_ring_frame_ms = 0;
 
     // Sensor-Messwerte
     int16_t temp_01c = INT16_MIN;
@@ -120,7 +126,6 @@ namespace {
     constexpr uint32_t GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
     constexpr uint16_t AIR_METRIC_UNGUELTIG = 0xFFFFU;
     constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;
-    constexpr uint8_t LED_RING_HELLIGKEIT = 24U; // NeoPixel-Helligkeit auf Skala 0 bis 255.
     constexpr uint16_t I2C_TIMEOUT_MS = 50U;     // 50 Millisekunden I2C-Timeout.
 }
 
@@ -128,6 +133,147 @@ namespace {
 // SENSOR-HILFSFUNKTIONEN (device-spezifisch)
 // =============================================================================
 namespace {
+    // Nicht Bestandteil der Technikerarbeit:
+    // Die folgenden LED-Ring-Helfer sind eine lokale Komfortanzeige. Sie veraendern
+    // weder ESP-NOW-Payloads noch MQTT-Serververtrag und sind fuer den Server nicht
+    // erforderlich.
+    uint8_t ringScale(uint8_t value) {
+        constexpr uint8_t brightness =
+            NET_ERL_LED_RING_BRIGHTNESS > NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS
+                ? NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS
+                : NET_ERL_LED_RING_BRIGHTNESS;
+        return (uint8_t)(((uint16_t)value * brightness) / 255U);
+    }
+
+    uint32_t ringColor(uint8_t red, uint8_t green, uint8_t blue) {
+        return ledRing.Color(ringScale(red), ringScale(green), ringScale(blue));
+    }
+
+    void ringSetAll(uint32_t color) {
+        for (uint16_t i = 0; i < ledRing.numPixels(); ++i) {
+            ledRing.setPixelColor(i, color);
+        }
+    }
+
+    uint32_t ringAqiColor() {
+        if (aqi == AIR_METRIC_UNGUELTIG) return ringColor(90, 90, 90);
+        if (aqi <= 50U) return ringColor(0, 210, 80);
+        if (aqi <= 100U) return ringColor(180, 190, 0);
+        if (aqi <= 150U) return ringColor(255, 115, 0);
+        if (aqi <= 200U) return ringColor(220, 0, 0);
+        if (aqi <= 300U) return ringColor(130, 0, 170);
+        return ringColor(90, 0, 40);
+    }
+
+    uint32_t ringDimColor(uint32_t color, float factor) {
+        uint8_t red = (uint8_t)((color >> 16) & 0xFFU);
+        uint8_t green = (uint8_t)((color >> 8) & 0xFFU);
+        uint8_t blue = (uint8_t)(color & 0xFFU);
+        return ledRing.Color(
+            (uint8_t)((float)red * factor),
+            (uint8_t)((float)green * factor),
+            (uint8_t)((float)blue * factor)
+        );
+    }
+
+    void ensureRingInitialized() {
+        if (ring_initialized) return;
+        ledRing.begin();
+        ledRing.setBrightness(255);
+        ledRing.clear();
+        ledRing.show();
+        ring_initialized = true;
+    }
+
+    void startRingComfortSequence(unsigned long nowMs) {
+        if (ring_display_until_ms == 0 || (long)(ring_display_until_ms - nowMs) <= 0) {
+            ring_sequence_started_ms = nowMs;
+        }
+        ring_display_until_ms = nowMs
+            + NET_ERL_LED_RING_AQI_PHASE_MS
+            + NET_ERL_LED_RING_TEMP_PHASE_MS
+            + NET_ERL_LED_RING_HUM_PHASE_MS;
+    }
+
+    void updateRingComfortDisplay(unsigned long nowMs) {
+        ensureRingInitialized();
+        if ((nowMs - letzter_ring_frame_ms) < NET_ERL_LED_RING_FRAME_INTERVAL_MS) return;
+        letzter_ring_frame_ms = nowMs;
+
+        if (runtime.blocked_by_lux && !letzter_blocked_by_lux) {
+            ring_lux_blocked_until_ms = nowMs + NET_ERL_LED_RING_LUX_BLOCKED_ALERT_MS;
+        }
+        letzter_blocked_by_lux = runtime.blocked_by_lux;
+
+        if (netErlDeviceHasSensorFault()) {
+            ringSetAll(ringColor(255, 0, 0));
+            ledRing.show();
+            return;
+        }
+
+        if ((long)(ring_lux_blocked_until_ms - nowMs) > 0) {
+            ledRing.clear();
+            const uint16_t count = ledRing.numPixels();
+            const uint16_t head = count > 0 ? (uint16_t)((nowMs / NET_ERL_LED_RING_FRAME_INTERVAL_MS) % count) : 0;
+            for (uint16_t offset = 0; offset < 4U && offset < count; ++offset) {
+                const uint16_t pos = (uint16_t)((head + count - offset) % count);
+                ledRing.setPixelColor(pos, ringColor((uint8_t)(255U - offset * 45U), (uint8_t)(140U - offset * 25U), 0));
+            }
+            ledRing.show();
+            return;
+        }
+
+        if (ring_display_until_ms == 0 || (long)(ring_display_until_ms - nowMs) <= 0) {
+            ledRing.clear();
+            ledRing.show();
+            return;
+        }
+
+        const unsigned long totalPhaseMs =
+            NET_ERL_LED_RING_AQI_PHASE_MS + NET_ERL_LED_RING_TEMP_PHASE_MS + NET_ERL_LED_RING_HUM_PHASE_MS;
+        const unsigned long phaseMs = totalPhaseMs > 0
+            ? (nowMs - ring_sequence_started_ms) % totalPhaseMs
+            : 0UL;
+        const uint16_t count = ledRing.numPixels();
+
+        if (phaseMs < NET_ERL_LED_RING_AQI_PHASE_MS) {
+            const float pulse = 0.55f + 0.45f * ((sinf((float)nowMs / 360.0f) + 1.0f) / 2.0f);
+            ringSetAll(ringDimColor(ringAqiColor(), pulse));
+            ledRing.show();
+            return;
+        }
+
+        if (phaseMs < (NET_ERL_LED_RING_AQI_PHASE_MS + NET_ERL_LED_RING_TEMP_PHASE_MS)) {
+            ledRing.clear();
+            int16_t t = temp_01c == INT16_MIN ? 0 : temp_01c;
+            int active = ((int)t * (int)count) / 400;
+            if (active < 1 && t > 0) active = 1;
+            if (active > (int)count) active = count;
+            const uint16_t sweep = count > 0 ? (uint16_t)((nowMs / 180UL) % count) : 0;
+            for (int i = 0; i < active; ++i) {
+                const bool highlight = (uint16_t)i == sweep || (uint16_t)i == (uint16_t)((sweep + count - 1U) % count);
+                ledRing.setPixelColor((uint16_t)i, ringColor(highlight ? 255 : 150, highlight ? 55 : 12, 0));
+            }
+            ledRing.show();
+            return;
+        }
+
+        ledRing.clear();
+        uint16_t h = hum_01pct == 0xFFFFU ? 0U : hum_01pct;
+        int active = ((int)h * (int)count) / 1000;
+        if (active < 1 && h > 0U) active = 1;
+        if (active > (int)count) active = count;
+        const uint16_t wave = count > 0 ? (uint16_t)((nowMs / 220UL) % count) : 0;
+        for (int i = 0; i < active; ++i) {
+            const uint16_t pos = (uint16_t)i;
+            const uint16_t distance = pos > wave ? (uint16_t)(pos - wave) : (uint16_t)(wave - pos);
+            const bool crest = distance <= 1U || distance >= (count > 0 ? count - 1U : 0U);
+            ledRing.setPixelColor(pos, ringColor(0, crest ? 120 : 35, crest ? 255 : 170));
+        }
+        ledRing.show();
+    }
+    // Ende: Nicht Bestandteil der Technikerarbeit.
+
     // Aufgabe: Mappt den ENS160-AQI-Rohwert von 1 bis 5 auf die Projekt-Skala 0 bis 500.
     // Eingabewert: r ist der AQI-Rohwert des ENS160.
     // Ausgabewert: 100 bis 500 bei gueltigem Rohwert, 0 bei ungueltigem Rohwert.
@@ -271,6 +417,7 @@ void netErlDeviceInit() {
     else if (!setEnsStandardMode()) { logMsg("WARN", "ENS160 mode fail"); }
 
     pinMode(PIN_LD2410_OUT, INPUT);
+    ensureRingInitialized();
 }
 
 // Aufgabe: Setzt alle Sensorwerte auf ungueltige Startwerte zurueck.
@@ -286,7 +433,16 @@ void netErlDeviceResetSensorDefaults() {
 // Eingabewerte: keine; PIN_LD2410_OUT kommt aus PinConfig.h.
 // Ausgabewert: true bedeutet, der Radar-Ausgang steht auf HIGH und Praesenz wurde erkannt.
 bool netErlDeviceReadPresence() {
-    return digitalRead(PIN_LD2410_OUT) == HIGH;
+    const bool presence = digitalRead(PIN_LD2410_OUT) == HIGH;
+    const unsigned long nowMs = millis();
+    // Nicht Bestandteil der Technikerarbeit:
+    // Startet nur die lokale LED-Ring-Komfortanzeige. Die eigentliche
+    // Praesenzlogik des NET-ERL-Basistyps bleibt unveraendert.
+    if (presence) {
+        startRingComfortSequence(nowMs);
+    }
+    updateRingComfortDisplay(nowMs);
+    return presence;
 }
 
 // Aufgabe: Schaltet den Relaisausgang.
@@ -296,22 +452,14 @@ void netErlDeviceSetRelayOutput(bool on) {
     digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
 }
 
-// Aufgabe: Aktualisiert den NeoPixel-LED-Ring passend zum Relaiszustand.
-// Eingabewert: relayOn=true bedeutet, der Ring wird weiss eingeschaltet.
-// Ausgabewert: keiner; Adafruit_NeoPixel schreibt die LED-Daten an PIN_LED_RING.
-// Beim ersten Aufruf wird der Ring initialisiert, damit der Basistyp keine LED-Details kennen muss.
+// Nicht Bestandteil der Technikerarbeit:
+// Aktualisiert die lokale LED-Ring-Komfortanzeige. Der Relaiszustand wird hier
+// bewusst nicht mehr als einfache Weiss-Anzeige benutzt; der Ring zeigt bei
+// Bewegung AQI, Temperatur und Feuchte und bleibt bei Fehler rot sichtbar.
+// Der Serververtrag und die ESP-NOW-Payloads bleiben davon unberuehrt.
 void netErlDeviceUpdateIndicators(bool relayOn) {
-    if (!ring_initialized) {
-        ledRing.begin(); ledRing.setBrightness(LED_RING_HELLIGKEIT);
-        ledRing.clear(); ledRing.show(); ring_initialized = true;
-    }
-    if (relayOn) {
-        uint32_t c = ledRing.Color(24, 24, 24);
-        for (uint16_t i = 0; i < ledRing.numPixels(); ++i) ledRing.setPixelColor(i, c);
-    } else {
-        ledRing.clear();
-    }
-    ledRing.show();
+    (void)relayOn;
+    updateRingComfortDisplay(millis());
 }
 
 // Aufgabe: Pollt alle Sensoren, aktualisiert Messwerte, Recovery, ENS160-Kompensation und Auto-Light.
@@ -414,6 +562,11 @@ void netErlDevicePollSensors(unsigned long nowMs) {
             runtime.state_report_offen = true;
         }
     }
+
+    // Nicht Bestandteil der Technikerarbeit:
+    // Aktualisiert nur die lokale LED-Ring-Komfortanzeige nach Sensorpoll und
+    // Late-Lux-Entscheidung. State-Payload und Auto-Light-Logik bleiben getrennt.
+    updateRingComfortDisplay(nowMs);
 
     // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Aenderung.
     // Spart ESP-NOW/MQTT-Bandbreite bei gleichbleibenden Messwerten

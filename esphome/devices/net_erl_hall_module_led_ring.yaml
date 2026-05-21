@@ -22,6 +22,10 @@ substitutions:
   presence_pin: GPIO7
   led_ring_pin: GPIO8
   led_ring_count: "17"
+  led_ring_default_brightness_pct: "18"
+  led_ring_air_quality_phase_s: "15"
+  led_ring_temperature_phase_s: "15"
+  led_ring_humidity_phase_s: "15"
   i2c_sda_pin: GPIO0
   i2c_scl_pin: GPIO1
   bme680_address: "0x76"
@@ -122,6 +126,7 @@ mqtt:
             if (command == "get_state") {
               id(clear_contract_fault).execute();
               id(publish_net_erl_led_state).execute();
+              id(trigger_led_ring_ack_ok).execute();
               queue_ack("ok", 0, "node_ack");
               return;
             }
@@ -182,9 +187,54 @@ mqtt:
               }
               id(clear_contract_fault).execute();
               id(publish_net_erl_led_state).execute();
+              id(trigger_led_ring_ack_ok).execute();
               queue_ack("ok", 0, "node_ack");
               return;
             }
+
+            // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie:
+            // Diese lokale Config steuert nur die optionale LED-Ring-Anzeige dieses MQTT-only
+            // ESPHome-Geraets. Der Serververtrag funktioniert unveraendert ohne diese Felder.
+            if (command == "set_config") {
+              bool changed = false;
+              bool invalid = false;
+              if (!x["values"].is<JsonObject>()) {
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "device_validation");
+                return;
+              }
+
+              JsonObject values = x["values"].as<JsonObject>();
+              if (values["ring_brightness_pct"].is<int>()) {
+                int brightness = values["ring_brightness_pct"].as<int>();
+                if (brightness < 1 || brightness > 60) {
+                  invalid = true;
+                } else {
+                  id(led_ring_brightness_pct) = brightness;
+                  changed = true;
+                }
+              }
+              if (values["ring_enabled"].is<bool>()) {
+                id(led_ring_enabled) = values["ring_enabled"].as<bool>();
+                changed = true;
+              }
+
+              if (invalid || !changed) {
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "device_validation");
+                return;
+              }
+
+              id(clear_contract_fault).execute();
+              id(trigger_led_ring_ack_ok).execute();
+              id(refresh_led_ring_comfort_display).execute();
+              id(publish_net_erl_led_state).execute();
+              queue_ack("ok", 0, "device_ack");
+              return;
+            }
+            // Ende ESPHome-Komfortfunktion.
 
             id(contract_last_status_code) = -2;
             id(contract_last_status_text) = "unsupported";
@@ -304,6 +354,34 @@ globals:
     type: int
     restore_value: no
     initial_value: "65535"
+  # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie:
+  # Lokaler Anzeigezustand fuer den LED-Ring. Diese Werte erweitern nicht den
+  # oeffentlichen MQTT-Serververtrag und muessen vom Server nicht verstanden werden.
+  - id: led_ring_enabled
+    type: bool
+    restore_value: yes
+    initial_value: "true"
+  - id: led_ring_brightness_pct
+    type: int
+    restore_value: yes
+    initial_value: "${led_ring_default_brightness_pct}"
+  - id: led_ring_sequence_started_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: led_ring_display_until_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: led_ring_alert_code
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: led_ring_alert_until_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  # Ende ESPHome-Komfortfunktion.
 
 script:
   - id: publish_net_erl_led_state
@@ -330,6 +408,67 @@ script:
             root["motion"] = id(motion_state);
             root["fault"] = sensor_fault;
 
+  # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie:
+  # Startet bei Bewegung ein lokales 45s-Anzeigefenster: Luftqualitaet,
+  # Temperatur und Luftfeuchte werden nacheinander auf dem LED-Ring dargestellt.
+  - id: start_led_ring_comfort_sequence
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          if ((int32_t) (id(led_ring_display_until_ms) - now) <= 0) {
+            id(led_ring_sequence_started_ms) = now;
+          }
+          const uint32_t total_ms =
+            ((uint32_t) atoi("${led_ring_air_quality_phase_s}") +
+             (uint32_t) atoi("${led_ring_temperature_phase_s}") +
+             (uint32_t) atoi("${led_ring_humidity_phase_s}")) * 1000UL;
+          id(led_ring_display_until_ms) = now + total_ms;
+      - script.execute: refresh_led_ring_comfort_display
+
+  - id: trigger_led_ring_lux_blocked
+    then:
+      - lambda: |-
+          id(led_ring_alert_code) = 1;
+          id(led_ring_alert_until_ms) = millis() + 3000UL;
+      - script.execute: refresh_led_ring_comfort_display
+
+  - id: trigger_led_ring_ack_ok
+    then:
+      - lambda: |-
+          id(led_ring_alert_code) = 2;
+          id(led_ring_alert_until_ms) = millis() + 1200UL;
+      - script.execute: refresh_led_ring_comfort_display
+
+  - id: refresh_led_ring_comfort_display
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          const bool sensor_fault =
+            !id(env_has_temp) ||
+            !id(env_has_hum) ||
+            !id(env_has_lux) ||
+            (now >= 180000UL && !id(env_has_air));
+          const bool alert_active = id(led_ring_alert_code) != 0 &&
+            (int32_t) (id(led_ring_alert_until_ms) - now) > 0;
+          const bool display_active = (int32_t) (id(led_ring_display_until_ms) - now) > 0;
+
+          if (!id(led_ring_enabled)) {
+            auto call = id(led_ring_light).turn_off();
+            call.perform();
+            return;
+          }
+
+          if (!id(contract_online) || sensor_fault || alert_active || display_active) {
+            auto call = id(led_ring_light).turn_on();
+            call.set_brightness(1.0f);
+            call.set_effect("Comfort Status");
+            call.perform();
+          } else {
+            auto call = id(led_ring_light).turn_off();
+            call.perform();
+          }
+  # Ende ESPHome-Komfortfunktion.
+
   - id: evaluate_auto_on_from_lux
     then:
       - lambda: |-
@@ -343,6 +482,7 @@ script:
             id(relay_1_output).turn_on();
           } else {
             id(blocked_by_lux) = true;
+            id(trigger_led_ring_lux_blocked).execute();
             id(publish_net_erl_led_state).execute();
           }
 
@@ -353,11 +493,13 @@ script:
           if (id(explicit_off_hold)) {
             id(motion_state) = true;
             id(last_motion_ms) = now;
+            id(start_led_ring_comfort_sequence).execute();
             id(publish_net_erl_led_state).execute();
             return;
           }
           id(motion_state) = true;
           id(last_motion_ms) = now;
+          id(start_led_ring_comfort_sequence).execute();
           id(blocked_by_lux) = false;
           if (id(manual_follow_motion_active)) {
             id(manual_follow_motion_seen) = true;
@@ -414,17 +556,12 @@ switch:
     on_turn_on:
       then:
         - lambda: 'id(relay_1_state) = true;'
-        - light.turn_on:
-            id: led_ring_light
-            brightness: 100%
-            red: 9%
-            green: 9%
-            blue: 9%
+        - script.execute: refresh_led_ring_comfort_display
         - script.execute: publish_net_erl_led_state
     on_turn_off:
       then:
         - lambda: 'id(relay_1_state) = false;'
-        - light.turn_off: led_ring_light
+        - script.execute: refresh_led_ring_comfort_display
         - script.execute: publish_net_erl_led_state
 
 binary_sensor:
@@ -478,6 +615,140 @@ light:
     num_leds: ${led_ring_count}
     rgb_order: GRB
     chipset: WS2812
+    effects:
+      # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie:
+      # Der Ring ist eine lokale Anzeige fuer dieses ESPHome-Geraet. Er veraendert
+      # weder Topics noch Payload-Felder des Serververtrags.
+      - addressable_lambda:
+          name: Comfort Status
+          update_interval: 120ms
+          lambda: |-
+            const uint32_t now = millis();
+            const int leds = it.size();
+            int brightness = id(led_ring_brightness_pct);
+            if (brightness < 1) brightness = 1;
+            if (brightness > 60) brightness = 60;
+
+            auto scaled = [&](int value) -> uint8_t {
+              if (value < 0) value = 0;
+              if (value > 255) value = 255;
+              return (uint8_t) ((value * brightness) / 100);
+            };
+            auto set_all = [&](int red, int green, int blue) {
+              const Color color(scaled(red), scaled(green), scaled(blue));
+              for (int i = 0; i < leds; i++) it[i] = color;
+            };
+            auto clear_all = [&]() {
+              for (int i = 0; i < leds; i++) it[i] = Color(0, 0, 0);
+            };
+            auto set_pulsed_aqi = [&](float pulse) {
+              const int aqi = id(env_aqi);
+              int red = 90;
+              int green = 90;
+              int blue = 90;
+              if (aqi != 65535) {
+                if (aqi <= 50) {
+                  red = 0; green = 210; blue = 80;
+                } else if (aqi <= 100) {
+                  red = 180; green = 190; blue = 0;
+                } else if (aqi <= 150) {
+                  red = 255; green = 115; blue = 0;
+                } else if (aqi <= 200) {
+                  red = 220; green = 0; blue = 0;
+                } else if (aqi <= 300) {
+                  red = 130; green = 0; blue = 170;
+                } else {
+                  red = 90; green = 0; blue = 40;
+                }
+              }
+              for (int i = 0; i < leds; i++) {
+                it[i] = Color(scaled((int) (red * pulse)), scaled((int) (green * pulse)), scaled((int) (blue * pulse)));
+              }
+            };
+
+            if (!id(led_ring_enabled)) {
+              clear_all();
+              return;
+            }
+
+            if (!id(contract_online)) {
+              const bool on = ((now / 500UL) % 2UL) == 0UL;
+              set_all(0, 0, on ? 255 : 0);
+              return;
+            }
+
+            const bool sensor_fault =
+              !id(env_has_temp) ||
+              !id(env_has_hum) ||
+              !id(env_has_lux) ||
+              (now >= 180000UL && !id(env_has_air));
+            if (sensor_fault) {
+              set_all(255, 0, 0);
+              return;
+            }
+
+            if (id(led_ring_alert_code) != 0 &&
+                (int32_t) (id(led_ring_alert_until_ms) - now) > 0) {
+              clear_all();
+              const int head = (now / 120UL) % leds;
+              if (id(led_ring_alert_code) == 1) {
+                for (int offset = 0; offset < 4 && offset < leds; offset++) {
+                  const int pos = (head + leds - offset) % leds;
+                  it[pos] = Color(scaled(255 - offset * 45), scaled(140 - offset * 25), 0);
+                }
+              } else {
+                const int pulse = 70 + (int) ((sinf(now / 120.0f) + 1.0f) * 70.0f);
+                set_all(0, pulse, 30);
+              }
+              return;
+            }
+
+            if ((int32_t) (id(led_ring_display_until_ms) - now) <= 0) {
+              clear_all();
+              return;
+            }
+
+            const uint32_t elapsed_s = (now - id(led_ring_sequence_started_ms)) / 1000UL;
+            const uint32_t aqi_phase_s = (uint32_t) atoi("${led_ring_air_quality_phase_s}");
+            const uint32_t temp_phase_s = (uint32_t) atoi("${led_ring_temperature_phase_s}");
+            const uint32_t hum_phase_s = (uint32_t) atoi("${led_ring_humidity_phase_s}");
+            const uint32_t total_s = aqi_phase_s + temp_phase_s + hum_phase_s;
+            const uint32_t phase_s = total_s > 0 ? elapsed_s % total_s : 0;
+
+            if (phase_s < aqi_phase_s) {
+              const float pulse = 0.55f + 0.45f * ((sinf(now / 360.0f) + 1.0f) / 2.0f);
+              set_pulsed_aqi(pulse);
+              return;
+            }
+
+            if (phase_s < aqi_phase_s + temp_phase_s) {
+              clear_all();
+              int temp_01c = id(env_temp_01c);
+              if (temp_01c == -32768) temp_01c = 0;
+              int active = (temp_01c * leds) / 400;
+              if (active < 1 && temp_01c > 0) active = 1;
+              if (active > leds) active = leds;
+              const int sweep = (now / 180UL) % leds;
+              for (int i = 0; i < active; i++) {
+                const bool highlight = i == sweep || i == ((sweep + leds - 1) % leds);
+                it[i] = Color(scaled(highlight ? 255 : 150), scaled(highlight ? 55 : 12), 0);
+              }
+              return;
+            }
+
+            clear_all();
+            int hum_01pct = id(env_hum_01pct);
+            if (hum_01pct == 65535) hum_01pct = 0;
+            int active = (hum_01pct * leds) / 1000;
+            if (active < 1 && hum_01pct > 0) active = 1;
+            if (active > leds) active = leds;
+            const int wave = (now / 220UL) % leds;
+            for (int i = 0; i < active; i++) {
+              const int distance = abs(i - wave);
+              const bool crest = distance <= 1 || distance >= leds - 1;
+              it[i] = Color(0, scaled(crest ? 120 : 35), scaled(crest ? 255 : 170));
+            }
+      # Ende ESPHome-Komfortfunktion.
 
 sensor:
   - platform: bme680
@@ -559,6 +830,7 @@ sensor:
                 id(env_eco2_ppm) = 65535;
               }
           - script.execute: publish_net_erl_led_state
+          - script.execute: refresh_led_ring_comfort_display
     tvoc:
       name: "${device_name} TVOC"
       internal: true
@@ -572,6 +844,7 @@ sensor:
                 id(env_tvoc_ppb) = 65535;
               }
           - script.execute: publish_net_erl_led_state
+          - script.execute: refresh_led_ring_comfort_display
     aqi:
       name: "${device_name} AQI"
       internal: true
@@ -587,6 +860,7 @@ sensor:
                 id(env_aqi) = 65535;
               }
           - script.execute: publish_net_erl_led_state
+          - script.execute: refresh_led_ring_comfort_display
 
 interval:
   - interval: 1s
@@ -648,6 +922,7 @@ interval:
             }
             id(publish_net_erl_led_state).execute();
           }
+      - script.execute: refresh_led_ring_comfort_display
   - interval: ${report_interval_s}s
     then:
       - script.execute: publish_net_erl_led_state

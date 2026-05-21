@@ -58,6 +58,18 @@
 #define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U
 
+// Nicht Bestandteil der Technikerarbeit:
+// Die folgenden LED-Ring-Anzeigeparameter sind eine lokale Komfort-Erweiterung
+// des konkreten Hall-Module-LED-Ring-Geraets. Sie aendern weder Protokoll,
+// Serververtrag noch die bewertete Firmware-Architekturlinie.
+#define NET_ERL_LED_RING_BRIGHTNESS 24U
+#define NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS 96U
+#define NET_ERL_LED_RING_AQI_PHASE_MS 15000UL
+#define NET_ERL_LED_RING_TEMP_PHASE_MS 15000UL
+#define NET_ERL_LED_RING_HUM_PHASE_MS 15000UL
+#define NET_ERL_LED_RING_FRAME_INTERVAL_MS 120UL
+#define NET_ERL_LED_RING_LUX_BLOCKED_ALERT_MS 3000UL
+
 #define NET_ERL_SENSOR_POLL_INTERVAL_MS 50UL        // 50 Millisekunden LD2410-Poll.
 #define NET_ERL_ENV_SAMPLE_INTERVAL_MS 2500UL       // 2500 Millisekunden = 2,5 Sekunden.
 #define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
