@@ -58,13 +58,16 @@
 #define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U
 
-// Nicht Bestandteil der Technikerarbeit:
-// Die folgenden LED-Ring-Anzeigeparameter sind eine lokale Komfort-Erweiterung
-// des konkreten Hall-Module-LED-Ring-Geraets. Sie aendern weder Protokoll,
-// Serververtrag noch die bewertete Firmware-Architekturlinie.
+// Teil der Technikerarbeit:
+// Grundparameter fuer die LED-Ring-Luftqualitaetsanzeige des Hall-Moduls.
+// Der Ring visualisiert den gemessenen ENS160-AQI lokal am Geraet.
 #define NET_ERL_LED_RING_BRIGHTNESS 24U
 #define NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS 96U
 #define NET_ERL_LED_RING_AQI_PHASE_MS 15000UL
+
+// Nicht Bestandteil der Technikerarbeit:
+// Zusaetzliche Komfortphasen und Hinweisanimationen. Sie aendern weder
+// Protokoll, Serververtrag noch die bewertete Firmware-Architekturlinie.
 #define NET_ERL_LED_RING_TEMP_PHASE_MS 15000UL
 #define NET_ERL_LED_RING_HUM_PHASE_MS 15000UL
 #define NET_ERL_LED_RING_FRAME_INTERVAL_MS 120UL

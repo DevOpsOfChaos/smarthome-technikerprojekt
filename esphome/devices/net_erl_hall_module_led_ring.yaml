@@ -354,9 +354,10 @@ globals:
     type: int
     restore_value: no
     initial_value: "65535"
-  # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie:
-  # Lokaler Anzeigezustand fuer den LED-Ring. Diese Werte erweitern nicht den
-  # oeffentlichen MQTT-Serververtrag und muessen vom Server nicht verstanden werden.
+  # LED-Ring-Anzeige:
+  # Teil der Technikerarbeit ist nur die lokale Luftqualitaetsanzeige per AQI.
+  # Die weiteren Zustandswerte dienen optionalen ESPHome-Komfortanimationen und
+  # erweitern nicht den oeffentlichen MQTT-Serververtrag.
   - id: led_ring_enabled
     type: bool
     restore_value: yes
@@ -408,9 +409,10 @@ script:
             root["motion"] = id(motion_state);
             root["fault"] = sensor_fault;
 
-  # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie:
-  # Startet bei Bewegung ein lokales 45s-Anzeigefenster: Luftqualitaet,
-  # Temperatur und Luftfeuchte werden nacheinander auf dem LED-Ring dargestellt.
+  # LED-Ring-Anzeige:
+  # Teil der Technikerarbeit ist die erste Phase: Luftqualitaet per AQI.
+  # Die anschliessenden Temperatur-/Feuchtephasen sind ESPHome-Komfortfunktion
+  # und nicht Bestandteil der Technikerprojekt-Firmwarelinie.
   - id: start_led_ring_comfort_sequence
     then:
       - lambda: |-
@@ -427,6 +429,7 @@ script:
 
   - id: trigger_led_ring_lux_blocked
     then:
+      # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
       - lambda: |-
           id(led_ring_alert_code) = 1;
           id(led_ring_alert_until_ms) = millis() + 3000UL;
@@ -434,6 +437,7 @@ script:
 
   - id: trigger_led_ring_ack_ok
     then:
+      # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
       - lambda: |-
           id(led_ring_alert_code) = 2;
           id(led_ring_alert_until_ms) = millis() + 1200UL;
@@ -467,7 +471,7 @@ script:
             auto call = id(led_ring_light).turn_off();
             call.perform();
           }
-  # Ende ESPHome-Komfortfunktion.
+  # Ende LED-Ring-Anzeige.
 
   - id: evaluate_auto_on_from_lux
     then:
@@ -616,9 +620,11 @@ light:
     rgb_order: GRB
     chipset: WS2812
     effects:
-      # ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie:
-      # Der Ring ist eine lokale Anzeige fuer dieses ESPHome-Geraet. Er veraendert
-      # weder Topics noch Payload-Felder des Serververtrags.
+      # LED-Ring-Anzeige:
+      # Teil der Technikerarbeit ist nur die AQI-/Luftqualitaetsphase.
+      # Temperatur, Feuchte, ACK-Impuls, Lux-Blockade und Runtime-Config sind
+      # ESPHome-Komfortfunktionen ausserhalb der Technikerprojekt-Firmwarelinie.
+      # Keine dieser Anzeigen veraendert Topics oder Payload-Felder.
       - addressable_lambda:
           name: Comfort Status
           update_interval: 120ms
@@ -672,6 +678,7 @@ light:
             }
 
             if (!id(contract_online)) {
+              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
               const bool on = ((now / 500UL) % 2UL) == 0UL;
               set_all(0, 0, on ? 255 : 0);
               return;
@@ -683,12 +690,14 @@ light:
               !id(env_has_lux) ||
               (now >= 180000UL && !id(env_has_air));
             if (sensor_fault) {
+              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
               set_all(255, 0, 0);
               return;
             }
 
             if (id(led_ring_alert_code) != 0 &&
                 (int32_t) (id(led_ring_alert_until_ms) - now) > 0) {
+              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
               clear_all();
               const int head = (now / 120UL) % leds;
               if (id(led_ring_alert_code) == 1) {
@@ -716,12 +725,14 @@ light:
             const uint32_t phase_s = total_s > 0 ? elapsed_s % total_s : 0;
 
             if (phase_s < aqi_phase_s) {
+              // Teil der Technikerarbeit: lokale Luftqualitaetsanzeige per AQI.
               const float pulse = 0.55f + 0.45f * ((sinf(now / 360.0f) + 1.0f) / 2.0f);
               set_pulsed_aqi(pulse);
               return;
             }
 
             if (phase_s < aqi_phase_s + temp_phase_s) {
+              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
               clear_all();
               int temp_01c = id(env_temp_01c);
               if (temp_01c == -32768) temp_01c = 0;
@@ -736,6 +747,7 @@ light:
               return;
             }
 
+            // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
             clear_all();
             int hum_01pct = id(env_hum_01pct);
             if (hum_01pct == 65535) hum_01pct = 0;
@@ -748,7 +760,7 @@ light:
               const bool crest = distance <= 1 || distance >= leds - 1;
               it[i] = Color(0, scaled(crest ? 120 : 35), scaled(crest ? 255 : 170));
             }
-      # Ende ESPHome-Komfortfunktion.
+      # Ende LED-Ring-Anzeige.
 
 sensor:
   - platform: bme680
@@ -874,6 +886,7 @@ interval:
           }
 
           if (presence_high) {
+            id(start_led_ring_comfort_sequence).execute();
             if (!id(explicit_off_hold)) {
               if (!id(motion_state)) {
                 id(handle_motion_on).execute();

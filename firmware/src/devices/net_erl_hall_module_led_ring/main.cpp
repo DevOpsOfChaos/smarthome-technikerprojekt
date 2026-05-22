@@ -14,9 +14,9 @@
  und NeoPixel-LED-Ring. Der BME680 liefert Temperatur, Feuchte, Luftdruck und
  Gaswiderstand. Der ENS160 nutzt Temperatur und Feuchte als Kompensation und
  liefert AQI, TVOC und eCO2. Der VEML7700 liefert Lux fuer die Auto-Light-
- Entscheidung. Der LED-Ring zeigt als lokale Komfort-Erweiterung Bewegungsstatus
- und Umweltdaten an. Diese Anzeige ist nicht Bestandteil der bewerteten
- Technikerarbeits-Architektur.
+ Entscheidung. Der LED-Ring zeigt als Bestandteil der Technikerarbeit die
+ Luftqualitaet an. Weitere Ringanzeigen fuer Temperatur, Feuchte und lokale
+ Hinweise sind reine Komfort-Erweiterungen und getrennt kommentiert.
 
  Wichtige Zeitwerte:
  - 400 ms VEML7700-Integrationszeit: laengere Lichtmessung fuer stabilere Luxwerte.
@@ -50,7 +50,7 @@
  - 2026-05-14: Device-Code fuer NET-ERL Hall Module LED Ring angelegt.
  - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
  - 2026-05-19: Sensor-Ausfallpfade, ENS160-Warmup und Auto-Flags bereinigt.
- - 2026-05-21: LED-Ring-Komfortanzeige fuer AQI, Temperatur, Feuchte und Fehler ergaenzt.
+ - 2026-05-21: LED-Ring-Anzeige fuer AQI ergaenzt; weitere Ring-Komfortphasen abgegrenzt.
 ===============================================================================
 */
 
@@ -133,10 +133,10 @@ namespace {
 // SENSOR-HILFSFUNKTIONEN (device-spezifisch)
 // =============================================================================
 namespace {
-    // Nicht Bestandteil der Technikerarbeit:
-    // Die folgenden LED-Ring-Helfer sind eine lokale Komfortanzeige. Sie veraendern
-    // weder ESP-NOW-Payloads noch MQTT-Serververtrag und sind fuer den Server nicht
-    // erforderlich.
+    // Teil der Technikerarbeit:
+    // Hilfsfunktionen fuer die lokale LED-Ring-Luftqualitaetsanzeige. Sie zeigen
+    // den ENS160-AQI am Geraet, ohne ESP-NOW-Payloads oder MQTT-Serververtrag zu
+    // erweitern.
     uint8_t ringScale(uint8_t value) {
         constexpr uint8_t brightness =
             NET_ERL_LED_RING_BRIGHTNESS > NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS
@@ -189,6 +189,9 @@ namespace {
         if (ring_display_until_ms == 0 || (long)(ring_display_until_ms - nowMs) <= 0) {
             ring_sequence_started_ms = nowMs;
         }
+        // Teil der Technikerarbeit ist die AQI-Phase. Die anschliessenden
+        // Temperatur-/Feuchtephasen sind Komfort-Erweiterungen und bleiben
+        // ausserhalb der bewerteten Projektfunktion.
         ring_display_until_ms = nowMs
             + NET_ERL_LED_RING_AQI_PHASE_MS
             + NET_ERL_LED_RING_TEMP_PHASE_MS
@@ -205,12 +208,17 @@ namespace {
         }
         letzter_blocked_by_lux = runtime.blocked_by_lux;
 
+        // Nicht Bestandteil der Technikerarbeit:
+        // Rote Daueranzeige bei Sensorfehlern ist eine lokale Komfort-/Diagnosehilfe.
         if (netErlDeviceHasSensorFault()) {
             ringSetAll(ringColor(255, 0, 0));
             ledRing.show();
             return;
         }
 
+        // Nicht Bestandteil der Technikerarbeit:
+        // Kurze Lux-Blockade-Animation. Die Auto-Light-Entscheidung selbst bleibt
+        // unveraendert im NET-ERL-Basistyp und im State-Payload.
         if ((long)(ring_lux_blocked_until_ms - nowMs) > 0) {
             ledRing.clear();
             const uint16_t count = ledRing.numPixels();
@@ -236,6 +244,8 @@ namespace {
             : 0UL;
         const uint16_t count = ledRing.numPixels();
 
+        // Teil der Technikerarbeit:
+        // Die erste Phase visualisiert ausschliesslich die Luftqualitaet per AQI.
         if (phaseMs < NET_ERL_LED_RING_AQI_PHASE_MS) {
             const float pulse = 0.55f + 0.45f * ((sinf((float)nowMs / 360.0f) + 1.0f) / 2.0f);
             ringSetAll(ringDimColor(ringAqiColor(), pulse));
@@ -243,6 +253,8 @@ namespace {
             return;
         }
 
+        // Nicht Bestandteil der Technikerarbeit:
+        // Temperaturanzeige ist eine lokale Zusatzanimation.
         if (phaseMs < (NET_ERL_LED_RING_AQI_PHASE_MS + NET_ERL_LED_RING_TEMP_PHASE_MS)) {
             ledRing.clear();
             int16_t t = temp_01c == INT16_MIN ? 0 : temp_01c;
@@ -258,6 +270,8 @@ namespace {
             return;
         }
 
+        // Nicht Bestandteil der Technikerarbeit:
+        // Feuchteanzeige ist eine lokale Zusatzanimation.
         ledRing.clear();
         uint16_t h = hum_01pct == 0xFFFFU ? 0U : hum_01pct;
         int active = ((int)h * (int)count) / 1000;
@@ -272,7 +286,7 @@ namespace {
         }
         ledRing.show();
     }
-    // Ende: Nicht Bestandteil der Technikerarbeit.
+    // Ende LED-Ring-Anzeige.
 
     // Aufgabe: Mappt den ENS160-AQI-Rohwert von 1 bis 5 auf die Projekt-Skala 0 bis 500.
     // Eingabewert: r ist der AQI-Rohwert des ENS160.
@@ -435,9 +449,8 @@ void netErlDeviceResetSensorDefaults() {
 bool netErlDeviceReadPresence() {
     const bool presence = digitalRead(PIN_LD2410_OUT) == HIGH;
     const unsigned long nowMs = millis();
-    // Nicht Bestandteil der Technikerarbeit:
-    // Startet nur die lokale LED-Ring-Komfortanzeige. Die eigentliche
-    // Praesenzlogik des NET-ERL-Basistyps bleibt unveraendert.
+    // Teil der Technikerarbeit ist nur der Start der AQI-Anzeige bei Praesenz.
+    // Die zusaetzlichen Ringphasen bleiben lokale Komfort-Erweiterungen.
     if (presence) {
         startRingComfortSequence(nowMs);
     }
@@ -452,11 +465,10 @@ void netErlDeviceSetRelayOutput(bool on) {
     digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
 }
 
-// Nicht Bestandteil der Technikerarbeit:
-// Aktualisiert die lokale LED-Ring-Komfortanzeige. Der Relaiszustand wird hier
-// bewusst nicht mehr als einfache Weiss-Anzeige benutzt; der Ring zeigt bei
-// Bewegung AQI, Temperatur und Feuchte und bleibt bei Fehler rot sichtbar.
-// Der Serververtrag und die ESP-NOW-Payloads bleiben davon unberuehrt.
+// Aktualisiert die lokale LED-Ring-Anzeige. Teil der Technikerarbeit ist nur die
+// AQI-/Luftqualitaetsanzeige; Temperatur, Feuchte und Fehlerhinweise sind als
+// Komfort-Erweiterungen im Anzeigehelfer abgegrenzt. Der Serververtrag und die
+// ESP-NOW-Payloads bleiben davon unberuehrt.
 void netErlDeviceUpdateIndicators(bool relayOn) {
     (void)relayOn;
     updateRingComfortDisplay(millis());
@@ -563,9 +575,9 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         }
     }
 
-    // Nicht Bestandteil der Technikerarbeit:
-    // Aktualisiert nur die lokale LED-Ring-Komfortanzeige nach Sensorpoll und
-    // Late-Lux-Entscheidung. State-Payload und Auto-Light-Logik bleiben getrennt.
+    // Aktualisiert die lokale LED-Ring-Anzeige nach Sensorpoll und Late-Lux.
+    // Nur die AQI-Anzeige zaehlt zur Technikerarbeit; Zusatzanimationen bleiben
+    // ausserhalb. State-Payload und Auto-Light-Logik bleiben getrennt.
     updateRingComfortDisplay(nowMs);
 
     // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Aenderung.
