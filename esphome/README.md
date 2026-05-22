@@ -20,6 +20,30 @@ mqtt_password: <mqtt-passwort>
 
 Wenn dein MQTT-Broker keine Zugangsdaten nutzt, muessen die `username`/`password`-Zeilen in den Device-YAMLs entfernt oder passend ersetzt werden.
 
+## Lokale Pruefung
+
+Die YAMLs koennen lokal ohne echte Zugangsdaten geprueft werden. Das Skript legt dafuer eine Arbeitskopie mit Dummy-Secrets an und nutzt einen isolierten PlatformIO-Cache unter einem kurzen lokalen Pfad wie `D:\.sh-esphome\`. Der kurze Pfad ist unter Windows wichtig, weil ESPHome/PlatformIO sonst beim Compile an zu langen Befehlszeilen scheitern kann.
+
+Nur Konfiguration validieren:
+
+```powershell
+.\scripts\check_esphome.ps1
+```
+
+Ein einzelnes Geraet validieren:
+
+```powershell
+.\scripts\check_esphome.ps1 -Device net_erl_hall_module_led_ring
+```
+
+Ein einzelnes Geraet kompilieren:
+
+```powershell
+.\scripts\check_esphome.ps1 -Device net_erl_hall_module_led_ring -Compile
+```
+
+Der erste Compile kann lange dauern, weil ESPHome und PlatformIO Abhaengigkeiten herunterladen. Echte WLAN- oder MQTT-Secrets gehoeren nicht ins Repo.
+
 ## Produktive Ersatz-YAMLs
 
 | Datei | MQTT-Device-ID | Zweck |

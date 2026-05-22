@@ -254,7 +254,7 @@ globals:
 #   Wenn Kalibrier-Phase 3 (Runterfahrt-Messung) → 180000ms
 #   Sonst                                          → gespeicherte travel_up_ms / travel_down_ms
 #
-# on_open / on_close:
+# on_opened / on_closed:
 #   Bei Teilfahrt:   Position = Zielposition, partial_active=false
 #   Bei Vollfahrt:   Position = 100 (offen) oder 0 (geschlossen)
 #   State = "stopped", Status publishen
@@ -275,7 +275,7 @@ cover:
       - switch.turn_off: cover_relay_down
     open_duration: ${default_cover_travel_ms}ms
     close_duration: ${default_cover_travel_ms}ms
-    on_open:
+    on_opened:
       then:
         - lambda: |-
             // Prueft ob eine Teilfahrt beendet wurde → Zielposition uebernehmen

@@ -198,14 +198,14 @@ mqtt:
             if (command == "set_config") {
               bool changed = false;
               bool invalid = false;
-              if (!x["values"].is<JsonObject>()) {
+              if (!x["values"].is<JsonObjectConst>()) {
                 id(contract_last_status_code) = -21;
                 id(contract_last_status_text) = "invalid_payload";
                 queue_ack("invalid_payload", -21, "device_validation");
                 return;
               }
 
-              JsonObject values = x["values"].as<JsonObject>();
+              JsonObjectConst values = x["values"].as<JsonObjectConst>();
               if (values["ring_brightness_pct"].is<int>()) {
                 int brightness = values["ring_brightness_pct"].as<int>();
                 if (brightness < 1 || brightness > 60) {
