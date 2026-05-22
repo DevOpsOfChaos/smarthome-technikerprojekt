@@ -18,7 +18,7 @@
 
  Wichtige Werte:
  - 50 Millisekunden Sensor-Poll-Intervall fuer LD2410.
- - 2500 Millisekunden Umweltsensor-Intervall entsprechen 2,5 Sekunden.
+ - 60000 Millisekunden Umweltsensor-Intervall entsprechen 60 Sekunden.
  - 30000 Millisekunden Recovery/Snapshot entsprechen 30 Sekunden.
  - 180000 Millisekunden Gas-/ENS160-Warmup entsprechen 180 Sekunden oder 3 Minuten.
  - 120000 Millisekunden ENS160-Stale-Timeout entsprechen 120 Sekunden oder 2 Minuten.
@@ -74,7 +74,7 @@
 #define NET_ERL_LED_RING_LUX_BLOCKED_ALERT_MS 3000UL
 
 #define NET_ERL_SENSOR_POLL_INTERVAL_MS 50UL        // 50 Millisekunden LD2410-Poll.
-#define NET_ERL_ENV_SAMPLE_INTERVAL_MS 2500UL       // 2500 Millisekunden = 2,5 Sekunden.
+#define NET_ERL_ENV_SAMPLE_INTERVAL_MS 60000UL      // 60000 Millisekunden = 60 Sekunden.
 #define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 #define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL    // 30000 Millisekunden = 30 Sekunden.
 

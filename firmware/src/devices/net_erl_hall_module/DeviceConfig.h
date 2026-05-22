@@ -22,7 +22,7 @@
  - 20000 Millisekunden Heartbeat entsprechen 20 Sekunden.
  - 20 Millisekunden Loop-Intervall begrenzen die Hauptschleife.
  - 250 Millisekunden Sensor-Poll-Intervall fuer den PIR.
- - 2000 Millisekunden Umweltsensor-Intervall entsprechen 2 Sekunden.
+ - 60000 Millisekunden Umweltsensor-Intervall entsprechen 60 Sekunden.
  - 30000 Millisekunden Recovery/Snapshot entsprechen 30 Sekunden.
  - 15 Sekunden Auto-Off-Delay sind die Nachlaufzeit nach Bewegung.
 
@@ -63,7 +63,7 @@
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U        // 15 Sekunden Nachlaufzeit.
 
 #define NET_ERL_SENSOR_POLL_INTERVAL_MS 250UL       // 250 Millisekunden PIR-Poll.
-#define NET_ERL_ENV_SAMPLE_INTERVAL_MS 2000UL       // 2000 Millisekunden = 2 Sekunden.
+#define NET_ERL_ENV_SAMPLE_INTERVAL_MS 60000UL      // 60000 Millisekunden = 60 Sekunden.
 #define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 #define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL    // 30000 Millisekunden = 30 Sekunden.
 

@@ -1,0 +1,75 @@
+Protokoll: I2C-Umweltsensoren auf 60 Sekunden Messintervall
+Datum: 2026-05-22
+Bereich: Firmware und ESPHome
+
+Ausgangslage
+------------
+- An mehreren netzbetriebenen Modulen wurden I2C-Umweltsensoren deutlich
+  haeufiger gelesen, als es fuer das Projekt fachlich notwendig ist.
+- Betroffen waren Temperatur, Feuchte, Druck, Lux und Luftqualitaet.
+- Die Messwerte dienen vor allem Anzeige, Zustandsmeldung und Nachweis. Mehrere
+  Messungen pro Minute liefern dafuer keinen relevanten Mehrwert.
+- Gleichzeitig fuehrt haeufiges Messen bei Sensoren mit interner Heizung oder
+  aktiver Messlogik zu unnoetiger thermischer Belastung und kann Messwerte im
+  Gehaeuse verfaelschen.
+
+Abgrenzung
+----------
+- Die I2C-Busfrequenz wurde nicht weiter reduziert. Sie ist nicht die passende
+  Stellgroesse fuer das Waermeproblem.
+- BME280, BME680, VEML7700 und ENS160 bleiben aktiv.
+- Schnelle digitale Eingaben wie PIR, LD2410, Button und Regen-Digitalstatus
+  wurden nicht verlangsamt.
+- LED-Ring-Animationsintervalle wurden nicht geaendert, weil sie keine
+  I2C-Umweltsensor-Messrate darstellen.
+
+Umsetzung
+---------
+- In den ESPHome-Geraeten wurden die I2C-Umweltsensoren auf `60s`
+  `update_interval` gesetzt:
+  - `esphome/devices/net_erl_hall_module.yaml`
+  - `esphome/devices/net_erl_hall_module_led_ring.yaml`
+  - `esphome/devices/net_sen_weather_station.yaml`
+- In der Firmware wurden die Umweltsensor-Leseintervalle auf 60000
+  Millisekunden gesetzt:
+  - `firmware/src/devices/net_erl_hall_module/DeviceConfig.h`
+  - `firmware/src/devices/net_erl_hall_module_led_ring/DeviceConfig.h`
+  - `firmware/src/devices/net_sen_weather_station/DeviceConfig.h`
+- Die zugehoerigen Kommentarzeilen wurden auf 60 Sekunden aktualisiert.
+
+Begruendung
+-----------
+- 60 Sekunden sind fuer Raumklima, Luftdruck, Helligkeitsstatus und
+  Luftqualitaet im Projekt ausreichend.
+- Der BME680 und ENS160 muessen nicht deaktiviert werden, um die thermische Last
+  zu senken. Selteneres Lesen reduziert die Messaktivitaet, ohne die Sensorik
+  funktional aus dem Projekt zu entfernen.
+- Die getrennte Behandlung von digitalen Eingaben verhindert, dass
+  Bewegungs-, Button- oder Regenereignisse traege werden.
+- Der Patch ist klein und nachvollziehbar: nur Intervallwerte und direkte
+  Dokumentationskommentare wurden geaendert.
+
+Pruefung
+--------
+- Suche nach alten I2C-Umweltsensor-Intervallen in ESPHome und Firmware:
+  - keine verbleibenden `2.5s`- oder `10s`-Update-Intervalle bei den
+    betroffenen I2C-Umweltsensoren
+  - nur Batterie-/Digitalsensoren behalten `1s`, weil sie nicht Teil dieser
+    thermischen I2C-Umstellung sind
+- ESPHome-Konfigurationen wurden validiert:
+  - alle Geraete gueltig
+  - bekannte Strapping-Pin-Warnungen bleiben unveraendert
+- Firmware-Builds wurden erfolgreich ausgefuehrt:
+  - `net_sen_weather_station`
+  - `net_erl_hall_module`
+  - `net_erl_hall_module_led_ring`
+
+Bewertung
+---------
+- Die Aenderung ist fachlich sinnvoll, weil sie den Messrhythmus an den
+  tatsaechlichen Informationsbedarf anpasst.
+- Sie ersetzt keinen thermischen Hardwaretest. Wenn Sensoren im gleichen warmen
+  Gehaeuse wie ESP32, Spannungsregler oder LED-Ring sitzen, bleibt die
+  mechanische Entkopplung weiterhin wichtig.
+- Ein Temperatur-Offset sollte erst nach einem Realtest bewertet werden, nicht
+  als Ersatz fuer bessere Messintervalle oder Gehaeusefuehrung.

@@ -19,7 +19,7 @@
  Wichtige Werte:
  - 5000 Millisekunden HELLO-Retry entsprechen 5 Sekunden.
  - 20000 Millisekunden Heartbeat entsprechen 20 Sekunden.
- - 2500 Millisekunden Sensor-Read-Intervall entsprechen 2,5 Sekunden.
+ - 60000 Millisekunden Sensor-Read-Intervall entsprechen 60 Sekunden.
  - 15000 Millisekunden Fehlerlog-Intervall entsprechen 15 Sekunden.
  - 30000 Millisekunden Snapshot-Intervall entsprechen 30 Sekunden.
  - 1050 Millisekunden VEML7700-Startverzoegerung entsprechen 1,05 Sekunden.
@@ -52,7 +52,7 @@
 #define NET_SEN_LOOP_INTERVAL_MS 50UL           // 50 Millisekunden Loop-Pause.
 
 // Sensor-Timing
-#define NET_SEN_ENV_BME280_VEML_RAIN_SENSOR_READ_INTERVAL_MS 2500UL  // 2500 Millisekunden = 2,5 Sekunden.
+#define NET_SEN_ENV_BME280_VEML_RAIN_SENSOR_READ_INTERVAL_MS 60000UL // 60000 Millisekunden = 60 Sekunden.
 #define NET_SEN_ENV_BME280_VEML_RAIN_ERROR_LOG_INTERVAL_MS 15000UL   // 15000 Millisekunden = 15 Sekunden.
 #define NET_SEN_ENV_BME280_VEML_RAIN_SNAPSHOT_LOG_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 

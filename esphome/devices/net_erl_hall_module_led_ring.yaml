@@ -765,7 +765,7 @@ light:
 sensor:
   - platform: bme680
     address: ${bme680_address}
-    update_interval: 2.5s
+    update_interval: 60s
     temperature:
       name: "${device_name} Temperature"
       internal: true
@@ -812,7 +812,7 @@ sensor:
     iir_filter: 3x
   - platform: veml7700
     address: ${veml7700_address}
-    update_interval: 2.5s
+    update_interval: 60s
     gain: 1X
     integration_time: 400ms
     ambient_light:
@@ -828,7 +828,7 @@ sensor:
           - script.execute: publish_net_erl_led_state
   - platform: ens160_i2c
     address: ${ens160_address}
-    update_interval: 2.5s
+    update_interval: 60s
     eco2:
       name: "${device_name} eCO2"
       internal: true

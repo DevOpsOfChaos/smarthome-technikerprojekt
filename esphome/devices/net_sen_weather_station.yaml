@@ -199,7 +199,7 @@ binary_sensor:
 sensor:
   - platform: bme280_i2c
     address: ${bme280_address}
-    update_interval: 10s
+    update_interval: 60s
     temperature:
       id: env_temperature_sensor
       name: "${device_name} Temperature"
@@ -235,7 +235,7 @@ sensor:
           - script.execute: publish_net_sen_state
   - platform: veml7700
     address: ${veml7700_address}
-    update_interval: 10s
+    update_interval: 60s
     id: env_veml7700_sensor
     ambient_light:
       name: "${device_name} Illuminance"
