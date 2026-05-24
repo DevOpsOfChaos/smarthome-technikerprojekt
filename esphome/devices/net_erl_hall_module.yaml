@@ -14,8 +14,16 @@ substitutions:
   reporting_mode: hybrid
   sensor_mask: THXLXXXXXX
   input_mask: XXXXX
+  setup_ap_password: net-erl-setup
+  setup_status_default: "10"
+  setup_sensor_default: "10"
+  setup_status_min: "5"
+  setup_status_max: "600"
+  setup_sensor_min: "5"
+  setup_sensor_max: "600"
   relay_pin: GPIO10
   pir_pin: GPIO7
+  setup_button_pin: GPIO2
   i2c_sda_pin: GPIO0
   i2c_scl_pin: GPIO1
   bme280_address: "0x76"
@@ -284,6 +292,27 @@ switch:
         - script.execute: publish_net_erl_state
 
 binary_sensor:
+  - platform: gpio
+    id: setup_button
+    name: "${device_name} Setup Button"
+    internal: true
+    pin:
+      number: ${setup_button_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 35ms
+      - delayed_off: 35ms
+    on_press:
+      then:
+        - delay: 5s
+        - if:
+            condition:
+              binary_sensor.is_on: setup_button
+            then:
+              - script.execute: enter_setup_portal
   - platform: gpio
     id: pir_sensor
     name: "${device_name} Motion"

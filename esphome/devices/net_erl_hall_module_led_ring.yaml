@@ -14,6 +14,13 @@ substitutions:
   reporting_mode: hybrid
   sensor_mask: THLPGAMXXX
   input_mask: BXXXX
+  setup_ap_password: net-erl-setup
+  setup_status_default: "10"
+  setup_sensor_default: "10"
+  setup_status_min: "5"
+  setup_status_max: "600"
+  setup_sensor_min: "5"
+  setup_sensor_max: "600"
   report_interval_s: "10"
   auto_on_lux_threshold: "250"
   auto_off_delay_s: "15"
@@ -322,6 +329,10 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: "0"
+  - id: button_setup_hold_consumed
+    type: bool
+    restore_value: no
+    initial_value: "false"
   - id: bme680_gas_read_count
     type: int
     restore_value: no
@@ -621,7 +632,16 @@ binary_sensor:
       - delayed_off: 40ms
     on_press:
       then:
-        - lambda: 'id(button_pressed_at_ms) = millis();'
+        - lambda: |-
+            id(button_pressed_at_ms) = millis();
+            id(button_setup_hold_consumed) = false;
+        - delay: 5s
+        - if:
+            condition:
+              binary_sensor.is_on: local_button
+            then:
+              - lambda: 'id(button_setup_hold_consumed) = true;'
+              - script.execute: enter_setup_portal
     on_release:
       then:
         - if:
@@ -629,12 +649,12 @@ binary_sensor:
               lambda: |-
                 const uint32_t pressed_at = id(button_pressed_at_ms);
                 const uint32_t held_ms = pressed_at > 0 ? millis() - pressed_at : 0;
+                const bool setup_consumed = id(button_setup_hold_consumed);
                 id(button_pressed_at_ms) = 0;
-                return held_ms < 5000UL;
+                id(button_setup_hold_consumed) = false;
+                return !setup_consumed && held_ms < 5000UL;
             then:
               - script.execute: handle_manual_relay_toggle
-            else:
-              - script.execute: enter_setup_portal
 
 light:
   - platform: esp32_rmt_led_strip

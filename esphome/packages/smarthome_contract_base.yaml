@@ -48,6 +48,14 @@ substitutions:
   sensor_mask: XXXXXXXXXX                 # 10-stellige Sensormaske: T(emp)peratur, H(um)Feuchte, P(ressure)Druck, G(as), L(ux)Licht, W(indow)Fensterkontakt, R(ain)Regen
   input_mask: XXXXX                       # 5-stellige Eingangsmaske (Reserve)
   setup_ap_password: smarthome            # lokales Setup-AP-Passwort, mindestens 8 Zeichen
+  setup_status_field_name: status_send_interval_s
+  setup_sensor_field_name: sensor_send_interval_s
+  setup_status_default: "60"
+  setup_sensor_default: "60"
+  setup_status_min: "5"
+  setup_status_max: "65535"
+  setup_sensor_min: "5"
+  setup_sensor_max: "65535"
 
 # =============================================================================
 # SETUP-PORTAL – Lokale AP-/Webserver-Schicht fuer Geraeteeinstellungen
@@ -101,6 +109,10 @@ globals:
     restore_value: yes
     max_restore_data_length: 17
     initial_value: '"${master_mac}"'
+  - id: setup_portal_active
+    type: bool
+    restore_value: no
+    initial_value: "false"
 
 # =============================================================================
 # SKRIPTE – Hilfsfunktionen für diesen Contract
@@ -170,6 +182,7 @@ script:
     then:
       - lambda: |-
           SmartHomeSetupPortal::start("${node_name}-setup", "${setup_ap_password}");
+          id(setup_portal_active) = true;
 
 text:
   - platform: template
@@ -199,6 +212,30 @@ text:
             call.set_value(id(stored_master_mac));
             call.perform();
           }
+
+number:
+  - platform: template
+    id: setup_status_interval_number
+    name: "${device_name} ${setup_status_field_name}"
+    min_value: ${setup_status_min}
+    max_value: ${setup_status_max}
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: ${setup_status_default}
+    internal: true
+  - platform: template
+    id: setup_sensor_interval_number
+    name: "${device_name} ${setup_sensor_field_name}"
+    min_value: ${setup_sensor_min}
+    max_value: ${setup_sensor_max}
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: ${setup_sensor_default}
+    internal: true
 
 button:
   - platform: template

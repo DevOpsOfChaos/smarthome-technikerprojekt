@@ -53,11 +53,18 @@ substitutions:
   reporting_mode: hybrid
   sensor_mask: XXXXXXXXXX
   input_mask: XXXXX
+  setup_ap_password: net-zrl-setup
+  setup_status_default: "60"
+  setup_sensor_default: "60"
+  setup_status_min: "10"
+  setup_status_max: "65535"
+  setup_sensor_min: "10"
+  setup_sensor_max: "65535"
   relay_up_pin: GPIO10               # bestehende Firmware: NET_ZRL_RELAY_UP_PIN
   relay_down_pin: GPIO5              # bestehende Firmware: NET_ZRL_RELAY_DOWN_PIN
   default_cover_travel_ms: "100000"
-  button_up_pin: GPIO4
-  button_down_pin: GPIO20
+  button_up_pin: GPIO20
+  button_down_pin: GPIO4
   button_stop_pin: GPIO3
   led_up_pin: GPIO6
   led_down_pin: GPIO7
@@ -190,6 +197,7 @@ binary_sensor:
         pullup: false
     filters:
       - delayed_on: 35ms
+      - delayed_off: 35ms
     on_press:
       then:
         - script.execute: cover_hw_open
@@ -207,11 +215,34 @@ binary_sensor:
         pullup: false
     filters:
       - delayed_on: 35ms
+      - delayed_off: 35ms
     on_press:
       then:
-        - script.execute: cover_hw_close
-        - lambda: 'id(cover_contract_state) = "closing";'
-        - script.execute: publish_cover_contract_state
+        - lambda: |-
+            id(down_button_pressed_at_ms) = millis();
+            id(down_setup_hold_consumed) = false;
+        - delay: 5s
+        - if:
+            condition:
+              binary_sensor.is_on: cover_button_down
+            then:
+              - lambda: 'id(down_setup_hold_consumed) = true;'
+              - script.execute: enter_setup_portal
+    on_release:
+      then:
+        - if:
+            condition:
+              lambda: |-
+                const uint32_t pressed_at = id(down_button_pressed_at_ms);
+                const uint32_t held_ms = pressed_at > 0 ? millis() - pressed_at : 0;
+                const bool setup_consumed = id(down_setup_hold_consumed);
+                id(down_button_pressed_at_ms) = 0;
+                id(down_setup_hold_consumed) = false;
+                return !setup_consumed && held_ms < 5000UL;
+            then:
+              - script.execute: cover_hw_close
+              - lambda: 'id(cover_contract_state) = "closing";'
+              - script.execute: publish_cover_contract_state
   - platform: gpio
     id: cover_button_stop
     name: "Cover Button Stop"
@@ -224,23 +255,13 @@ binary_sensor:
         pullup: false
     filters:
       - delayed_on: 35ms
+      - delayed_off: 35ms
     on_press:
       then:
         - lambda: 'id(stop_button_pressed_at_ms) = millis();'
         - script.execute: cover_hw_stop
         - lambda: 'id(cover_contract_state) = "stopped";'
         - script.execute: publish_cover_contract_state
-    on_release:
-      then:
-        - if:
-            condition:
-              lambda: |-
-                const uint32_t pressed_at = id(stop_button_pressed_at_ms);
-                const uint32_t held_ms = pressed_at > 0 ? millis() - pressed_at : 0;
-                id(stop_button_pressed_at_ms) = 0;
-                return held_ms >= 5000UL;
-            then:
-              - script.execute: enter_setup_portal
 
 # =============================================================================
 # GLOBALE VARIABLEN – Teil-Positionierung (Partial Movement)
@@ -250,6 +271,14 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: "0"
+  - id: down_button_pressed_at_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: down_setup_hold_consumed
+    type: bool
+    restore_value: no
+    initial_value: "false"
   - id: cover_partial_active          # true = eine Teil-Positionsfahrt ist aktiv
     type: bool
     restore_value: no
@@ -258,6 +287,67 @@ globals:
     type: int
     restore_value: no
     initial_value: "0"
+
+number:
+  - platform: template
+    id: setup_cover_travel_up_ms
+    name: "${device_name} travel_time_up_ms"
+    min_value: 1000
+    max_value: 180000
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: ${default_cover_travel_ms}
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            id(cover_contract_travel_up_ms) = (int)x;
+            id(cover_contract_calibrated) =
+              id(cover_contract_travel_up_ms) >= 1000 &&
+              id(cover_contract_travel_down_ms) >= 1000;
+  - platform: template
+    id: setup_cover_travel_down_ms
+    name: "${device_name} travel_time_down_ms"
+    min_value: 1000
+    max_value: 180000
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: ${default_cover_travel_ms}
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            id(cover_contract_travel_down_ms) = (int)x;
+            id(cover_contract_calibrated) =
+              id(cover_contract_travel_up_ms) >= 1000 &&
+              id(cover_contract_travel_down_ms) >= 1000;
+  - platform: template
+    id: setup_cover_default_travel_ms
+    name: "${device_name} default_estimated_travel_time_ms"
+    min_value: 1000
+    max_value: 180000
+    step: 1
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: ${default_cover_travel_ms}
+    internal: true
+
+select:
+  - platform: template
+    id: setup_relay_up_mapping
+    name: "${device_name} relay_up_mapping"
+    options:
+      - relay_a
+      - relay_b
+    optimistic: true
+    restore_value: true
+    initial_option: relay_a
+    internal: true
 
 # =============================================================================
 # COVER – Zeitbasierte Cover-Plattform
@@ -285,11 +375,25 @@ cover:
     name: "${device_name}"
     device_class: shutter
     open_action:
-      - switch.turn_off: cover_relay_down
-      - switch.turn_on: cover_relay_up
+      - if:
+          condition:
+            lambda: 'return id(setup_relay_up_mapping).state == "relay_b";'
+          then:
+            - switch.turn_off: cover_relay_up
+            - switch.turn_on: cover_relay_down
+          else:
+            - switch.turn_off: cover_relay_down
+            - switch.turn_on: cover_relay_up
     close_action:
-      - switch.turn_off: cover_relay_up
-      - switch.turn_on: cover_relay_down
+      - if:
+          condition:
+            lambda: 'return id(setup_relay_up_mapping).state == "relay_b";'
+          then:
+            - switch.turn_off: cover_relay_down
+            - switch.turn_on: cover_relay_up
+          else:
+            - switch.turn_off: cover_relay_up
+            - switch.turn_on: cover_relay_down
     stop_action:
       - switch.turn_off: cover_relay_up
       - switch.turn_off: cover_relay_down

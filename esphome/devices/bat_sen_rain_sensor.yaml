@@ -14,8 +14,18 @@ substitutions:
   reporting_mode: sleep_event
   sensor_mask: RXXXXXXXXX
   input_mask: XXXXX
+  setup_ap_password: bat-sen-setup
+  setup_status_field_name: wake_interval_s
+  setup_sensor_field_name: rx_window_ms
+  setup_status_default: "900"
+  setup_sensor_default: "5000"
+  setup_status_min: "30"
+  setup_status_max: "65535"
+  setup_sensor_min: "500"
+  setup_sensor_max: "60000"
   rain_pin: GPIO3
   battery_pin: GPIO4
+  setup_button_pin: GPIO2
   rain_wet_threshold_raw: "2200"
   rain_clear_threshold_raw: "2050"
   wake_interval_s: "900"
@@ -163,6 +173,37 @@ deep_sleep:
   id: deep_sleep_1
   run_duration: ${rx_window_ms}ms
   sleep_duration: ${wake_interval_s}s
+
+binary_sensor:
+  - platform: gpio
+    id: setup_button
+    name: "${device_name} Setup Button"
+    internal: true
+    pin:
+      number: ${setup_button_pin}
+      mode:
+        input: true
+        pullup: false
+        pulldown: false
+    filters:
+      - delayed_on: 35ms
+      - delayed_off: 35ms
+    on_press:
+      then:
+        - deep_sleep.prevent: deep_sleep_1
+        - delay: 5s
+        - if:
+            condition:
+              binary_sensor.is_on: setup_button
+            then:
+              - script.execute: enter_setup_portal
+    on_release:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(setup_portal_active);'
+            then:
+              - deep_sleep.allow: deep_sleep_1
 
 globals:
   - id: rain_detected_state
