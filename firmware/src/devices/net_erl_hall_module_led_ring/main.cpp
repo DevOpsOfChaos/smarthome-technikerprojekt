@@ -96,7 +96,7 @@ using SmartHome::absDiffU32;
 // =============================================================================
 
 Adafruit_BME680 bme680;
-Adafruit_VEML7700 veml = Adafruit_VEML7700();                          // Adafruit_VEML7700-Instanz (Kurzform "veml").
+Adafruit_VEML7700 veml = Adafruit_VEML7700();                          // Adafruit_VEML7700-Instanz (Kurzform "veml" wegen Lesbarkeit, entspricht "veml7700" in anderen Geraeten).
 ScioSense_ENS160 ens160Addr52(NET_ERL_ENS160_PRIMARY_ADDRESS);
 ScioSense_ENS160 ens160Addr53(NET_ERL_ENS160_FALLBACK_ADDRESS);
 ScioSense_ENS160* ens160 = nullptr;

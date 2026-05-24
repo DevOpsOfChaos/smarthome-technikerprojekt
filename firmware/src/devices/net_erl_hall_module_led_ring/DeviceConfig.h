@@ -78,7 +78,7 @@
 #define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 #define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL    // 30000 Millisekunden = 30 Sekunden.
 
-#define NET_ERL_I2C_CLOCK_HZ 5000UL
+#define NET_ERL_I2C_CLOCK_HZ 100000UL  // 100 kHz I2C-Standardtakt (BME680, ENS160, VEML7700).
 
 // BME680
 #define NET_ERL_BME680_PRIMARY_ADDRESS 0x76
@@ -93,4 +93,4 @@
 #define NET_ERL_ENS160_STALE_TIMEOUT_MS 120000UL   // 120000 Millisekunden = 2 Minuten.
 
 // Button
-#define BUTTON_DEBOUNCE_MS 40UL                    // 40 Millisekunden Entprellzeit.
+#define NET_ERL_BUTTON_DEBOUNCE_MS 40UL // 40 ms Entprellzeit (lokaler Taster).

@@ -164,7 +164,6 @@ struct NodeState {
     uint8_t naechste_seq;               // Naechste ESP-NOW-Sequenz
     char setup_ap_ssid[SETUP_AP_SSID_BUFFER_SIZE]; // Setup-AP-SSID
     SensorState sensor;                  // Aktuelle Sensorwerte
-    unsigned long sensorPollStartMs;  // Zeitstempel Sensor-Polling-Start (Timeout-Schutz)
 };
 
 // Globale Instanz des Geraetezustands
@@ -365,6 +364,8 @@ void wendeReportIntervalAn(uint32_t wertS) {
 // =============================================================================
 // PROVISIONING-HANDLER – NetSenProvisioningHandler (keine zusaetzlichen Felder)
 // =============================================================================
+// Minimal-Implementierung des ProvisioningHandler-Interface.
+// Alle Methoden erfuellen nur den Interface-Vertrag ohne zusaetzliche Logik.
 class NetSenProvisioningHandler final : public SmartHome::ShNodeProvisioning::DeviceProvisioningHandler {
   public:
     const char* pageTitle() const override { return "NET-SEN Provisioning"; }
@@ -658,12 +659,6 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
         return;
     }
 
-    // Prueft ob Master-MAC provisioniert wurde
-    if (!nodeStatus.master_mac_gueltig) {
-        logf("WARN", "HELLO_ACK ignoriert: keine provisionierte Master-Bindung");
-        return;
-    }
-
     // Prueft ob Sender der provisionierte Master ist
     if (!senderIstProvisionierterMaster(senderMac)) {
         logf("WARN", "HELLO_ACK ignoriert: Sender ist nicht der provisionierte Master");
@@ -836,7 +831,6 @@ void initialisiereSensorik() {
 //   neu initialisiert und ein Fault-Flag gesetzt.
 void pollSensorik() {
     const unsigned long startMs = millis();
-    nodeStatus.sensorPollStartMs = startMs;
 
     SensorState neuerState = nodeStatus.sensor;
     bool geaendert = netSenDeviceSensorPoll(

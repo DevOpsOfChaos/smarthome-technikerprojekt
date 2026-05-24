@@ -63,6 +63,7 @@ substitutions:
 esphome:
   includes:
     - ../packages/setup_portal.h
+    - ../packages/smarthome_command_dispatch.h
 
 web_server:
   port: 80
@@ -197,15 +198,8 @@ text:
     internal: true
     set_action:
       - lambda: |-
-          auto is_hex = [](char c) {
-            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
-          };
-          bool valid = x.empty() || x.length() == 17;
-          for (size_t i = 0; valid && i < x.length(); i++) {
-            if ((i + 1) % 3 == 0) valid = x[i] == ':';
-            else valid = is_hex(x[i]);
-          }
-          if (valid) {
+          // Nutzt smarthome::smarthome_validate_master_mac() aus smarthome_command_dispatch.h
+          if (x.empty() || smarthome::smarthome_validate_master_mac(x)) {
             id(stored_master_mac) = x;
           } else {
             auto call = id(setup_master_mac_text).make_call();

@@ -117,11 +117,6 @@
 #include "../../../lib/sh_protocol/src/Protocol.h"
 #include "NetErlProvisioning.h"
 
-using SmartHome::clampToU16;
-using SmartHome::clampHum01pct;
-using SmartHome::absDiffU16;
-using SmartHome::recoveryIsDue;
-using SmartHome::gasWarmupComplete;
 using SmartHome::intervalElapsed;
 
 // Forward-Deklaration – wird weiter unten als globale Variable definiert
@@ -194,8 +189,9 @@ struct NetErlRuntime {
     bool motion_aktiv;
     uint8_t pending_motion_event_state;
 
+// Nur von net_erl_hall_module genutzt (ISR-sicherer Kommando-Ringpuffer).
 #if NET_ERL_USE_ISR_CMD_QUEUE
-    // ISR-safe CMD/CFG-Pending-Queue (Hall-Stil)
+    // ISR-safe CMD/CFG-Pending-Queue
     portMUX_TYPE runtimeMux = portMUX_INITIALIZER_UNLOCKED;
     bool pendingCmdReady;
     SmartHome::CmdPayload pendingCmd;
@@ -234,19 +230,6 @@ NetErlRuntime runtime = {};
 // =============================================================================
 // HOOK-DEKLARATIONEN (müssen vom Device implementiert werden)
 // =============================================================================
-#ifndef NET_ERL_DEVICE_HAS_CUSTOM_HOOKS
-// No-Op-Defaults für Basistyp-Builds (ohne Device)
-inline void netErlDeviceInit() {}
-inline void netErlDeviceResetSensorDefaults() {}
-inline void netErlDevicePollSensors(unsigned long) {}
-inline void netErlDeviceSetRelayOutput(bool) {}
-inline bool netErlDeviceReadPresence() { return false; }
-inline void netErlDeviceFillStatePayload(void*, size_t*) {}
-inline uint8_t netErlDeviceBuildAutoFlags() { return 0; }
-inline bool netErlDeviceHasSensorFault() { return false; }
-inline void netErlDeviceLogSnapshot() {}
-inline bool netErlDeviceGetCachedLux(uint16_t*) { return false; }
-#else
 // Deklariert – Device-main.cpp liefert die Implementierung
 extern void netErlDeviceInit();
 extern void netErlDeviceResetSensorDefaults();
@@ -267,7 +250,6 @@ inline void netErlDeviceUpdateIndicators(bool) {}
 
 #ifdef NET_ERL_HAS_BUTTON
 extern bool netErlDeviceReadButton();
-#endif
 #endif
 
 // =============================================================================
@@ -1078,9 +1060,10 @@ bool handleCfg(const SmartHome::CfgPayload& payload) {
     }
 }
 
+// Nur von net_erl_hall_module genutzt (ISR-sicherer Kommando-Ringpuffer).
 #if NET_ERL_USE_ISR_CMD_QUEUE
 // =============================================================================
-// merkePendingCmd – CMD im ISR-safe Puffer speichern (Hall-Geraet).
+// merkePendingCmd – CMD im ISR-safe Puffer speichern.
 //
 // WARUM: ESP-NOW-Callback laeuft im Interrupt-Kontext. handleCmd() darf
 //        dort NICHT aufgerufen werden (nutzt Serial, NVS, delay).
@@ -1334,7 +1317,7 @@ void pollPresence(unsigned long nowMs) {
 // =============================================================================
 // processBtn – Taster entprellen und Short-Press/Long-Press unterscheiden.
 //
-// WAS: Liest den Taster, entprellt ihn (BUTTON_DEBOUNCE_MS), und unterscheidet:
+// WAS: Liest den Taster, entprellt ihn (NET_ERL_BUTTON_DEBOUNCE_MS), und unterscheidet:
 //      - Short-Press (< SETUP_BUTTON_HOLD_MS): Relais toggeln
 //      - Long-Press  (>= SETUP_BUTTON_HOLD_MS): Ignorieren (wird vom
 //        Provisioning-Controller fuer Setup-Mode verarbeitet)
@@ -1354,7 +1337,7 @@ void processBtn(unsigned long nowMs) {
 
     // Entprellung: Ignoriere Wechsel die kuerzer als DEBOUNCE_MS sind
     unsigned long timeSinceChange = nowMs - runtime.button_changed_at_ms;
-    if (timeSinceChange < BUTTON_DEBOUNCE_MS) {
+    if (timeSinceChange < NET_ERL_BUTTON_DEBOUNCE_MS) {
         return;
     }
 

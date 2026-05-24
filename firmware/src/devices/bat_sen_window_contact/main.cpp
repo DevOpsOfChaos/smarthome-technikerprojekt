@@ -53,7 +53,7 @@ bool event_pending = false;         // true = Statuswechsel nicht gemeldet
 bool kontakt_init_ok = false;       // true = GPIO-Init erfolgreich
 int last_raw_level = LOW;           // Letzter Rohwert (entprellt)
 int stable_level = LOW;             // Stabiler Pegel nach Entprellung
-unsigned long last_edge_ms = 0UL;   // Zeitstempel letzter Flankenwechsel
+unsigned long letzte_flanke_ms = 0UL;   // Zeitstempel letzter Flankenwechsel
 
 // Aufgabe: Prueft, ob ein gelesener GPIO-Pegel als "Fenster offen" gilt.
 // Eingabewert: level ist das Ergebnis von digitalRead(), also HIGH oder LOW.
@@ -85,7 +85,7 @@ void device_init_io() {
 
     stable_level = digitalRead(BAT_SEN_WINDOW_CONTACT_PIN);
     last_raw_level = stable_level;
-    last_edge_ms = millis();
+    letzte_flanke_ms = millis();
     kontakt_offen = levelIstOffen(stable_level);
     event_pending = false;
     kontakt_init_ok = true;
@@ -110,12 +110,12 @@ bool device_poll_inputs() {
     // Rohwert geaendert: Entprell-Timer neu starten.
     if (raw_level != last_raw_level) {
         last_raw_level = raw_level;
-        last_edge_ms = jetzt;
+        letzte_flanke_ms = jetzt;
         return false;
     }
 
     // Entprellzeit ist noch nicht abgelaufen; der Pegel ist noch nicht sicher.
-    if ((jetzt - last_edge_ms) < BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS) {
+    if ((jetzt - letzte_flanke_ms) < BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS) {
         return false;
     }
 

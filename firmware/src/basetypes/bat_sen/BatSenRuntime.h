@@ -905,8 +905,7 @@ bool darfInDeepSleep(unsigned long jetzt) {
     if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode || !nodeStatus.master_mac_gueltig) return false;
 
     // Nicht schlafen wenn Nachrichten gesendet werden muessen
-    if (nodeStatus.master_mac_gueltig &&
-        (nodeStatus.state_report_offen || nodeStatus.event_report_offen || nodeStatus.event.vorhanden)) {
+    if (nodeStatus.state_report_offen || nodeStatus.event_report_offen || nodeStatus.event.vorhanden) {
         return false;
     }
 
@@ -1069,8 +1068,9 @@ void setup() {
         return;
     }
 
+    // Batterie-Geraete verwenden die Config-Felder um: Status-Intervall = Wake-Intervall, Sensor-Intervall = RX-Fenster.
     nodeStatus.wake_interval_s = nodeProvisioning.sanitizeStatusSendInterval(nodeStatus.wake_interval_s);
-    nodeStatus.rx_window_ms = nodeProvisioning.sanitizeSensorSendInterval(nodeStatus.rx_window_ms);
+    nodeStatus.rx_window_ms     = nodeProvisioning.sanitizeSensorSendInterval(nodeStatus.rx_window_ms);
 
     logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
     logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);

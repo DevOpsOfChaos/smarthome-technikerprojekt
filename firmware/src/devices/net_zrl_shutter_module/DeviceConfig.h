@@ -31,10 +31,18 @@
 
 #pragma once
 
+#include "../../../lib/sh_protocol/src/DeviceTypes.h"
+
 // Geraete-Identifikation.
 #define NET_ZRL_DEVICE_ID           "NET-ZRL-002"
 #define NET_ZRL_DEVICE_NAME         "NET-ZRL Shutter"
 #define NET_ZRL_FW_VARIANT          "net_zrl_shutter_module"
+
+// Geraete-Faehigkeiten, Steuermodus, Profil und Meldeverhalten.
+#define NET_ZRL_DEVICE_CAPS             (SH_CAP_COVER)
+#define NET_ZRL_DEVICE_CONTROL_MODE     SH_CONTROL_MODE_COVER
+#define NET_ZRL_DEVICE_CONFIG_PROFILE   SH_PROFILE_COVER_BASIC
+#define NET_ZRL_DEVICE_REPORTING_MODE   SH_REPORTING_HYBRID
 
 // Debug-Ausgaben fuer Entwicklung und Inbetriebnahme.
 #define NET_ZRL_DEBUG_ENABLED       1
