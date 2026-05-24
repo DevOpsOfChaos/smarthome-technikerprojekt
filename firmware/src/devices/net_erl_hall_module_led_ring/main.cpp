@@ -96,7 +96,7 @@ using SmartHome::absDiffU32;
 // =============================================================================
 
 Adafruit_BME680 bme680;
-Adafruit_VEML7700 veml = Adafruit_VEML7700();
+Adafruit_VEML7700 veml = Adafruit_VEML7700();                          // Adafruit_VEML7700-Instanz (Kurzform "veml").
 ScioSense_ENS160 ens160Addr52(NET_ERL_ENS160_PRIMARY_ADDRESS);
 ScioSense_ENS160 ens160Addr53(NET_ERL_ENS160_FALLBACK_ADDRESS);
 ScioSense_ENS160* ens160 = nullptr;
@@ -117,16 +117,16 @@ namespace {
     unsigned long ring_lux_blocked_until_ms = 0, letzter_ring_frame_ms = 0;
 
     // Sensor-Messwerte
-    int16_t temp_01c = INT16_MIN;
-    uint16_t hum_01pct = 0xFFFFU, lux = 0xFFFFU;
-    uint32_t pressure_pa = 0xFFFFFFFFUL, gas_ohm = 0xFFFFFFFFUL;
-    uint16_t aqi = 0xFFFFU, tvoc_ppb = 0xFFFFU, eco2_ppm = 0xFFFFU;
+    int16_t temp_01c = INT16_MIN;                                       // INT16_MIN = Sentinel "kein gueltiger Messwert" (Temperatur).
+    uint16_t hum_01pct = 0xFFFFU, lux = 0xFFFFU;                       // 0xFFFF = Sentinel "kein gueltiger Wert" (Feuchte, Lux).
+    uint32_t pressure_pa = 0xFFFFFFFFUL, gas_ohm = 0xFFFFFFFFUL;       // 0xFFFFFFFF = Sentinel "kein gueltiger Wert" (Druck, Gas).
+    uint16_t aqi = 0xFFFFU, tvoc_ppb = 0xFFFFU, eco2_ppm = 0xFFFFU;   // 0xFFFF = Sentinel "kein gueltiger Wert" (AQI, TVOC, eCO2).
 
-    constexpr uint32_t PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
-    constexpr uint32_t GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
-    constexpr uint16_t AIR_METRIC_UNGUELTIG = 0xFFFFU;
-    constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;
-    constexpr uint16_t I2C_TIMEOUT_MS = 50U;     // 50 Millisekunden I2C-Timeout.
+    constexpr uint32_t PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;              // 0xFFFFFFFF = Sentinel "kein gueltiger Wert".
+    constexpr uint32_t GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;               // 0xFFFFFFFF = Sentinel "kein gueltiger Wert".
+    constexpr uint16_t AIR_METRIC_UNGUELTIG = 0xFFFFU;                 // 0xFFFF = Sentinel "kein gueltiger Wert".
+    constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;                       // ENS160 liefert AQI 1-5 als Rohwert.
+    constexpr uint16_t I2C_TIMEOUT_MS = 50U;     // 50 ms I2C-Timeout (verhindert Bus-Blockade).
 }
 
 // =============================================================================
@@ -330,7 +330,8 @@ namespace {
             if (!bme680.begin(a, &Wire)) continue;
             bme680.setTemperatureOversampling(BME680_OS_8X); bme680.setHumidityOversampling(BME680_OS_2X);
             bme680.setPressureOversampling(BME680_OS_4X); bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
-            bme680.setGasHeater(320U, 150U); return true;
+            bme680.setGasHeater(320U, 150U); // 320 °C Heiztemperatur, 150 ms Heizdauer (BME680-Gasprofil).
+            return true;
         }
         return false;
     }
@@ -384,6 +385,7 @@ namespace {
     // Aufgabe: Prueft, ob der BME680-Gassensor ausreichend warmgelaufen ist.
     // Eingabewert: j ist der aktuelle millis()-Zeitstempel in Millisekunden.
     // Ausgabewert: true bedeutet, Gaswerte duerfen als gueltig gemeldet werden.
+    // NET_ERL_BME680_GAS_WARMUP_MIN_READS = 5: erst nach 5 Messungen sind Gaswerte stabil.
     bool gasWarmupOk(unsigned long j) {
         return gasWarmupComplete(runtime.boot_ms, j, NET_ERL_BME680_GAS_WARMUP_MS, bme680_gueltige_messungen, NET_ERL_BME680_GAS_WARMUP_MIN_READS);
     }
@@ -517,7 +519,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
                 temp_01c = (int16_t)lroundf(t * 10.0f);
                 hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
                 pressure_pa = (uint32_t)lroundf(p);
-                if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++;
+                if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++; // Maximal 255 Zaehler (uint8_t).
                 gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
                 bme_read_valid = true;
             } else {

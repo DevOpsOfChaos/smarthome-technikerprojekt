@@ -7,7 +7,7 @@ substitutions:
   device_class: net_sen
   power_type: mains
   fw_version: "1"
-  caps: "33052"
+  caps: "33052" # Bitmaske: TEMP(2)|HUM(4)|PRESSURE(8)|GAS(16)|LUX(64)|RAIN(512)|AQI(16384)|BUTTON(32768)
   meta_schema_version: "1"
   control_mode: none
   config_profile: none
@@ -15,8 +15,9 @@ substitutions:
   sensor_mask: THPLRXXXXX
   input_mask: XXXXX
   setup_ap_password: net-sen-setup
+  # 10 s Report-Intervall
   setup_status_default: "10"
-  setup_sensor_default: "10"
+  setup_sensor_default: "10" # 10 s Sensor-Intervall
   setup_status_min: "5"
   setup_status_max: "600"
   setup_sensor_min: "5"
@@ -252,11 +253,11 @@ binary_sensor:
         input: true
         pullup: true
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit
+      - delayed_off: 35ms # 35 ms Entprellzeit
     on_press:
       then:
-        - delay: 5s
+        - delay: 5s # 5 s Haltezeit Setup-Portal
         - if:
             condition:
               binary_sensor.is_on: setup_button
@@ -272,8 +273,8 @@ binary_sensor:
         input: true
         pullup: true
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit
+      - delayed_off: 35ms # 35 ms Entprellzeit
     on_state:
       then:
         - lambda: 'id(rain_state) = x;'
@@ -288,11 +289,11 @@ binary_sensor:
 sensor:
   - platform: bme280_i2c
     address: ${bme280_address}
-    update_interval: 60s
+    update_interval: 60s # 60 s Sensor-Poll-Intervall (BME280, VEML7700)
     temperature:
       id: env_temperature_sensor
       name: "${device_name} Temperature"
-      oversampling: 16x
+      oversampling: 16x # 16x Oversampling (BME280 Temperatur)
       on_value:
         then:
           - lambda: |-
@@ -303,7 +304,7 @@ sensor:
     humidity:
       id: env_humidity_sensor
       name: "${device_name} Humidity"
-      oversampling: 16x
+      oversampling: 16x # 16x Oversampling (BME280 Humidity)
       on_value:
         then:
           - lambda: |-
@@ -314,7 +315,7 @@ sensor:
     pressure:
       id: env_pressure_sensor
       name: "${device_name} Pressure"
-      oversampling: 16x
+      oversampling: 16x # 16x Oversampling (BME280 Pressure)
       on_value:
         then:
           - lambda: |-
@@ -324,7 +325,7 @@ sensor:
           - script.execute: publish_net_sen_state
   - platform: veml7700
     address: ${veml7700_address}
-    update_interval: 60s
+    update_interval: 60s # 60 s Sensor-Poll-Intervall (BME280, VEML7700)
     id: env_veml7700_sensor
     ambient_light:
       name: "${device_name} Illuminance"
@@ -337,7 +338,7 @@ sensor:
           - script.execute: publish_net_sen_state
 
 interval:
-  - interval: 5min
+  - interval: 5min # 5 min = 300 s periodischer Refresh (Meta, Availability, State)
     then:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability

@@ -81,8 +81,8 @@ static_assert(NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN >= 0,
 // =============================================================================
 
 namespace {
-constexpr uint32_t I2C_CLOCK_HZ = 100000UL; // 100000 Hz = 100 kHz I2C-Standardmodus.
-constexpr unsigned long SENSOR_RECOVERY_RETRY_INTERVAL_MS = 30000UL; // 30000 ms = 30 Sekunden.
+constexpr uint32_t I2C_CLOCK_HZ = 100000UL; // 100 kHz I2C-Standardtakt.
+constexpr unsigned long SENSOR_RECOVERY_RETRY_INTERVAL_MS = 30000UL; // 30000 ms = 30 s Recovery-Retry-Abstand.
 
 struct ErweiterterState {
     uint32_t pressure_pa;

@@ -44,6 +44,7 @@
 #include <Wire.h>
 #include <Adafruit_BME280.h>
 #include <Adafruit_VEML7700.h>
+#include <math.h>
 
 #include "DeviceConfig.h"
 #include "PinConfig.h"
@@ -89,11 +90,15 @@ namespace {
     unsigned long veml7700_bereit_seit_ms = 0;
 
     // Sensor-Messwerte
-    int16_t temp_01c = INT16_MIN;
-    uint16_t hum_01pct = 0xFFFFU, lux = 0xFFFFU;
+    int16_t temp_01c = INT16_MIN;                                       // INT16_MIN = Sentinel "kein gueltiger Messwert" (Temperatur).
+    uint16_t hum_01pct = 0xFFFFU, lux = 0xFFFFU;                       // 0xFFFF = Sentinel "kein gueltiger Messwert" (Feuchte, Lux).
     bool pir_raw = false;
 
-    constexpr uint32_t SENSOR_POLL_INTERVAL_MS = 250UL; // 250 Millisekunden.
+    // EMA-Filter fuer Temperatur und Feuchte (daempft Sensorrauschen).
+    // alpha = 0.2 bedeutet: 20 % neuer Wert, 80 % alter Mittelwert.
+    // Je kleiner alpha, desto staerker die Glaettung.
+    constexpr float EMA_ALPHA = 0.2f;
+    float temp_ema = NAN, hum_ema = NAN;
 }
 
 // =============================================================================
@@ -168,6 +173,7 @@ void netErlDeviceInit() {
 // Ausgabewert: keiner; INT16_MIN und 0xFFFFU markieren ungueltige Messwerte.
 void netErlDeviceResetSensorDefaults() {
     temp_01c = INT16_MIN; hum_01pct = 0xFFFFU; lux = 0xFFFFU;
+    temp_ema = NAN; hum_ema = NAN;
 }
 
 // Aufgabe: Liest den PIR-Bewegungssensor und speichert den Rohstatus.
@@ -222,6 +228,16 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         if (!isnan(t) && !isnan(h) && h >= 0 && h <= 100) {
             temp_01c = (int16_t)lroundf(t * 10.0f);
             hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
+
+            // Exponentiell gleitender Mittelwert (EMA) zur Rauschunterdrueckung.
+            // Erste Messung initialisiert den Filter ohne Glaettung.
+            if (isnan(temp_ema)) { temp_ema = (float)temp_01c; hum_ema = (float)hum_01pct; }
+            else {
+                temp_ema = EMA_ALPHA * (float)temp_01c + (1.0f - EMA_ALPHA) * temp_ema;
+                hum_ema  = EMA_ALPHA * (float)hum_01pct + (1.0f - EMA_ALPHA) * hum_ema;
+            }
+            temp_01c = (int16_t)lroundf(temp_ema);
+            hum_01pct = clampHum01pct((long)lroundf(hum_ema));
         } else { bme280_ok = false; logMsg("WARN", "BME280 unplausibel"); }
     }
 

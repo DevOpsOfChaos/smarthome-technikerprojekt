@@ -46,7 +46,7 @@ substitutions:
   device_class: net_zrl
   power_type: mains
   fw_version: "1"
-  caps: "8195"
+  caps: "8195" # Bitmaske: RELAY(1)|RELAY2(2)|COVER(8192)
   meta_schema_version: "1"
   control_mode: cover
   config_profile: cover_basic
@@ -62,7 +62,7 @@ substitutions:
   setup_sensor_max: "65535"
   relay_up_pin: GPIO10               # bestehende Firmware: NET_ZRL_RELAY_UP_PIN
   relay_down_pin: GPIO5              # bestehende Firmware: NET_ZRL_RELAY_DOWN_PIN
-  default_cover_travel_ms: "100000"
+  default_cover_travel_ms: "100000" # 100000 ms = 100 s Standard-Fahrzeit
   button_up_pin: GPIO20
   button_down_pin: GPIO4
   button_stop_pin: GPIO3
@@ -198,8 +198,8 @@ binary_sensor:
         pulldown: true
         pullup: false
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit
+      - delayed_off: 35ms # 35 ms Entprellzeit
     on_press:
       then:
         - script.execute: cover_hw_open
@@ -222,14 +222,14 @@ binary_sensor:
         pulldown: true
         pullup: false
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit
+      - delayed_off: 35ms # 35 ms Entprellzeit
     on_press:
       then:
         - lambda: |-
             id(down_button_pressed_at_ms) = millis();
             id(down_setup_hold_consumed) = false;
-        - delay: 5s
+        - delay: 5s # 5 s Haltezeit Setup-Portal
         - if:
             condition:
               binary_sensor.is_on: cover_button_down
@@ -246,7 +246,7 @@ binary_sensor:
                 const bool setup_consumed = id(down_setup_hold_consumed);
                 id(down_button_pressed_at_ms) = 0;
                 id(down_setup_hold_consumed) = false;
-                return !setup_consumed && held_ms < 5000UL;
+                return !setup_consumed && held_ms < 5000UL; // 5000 ms = 5 s Setup-Hold-Schwelle
             then:
               - script.execute: cover_hw_close
               - lambda: 'id(cover_contract_state) = "closing";'
@@ -268,8 +268,8 @@ binary_sensor:
         pulldown: true
         pullup: false
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit
+      - delayed_off: 35ms # 35 ms Entprellzeit
     on_press:
       then:
         - lambda: 'id(stop_button_pressed_at_ms) = millis();'
@@ -312,8 +312,8 @@ number:
   - platform: template
     id: setup_cover_travel_up_ms
     name: "${device_name} travel_time_up_ms"
-    min_value: 1000
-    max_value: 180000
+    min_value: 1000 # 1000 ms = 1 s minimale Fahrzeit
+    max_value: 180000 # 180000 ms = 180 s = 3 min maximale Fahrzeit
     step: 1
     mode: box
     optimistic: true
@@ -330,8 +330,8 @@ number:
   - platform: template
     id: setup_cover_travel_down_ms
     name: "${device_name} travel_time_down_ms"
-    min_value: 1000
-    max_value: 180000
+    min_value: 1000 # 1000 ms = 1 s minimale Fahrzeit
+    max_value: 180000 # 180000 ms = 180 s = 3 min maximale Fahrzeit
     step: 1
     mode: box
     optimistic: true
@@ -348,8 +348,8 @@ number:
   - platform: template
     id: setup_cover_default_travel_ms
     name: "${device_name} default_estimated_travel_time_ms"
-    min_value: 1000
-    max_value: 180000
+    min_value: 1000 # 1000 ms = 1 s minimale Fahrzeit
+    max_value: 180000 # 180000 ms = 180 s = 3 min maximale Fahrzeit
     step: 1
     mode: box
     optimistic: true
@@ -517,7 +517,7 @@ script:
           int travel_ms = target > current ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
           int partial_ms = (travel_ms * delta_abs) / 100;
           // Prueft ob berechnete Zeit unter 500ms → Minimum setzen (Ruckler vermeiden)
-          if (partial_ms < 500) partial_ms = 500;
+          if (partial_ms < 500) partial_ms = 500; // 500 ms Minimum-Fahrzeit (Ruckler vermeiden)
 
           id(cover_partial_active) = true;
           id(cover_partial_duration_ms) = partial_ms;
@@ -549,7 +549,7 @@ script:
 # INTERVAL – Regelmaessiger Refresh aller Status-Topics (alle 5 Minuten)
 # =============================================================================
 interval:
-  - interval: 5min
+  - interval: 5min # 5 min periodischer Refresh
     then:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability

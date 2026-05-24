@@ -7,7 +7,7 @@ substitutions:
   device_class: net_erl
   power_type: mains
   fw_version: "1"
-  caps: "93"
+  caps: "93"  # Bitmaske: RELAY(1)|HUM(4)|PRESSURE(8)|GAS(16)|LUX(64)
   meta_schema_version: "1"
   control_mode: relay_light
   config_profile: hall_light
@@ -15,6 +15,7 @@ substitutions:
   sensor_mask: THLMXXXXXX
   input_mask: XXXXX
   setup_ap_password: net-erl-setup
+  # Report-Intervall in Sekunden: 10 s = alle 10 Sekunden Status senden
   setup_status_default: "10"
   setup_sensor_default: "10"
   setup_status_min: "5"
@@ -274,8 +275,9 @@ script:
             root["tvoc_ppb"] = nullptr;
             root["eco2_ppm"] = nullptr;
             root["motion"] = id(motion_state);
-            root["auto_flags"] = 0;
-            root["report_interval_s"] = atoi("${setup_status_default}");
+            root["auto_flags"] = 0; // Auto-Light-Flags: 0 = keine Automation (manuelles Relais)
+            root["report_interval_s"] = atoi("${setup_status_default}"); // Report-Intervall in Sekunden
+            // Lux-Schwelle nicht anwendbar (kein Auto-Light)
             root["auto_on_lux_threshold"] = nullptr;
             root["fault"] = id(contract_fault);
 
@@ -318,11 +320,11 @@ binary_sensor:
         input: true
         pullup: true
     filters:
-      - delayed_on: 35ms
+      - delayed_on: 35ms  # Entprellzeit 35 ms (Hardware-Prellen)
       - delayed_off: 35ms
     on_press:
       then:
-        - delay: 5s
+        - delay: 5s  # 5 s Haltezeit fuer Setup-Portal-Trigger
         - if:
             condition:
               binary_sensor.is_on: setup_button
@@ -351,11 +353,11 @@ binary_sensor:
 sensor:
   - platform: bme280_i2c
     address: ${bme280_address}
-    update_interval: 60s
+    update_interval: 60s  # Sensor alle 60 s pollen (BME280, VEML7700)
     temperature:
       id: env_temperature_sensor
       name: "${device_name} Temperature"
-      oversampling: 16x
+      oversampling: 16x  # 16-faches Oversampling fuer hohe Genauigkeit
       on_value:
         then:
           - lambda: |-
@@ -366,7 +368,7 @@ sensor:
     humidity:
       id: env_humidity_sensor
       name: "${device_name} Humidity"
-      oversampling: 16x
+      oversampling: 16x  # 16-faches Oversampling fuer hohe Genauigkeit
       on_value:
         then:
           - lambda: |-
@@ -376,7 +378,7 @@ sensor:
           - script.execute: publish_net_erl_state
   - platform: veml7700
     address: ${veml7700_address}
-    update_interval: 60s
+    update_interval: 60s  # Sensor alle 60 s pollen (BME280, VEML7700)
     id: env_veml7700_sensor
     ambient_light:
       name: "${device_name} Illuminance"
@@ -392,7 +394,7 @@ interval:
   - interval: ${setup_status_default}s
     then:
       - script.execute: publish_net_erl_state
-  - interval: 5min
+  - interval: 5min  # Periodischer Refresh alle 5 min (Meta, Availability, State)
     then:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability

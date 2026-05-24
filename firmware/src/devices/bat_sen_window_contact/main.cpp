@@ -13,7 +13,7 @@
  Statuswechsel als Fenster-Events. Der Basistyp uebernimmt ESP-NOW, MQTT-
  Weitergabe, Batteriespannung, Setup-Modus und Deep-Sleep. Das Geraet wacht
  bei GPIO-Aenderung und zusaetzlich per Timer auf; 15 Minuten bedeuten
- 900 Sekunden zwischen zwei regulaeren Kontrollzyklen.
+ 900 s = 15 min Wake-Intervall.
 
  Hardware:
  - ESP32-C3
@@ -100,9 +100,7 @@ void device_init_io() {
 // Ausgabewert: true bedeutet, der Fensterstatus hat sich geaendert und ein
 // STATE-Report ist sinnvoll. false bedeutet, es gibt nichts Neues.
 //
-// BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS ist eine Millisekunden-Zeit. Beispiel:
-// 50UL bedeutet 50 Millisekunden Wartezeit nach einer Flanke. Erst danach wird
-// ein Pegel als stabil gewertet. Das verhindert falsche Events durch Prellen.
+// BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS = 50 ms Entprellzeit (verhindert falsche Events durch Kontaktprellen).
 bool device_poll_inputs() {
     if (!kontakt_init_ok) return false;
 

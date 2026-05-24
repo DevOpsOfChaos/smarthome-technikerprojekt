@@ -17,8 +17,8 @@ substitutions:
   setup_ap_password: bat-sen-setup
   setup_status_field_name: wake_interval_s
   setup_sensor_field_name: rx_window_ms
-  setup_status_default: "900"
-  setup_sensor_default: "5000"
+  setup_status_default: "900" # 900 s = 15 min Wake-Intervall
+  setup_sensor_default: "5000" # 5000 ms = 5 s RX-Fenster nach Wake
   setup_status_min: "30"
   setup_status_max: "65535"
   setup_sensor_min: "500"
@@ -26,7 +26,7 @@ substitutions:
   contact_pin: GPIO3
   battery_pin: GPIO4
   setup_button_pin: GPIO2
-  rx_window_ms: "5000"
+  rx_window_ms: "5000" # 5000 ms = 5 s RX-Fenster nach Wake
 
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
@@ -184,7 +184,7 @@ mqtt:
 deep_sleep:
   id: deep_sleep_1
   run_duration: ${rx_window_ms}ms
-  sleep_duration: 900s
+  sleep_duration: 900s # 900 s = 15 min Deep-Sleep-Dauer
   wakeup_pin:
     number: ${contact_pin}
     allow_other_uses: true
@@ -235,12 +235,12 @@ binary_sensor:
         pullup: false
         pulldown: false
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit (Button + Reed-Kontakt)
+      - delayed_off: 35ms # 35 ms Entprellzeit (Button + Reed-Kontakt)
     on_press:
       then:
         - deep_sleep.prevent: deep_sleep_1
-        - delay: 5s
+        - delay: 5s # 5 s Haltezeit Setup
         - if:
             condition:
               binary_sensor.is_on: setup_button
@@ -264,8 +264,8 @@ binary_sensor:
         pulldown: false
         pullup: true
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit (Button + Reed-Kontakt)
+      - delayed_off: 35ms # 35 ms Entprellzeit (Button + Reed-Kontakt)
     on_state:
       then:
         - lambda: 'id(window_open_state) = x;'
@@ -281,13 +281,16 @@ sensor:
   - platform: adc
     id: battery_adc
     pin: ${battery_pin}
-    update_interval: 1s
-    attenuation: 12db
+    update_interval: 1s # 1 s ADC-Poll-Intervall (Batterie)
+    attenuation: 12db # 12 dB Daempfung (Messbereich 0-3,3 V)
     on_value:
       then:
         - lambda: |-
-            int mv = (int) lroundf(x * 1000.0f * 2.0f * 1.078f);
-            int pct = (mv - 2200) * 100 / (3000 - 2200);
+            int mv = (int) lroundf(x * 1000.0f  // V in mV umrechnen
+                                     * 2.0f    // Spannungsteiler 1:1 (Faktor 2)
+                                     * 1.078f); // Kalibrierfaktor (empirisch ermittelt)
+            int pct = (mv - 2200)      // 2200 mV = CR2032-Leerspannung
+                      * 100 / (3000 - 2200); // 3000 mV = CR2032-Vollspannung
             if (pct < 0) pct = 0;
             if (pct > 100) pct = 100;
             id(battery_mv_value) = mv;

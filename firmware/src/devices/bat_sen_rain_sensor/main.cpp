@@ -79,7 +79,7 @@ unsigned long letzte_probe_ms = 0UL; // Zeitstempel letzte ADC-Messung
 
 // Aufgabe: Liest den ADC-Rohwert vom Regensensor-Pin.
 // Eingabewerte: keine; der ADC-Pin kommt aus DeviceConfig.h.
-// Ausgabewert: Rohwert von 0 bis 4095. 4095 ist der Maximalwert bei 12 Bit.
+// Ausgabewert: ADC-Rohwert 0-4095 (12-Bit-Aufloesung).
 uint16_t leseRainRaw() {
     int raw = analogRead(BAT_SEN_RAIN_SIGNAL_PIN);
     if (raw < 0) raw = 0;
@@ -123,7 +123,7 @@ bool istRegenZustand(uint16_t raw, bool bisherRegen) {
 void device_init_io() {
     pinMode(BAT_SEN_RAIN_SIGNAL_PIN, INPUT);
     analogSetAttenuation(ADC_11db);
-    // ADC-Dämpfung explizit auf 11 dB gesetzt (Messbereich 0–3,3 V).
+    // 11 dB Daempfung = Messbereich 0–3,3 V (vollstaendiger ADC-Bereich).
 
     rain_raw = leseRainRaw();
     regen_erkannt = istRegenZustand(rain_raw, false);
@@ -142,8 +142,7 @@ void device_init_io() {
 // Eingabewerte: keine; der aktuelle Zeitpunkt kommt aus millis().
 // Ausgabewert: true bedeutet, ein neuer STATE-Report ist sinnvoll.
 //
-// BAT_SEN_RAIN_SAMPLE_INTERVAL_MS ist eine Millisekunden-Zeit. Beispiel:
-// 200UL bedeutet 200 Millisekunden zwischen zwei ADC-Proben. BAT_SEN_RAIN_STATE_DELTA_RAW
+// BAT_SEN_RAIN_SAMPLE_INTERVAL_MS: Poll-Intervall in ms. BAT_SEN_RAIN_STATE_DELTA_RAW
 // ist die minimale Rohwertdifferenz, ab der ein neuer STATE gesendet wird.
 bool device_poll_inputs() {
     if (!rain_init_ok) return false;

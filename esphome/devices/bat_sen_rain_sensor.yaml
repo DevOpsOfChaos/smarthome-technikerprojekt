@@ -7,7 +7,7 @@ substitutions:
   device_class: bat_sen
   power_type: battery
   fw_version: "1"
-  caps: "768"
+  caps: "768" # Bitmaske: 768 = 0x300 (RAIN=512 + WINDOW=256?)
   meta_schema_version: "1"
   control_mode: none
   config_profile: none
@@ -17,8 +17,8 @@ substitutions:
   setup_ap_password: bat-sen-setup
   setup_status_field_name: wake_interval_s
   setup_sensor_field_name: rx_window_ms
-  setup_status_default: "900"
-  setup_sensor_default: "5000"
+  setup_status_default: "900" # 900 s = 15 min Wake-Intervall
+  setup_sensor_default: "5000" # 5000 ms = 5 s RX-Fenster nach Wake
   setup_status_min: "30"
   setup_status_max: "65535"
   setup_sensor_min: "500"
@@ -26,10 +26,10 @@ substitutions:
   rain_pin: GPIO3
   battery_pin: GPIO4
   setup_button_pin: GPIO2
-  rain_wet_threshold_raw: "2200"
-  rain_clear_threshold_raw: "2050"
-  wake_interval_s: "900"
-  rx_window_ms: "5000"
+  rain_wet_threshold_raw: "2200" # 2200 ADC-Rohwert (0-4095): ab hier nass
+  rain_clear_threshold_raw: "2050" # 2050 ADC-Rohwert: ab hier trocken (Hysterese 150)
+  wake_interval_s: "900" # 900 s = 15 min Wake-Intervall
+  rx_window_ms: "5000" # 5000 ms = 5 s RX-Fenster nach Wake
 
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
@@ -200,12 +200,12 @@ binary_sensor:
         pullup: false
         pulldown: false
     filters:
-      - delayed_on: 35ms
-      - delayed_off: 35ms
+      - delayed_on: 35ms # 35 ms Entprellzeit (Button)
+      - delayed_off: 35ms # 35 ms Entprellzeit (Button)
     on_press:
       then:
         - deep_sleep.prevent: deep_sleep_1
-        - delay: 5s
+        - delay: 5s # 5 s Haltezeit Setup
         - if:
             condition:
               binary_sensor.is_on: setup_button
@@ -260,13 +260,13 @@ sensor:
   - platform: adc
     id: rain_adc
     pin: ${rain_pin}
-    update_interval: 1s
-    attenuation: 12db
+    update_interval: 1s # 1 s ADC-Poll-Intervall (Batterie/Regen)
+    attenuation: 12db # 12 dB Daempfung (Messbereich 0-3,3 V)
     on_value:
       then:
         - lambda: |-
             bool prev_rain = id(rain_detected_state);
-            id(rain_raw_value) = (int) lroundf(x * 4095.0f);
+            id(rain_raw_value) = (int) lroundf(x * 4095.0f); // ADC-Aufloesung 12 Bit = 0-4095
             if (id(rain_raw_value) >= atoi("${rain_wet_threshold_raw}")) {
               id(rain_detected_state) = true;
             } else if (id(rain_raw_value) <= atoi("${rain_clear_threshold_raw}")) {
@@ -283,13 +283,16 @@ sensor:
   - platform: adc
     id: battery_adc
     pin: ${battery_pin}
-    update_interval: 1s
-    attenuation: 12db
+    update_interval: 1s # 1 s ADC-Poll-Intervall (Batterie/Regen)
+    attenuation: 12db # 12 dB Daempfung (Messbereich 0-3,3 V)
     on_value:
       then:
         - lambda: |-
-            int mv = (int) lroundf(x * 1000.0f * 2.0f * 1.078f);
-            int pct = (mv - 2000) * 100 / (3200 - 2000);
+            int mv = (int) lroundf(x * 1000.0f  // V in mV umrechnen
+                                     * 2.0f    // Spannungsteiler 1:1 (Faktor 2)
+                                     * 1.078f); // Kalibrierfaktor (empirisch ermittelt)
+            int pct = (mv - 2000)      // 2000 mV = 2xAA-Leerspannung
+                      * 100 / (3200 - 2000); // 3200 mV = 2xAA-Vollspannung
             if (pct < 0) pct = 0;
             if (pct > 100) pct = 100;
             id(battery_mv_value) = mv;
