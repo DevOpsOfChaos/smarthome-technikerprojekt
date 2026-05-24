@@ -38,6 +38,8 @@ substitutions:
   bme680_address: "0x76"
   veml7700_address: "0x10"
   ens160_address: "0x52"
+  temp_offset_01c: "0"    # Temperatur-Offset in Zehntelgrad (negativ = nach unten korrigieren)
+  hum_offset_01pct: "0"   # Feuchte-Offset in Zehntelprozent
 
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
@@ -829,21 +831,21 @@ sensor:
     temperature:
       name: "${device_name} Temperature"
       internal: true
-      oversampling: 8x
+      oversampling: 8x # 8x Oversampling + IIR-Filter: interne Filterung ausreichend, kein zusaetzlicher EMA-Filter noetig.
       on_value:
         then:
           - lambda: |-
-              id(env_temp_01c) = (int) lroundf(x * 10.0f);
+              id(env_temp_01c) = (int) lroundf(x * 10.0f) + atoi("${temp_offset_01c}");
               id(env_has_temp) = true;
           - script.execute: publish_net_erl_led_state
     humidity:
       name: "${device_name} Humidity"
       internal: true
-      oversampling: 2x
+      oversampling: 2x # 2x Oversampling + IIR-Filter: interne Filterung ausreichend, kein zusaetzlicher EMA-Filter noetig.
       on_value:
         then:
           - lambda: |-
-              id(env_hum_01pct) = (int) lroundf(x * 10.0f);
+              id(env_hum_01pct) = (int) lroundf(x * 10.0f) + atoi("${hum_offset_01pct}");
               id(env_has_hum) = true;
           - script.execute: publish_net_erl_led_state
     pressure:

@@ -110,6 +110,9 @@ unsigned long letzterBmeRecoveryMs = 0UL;
 unsigned long letzterVemlRecoveryMs = 0UL;
 unsigned long veml7700BereitSeitMs = 0UL;
 
+constexpr float NET_SEN_EMA_ALPHA = 0.2f;
+float net_sen_temp_ema = NAN, net_sen_hum_ema = NAN;
+
 ErweiterterState erweiterterState = {
     NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_GAS_OHM_UNGUELTIG,
     NET_SEN_AIR_METRIC_UNGUELTIG, NET_SEN_AIR_METRIC_UNGUELTIG,
@@ -179,6 +182,7 @@ void versucheBmeRecovery(unsigned long jetzt) {
     if (bme280Bereit || !recoveryIsDue(letzterBmeRecoveryMs, jetzt, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) return;
     letzterBmeRecoveryMs = jetzt;
     bme280Bereit = initialisiereBme280();
+    if (bme280Bereit) { net_sen_temp_ema = NAN; net_sen_hum_ema = NAN; }
     logf(bme280Bereit ? "INFO" : "WARN",
          bme280Bereit ? "BME280 Recovery ok" : "BME280 Recovery fehlgeschlagen");
 }
@@ -234,7 +238,8 @@ void netSenDeviceSensorInit() {
     Wire.setClock(I2C_CLOCK_HZ);
 
     bme280Bereit = initialisiereBme280();
-    if (!bme280Bereit) logf("WARN", "BME280 nicht gefunden (0x%02X/0x%02X)",
+    if (bme280Bereit) { net_sen_temp_ema = NAN; net_sen_hum_ema = NAN; }
+    else logf("WARN", "BME280 nicht gefunden (0x%02X/0x%02X)",
          NET_SEN_ENV_BME280_PRIMARY_ADDRESS, NET_SEN_ENV_BME280_FALLBACK_ADDRESS);
 
     veml7700Bereit = initialisiereVeml7700(bootMs);
@@ -357,8 +362,15 @@ bool netSenDeviceSensorPoll(
         const bool gueltig = isfinite(t) && isfinite(h) && isfinite(p) &&
             h >= 0.0f && h <= 100.0f && p >= 30000.0f && p <= 110000.0f;
         if (gueltig) {
-            nT = (int16_t)lroundf(t * 10.0f);
-            nH = clampHum01pct((long)lroundf(h * 10.0f));
+            const float tempConv = lroundf(t * 10.0f) + NET_SEN_TEMP_OFFSET_01C;
+            const float humConv = lroundf(h * 10.0f) + NET_SEN_HUM_OFFSET_01PCT;
+            if (isnan(net_sen_temp_ema)) { net_sen_temp_ema = tempConv; net_sen_hum_ema = humConv; }
+            else {
+                net_sen_temp_ema = NET_SEN_EMA_ALPHA * tempConv + (1.0f - NET_SEN_EMA_ALPHA) * net_sen_temp_ema;
+                net_sen_hum_ema = NET_SEN_EMA_ALPHA * humConv + (1.0f - NET_SEN_EMA_ALPHA) * net_sen_hum_ema;
+            }
+            nT = (int16_t)lroundf(net_sen_temp_ema);
+            nH = clampHum01pct((long)lroundf(net_sen_hum_ema));
             nP = (uint32_t)lroundf(p);
             bmeOk = true;
         } else {

@@ -68,3 +68,9 @@
 #define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL    // 30000 Millisekunden = 30 Sekunden.
 
 #define NET_ERL_BME280_ADDRESS 0x76
+
+// Sensor-Offset-Kompensation (in Geraete-Nativeinheiten).
+// Positiver Offset = Korrektur nach oben, negativer = nach unten.
+// Beispiel: BME280 nahe Netzteil misst 30 °C bei 22 °C Raumtemperatur → Offset -80 (-8,0 °C in Zehntelgrad).
+#define NET_ERL_TEMP_OFFSET_01C      0    // Zehntelgrad (0 = kein Offset)
+#define NET_ERL_HUM_OFFSET_01PCT     0    // Zehntelprozent (0 = kein Offset)

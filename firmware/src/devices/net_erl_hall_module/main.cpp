@@ -236,8 +236,8 @@ void netErlDevicePollSensors(unsigned long nowMs) {
                 temp_ema = EMA_ALPHA * (float)temp_01c + (1.0f - EMA_ALPHA) * temp_ema;
                 hum_ema  = EMA_ALPHA * (float)hum_01pct + (1.0f - EMA_ALPHA) * hum_ema;
             }
-            temp_01c = (int16_t)lroundf(temp_ema);
-            hum_01pct = clampHum01pct((long)lroundf(hum_ema));
+            temp_01c = (int16_t)(lroundf(temp_ema) + NET_ERL_TEMP_OFFSET_01C);
+            hum_01pct = clampHum01pct((long)(lroundf(hum_ema) + NET_ERL_HUM_OFFSET_01PCT));
         } else { bme280_ok = false; logMsg("WARN", "BME280 unplausibel"); }
     }
 

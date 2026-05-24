@@ -516,8 +516,8 @@ void netErlDevicePollSensors(unsigned long nowMs) {
             float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
             uint32_t g = bme680.gas_resistance;
             if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
-                temp_01c = (int16_t)lroundf(t * 10.0f);
-                hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
+                temp_01c = (int16_t)(lroundf(t * 10.0f) + NET_ERL_TEMP_OFFSET_01C);
+                hum_01pct = clampHum01pct((long)(lroundf(h * 10.0f) + NET_ERL_HUM_OFFSET_01PCT));
                 pressure_pa = (uint32_t)lroundf(p);
                 if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++; // Maximal 255 Zaehler (uint8_t).
                 gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;

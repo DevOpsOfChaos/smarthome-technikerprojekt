@@ -40,8 +40,9 @@
 #define NET_SEN_DEVICE_CAPS (SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_PRESSURE | SH_CAP_RAIN)
 #define NET_SEN_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
 
-// Reiner Sensor-Node: Kein CONTROL_MODE (none) und kein CONFIG_PROFILE (none).
-// Diese Defines werden bewusst nicht gesetzt; die Runtime verwendet Default-Werte.
+// Reiner Sensor-Node: kein Steuermodus, kein Konfigurationsprofil.
+#define NET_SEN_DEVICE_CONTROL_MODE     SH_CONTROL_MODE_NONE
+#define NET_SEN_DEVICE_CONFIG_PROFILE   SH_PROFILE_NONE
 
 #define NET_SEN_ENABLE_I2C_BASE 1
 
@@ -71,3 +72,9 @@
 #define NET_SEN_ENV_BME280_PRIMARY_ADDRESS 0x76
 #define NET_SEN_ENV_BME280_FALLBACK_ADDRESS 0x77
 #define NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS 1050UL // 1050 Millisekunden = 1,05 Sekunden.
+
+// Sensor-Offset-Kompensation (in Geraete-Nativeinheiten).
+// Positiver Offset = Korrektur nach oben, negativer = nach unten.
+// Beispiel: BME280 nahe Netzteil misst 30 °C bei 22 °C Raumtemperatur → Offset -80 (-8,0 °C in Zehntelgrad).
+#define NET_SEN_TEMP_OFFSET_01C      0    // Zehntelgrad (0 = kein Offset)
+#define NET_SEN_HUM_OFFSET_01PCT     0    // Zehntelprozent (0 = kein Offset)

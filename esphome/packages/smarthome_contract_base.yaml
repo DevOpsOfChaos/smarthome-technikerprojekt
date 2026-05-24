@@ -145,6 +145,7 @@ script:
             root["device_name"] = "${device_name}";
             root["device_class"] = "${device_class}";
             root["power_type"] = "${power_type}";
+            // fw_version: als Integer wenn rein numerisch ("1"→1), sonst String ("1.0"→"1.0").
             const char *fw_version_text = "${fw_version}";
             bool fw_version_is_numeric = fw_version_text[0] != '\0';
             for (const char *p = fw_version_text; *p != '\0'; p++) {

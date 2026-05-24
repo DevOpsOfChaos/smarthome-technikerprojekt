@@ -28,6 +28,8 @@ substitutions:
   setup_button_pin: GPIO2
   bme280_address: "0x76"
   veml7700_address: "0x10"
+  temp_offset_01c: "0"    # Temperatur-Offset in Zehntelgrad (negativ = nach unten korrigieren)
+  hum_offset_01pct: "0"   # Feuchte-Offset in Zehntelprozent
 
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
@@ -282,29 +284,29 @@ sensor:
     temperature:
       id: env_temperature_sensor
       name: "${device_name} Temperature"
-      oversampling: 16x # 16x Oversampling (BME280 Temperatur)
+      oversampling: 16x # 16x Oversampling: interne Filterung ausreichend, kein zusaetzlicher EMA-Filter noetig.
       on_value:
         then:
           - lambda: |-
-              id(env_temp_01c) = (int) lroundf(x * 10.0f);
+              id(env_temp_01c) = (int) lroundf(x * 10.0f) + atoi("${temp_offset_01c}");
               id(env_has_temp) = true;
           - script.execute: clear_contract_fault
           - script.execute: publish_net_sen_state
     humidity:
       id: env_humidity_sensor
       name: "${device_name} Humidity"
-      oversampling: 16x # 16x Oversampling (BME280 Humidity)
+      oversampling: 16x # 16x Oversampling: interne Filterung ausreichend, kein zusaetzlicher EMA-Filter noetig.
       on_value:
         then:
           - lambda: |-
-              id(env_hum_01pct) = (int) lroundf(x * 10.0f);
+              id(env_hum_01pct) = (int) lroundf(x * 10.0f) + atoi("${hum_offset_01pct}");
               id(env_has_hum) = true;
           - script.execute: clear_contract_fault
           - script.execute: publish_net_sen_state
     pressure:
       id: env_pressure_sensor
       name: "${device_name} Pressure"
-      oversampling: 16x # 16x Oversampling (BME280 Pressure)
+      oversampling: 16x # 16x Oversampling: interne Filterung ausreichend, kein zusaetzlicher EMA-Filter noetig.
       on_value:
         then:
           - lambda: |-

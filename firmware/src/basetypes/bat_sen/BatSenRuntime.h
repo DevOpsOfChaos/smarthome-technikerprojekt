@@ -430,6 +430,12 @@ void aktualisiereSchlafFenster(unsigned long fensterMs) {
 // MASKEN & PEER – Sensor-/Input-Masken bauen, ESP-NOW-Peer registrieren
 // =============================================================================
 
+// buildSensorMask/buidInputMask – Erzeugen Sensormasken-Strings.
+// Wenn BAT_SEN_SENSOR_MASK / BAT_SEN_INPUT_MASK nicht per DeviceConfig.h
+// ueberschrieben werden, liefern diese Funktionen konstante Fallback-Strings.
+// Eine constexpr-Optimierung ist moeglich, aber die Laufzeit-Flexibilitaet
+// fuer Device-Hooks wird beibehalten.
+
 // buildSensorMask – Baut Sensor-Maske (BAT-SEN: keine festen Sensoren)
 void buildSensorMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
@@ -923,6 +929,26 @@ bool darfInDeepSleep(unsigned long jetzt) {
     return istZeitErreicht(jetzt, nodeStatus.schlaf_ab_ms);
 }
 
+// Plattform-Helfer fuer GPIO-Wake (vermeidet #if-Labyrinth in aktiviereWakeQuellen).
+static esp_err_t aktiviereGpioWakeHigh(uint64_t mask) {
+#if CONFIG_IDF_TARGET_ESP32C3
+    return (mask != 0ULL) ? esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_HIGH) : ESP_OK;
+#else
+    return (mask != 0ULL) ? esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_HIGH) : ESP_OK;
+#endif
+}
+
+static esp_err_t aktiviereGpioWakeLow(uint64_t mask) {
+#if CONFIG_IDF_TARGET_ESP32C3
+    return (mask != 0ULL) ? esp_deep_sleep_enable_gpio_wakeup(mask, ESP_GPIO_WAKEUP_GPIO_LOW) : ESP_OK;
+#else
+    if (mask != 0ULL) {
+        logf("WARN", "LOW-Level-GPIO-Wake ist fuer dieses Ziel nicht verdrahtet");
+    }
+    return ESP_OK;
+#endif
+}
+
 // aktiviereWakeQuellen – Konfiguriert Timer- und GPIO-Wake-Quellen
 void aktiviereWakeQuellen() {
     // Timer-Wake (periodisch)
@@ -958,27 +984,11 @@ void aktiviereWakeQuellen() {
         return;
     }
 
-    // GPIO-Wake aktivieren (plattformabhaengig)
-    // Plattformabhaengige GPIO-Wake-API:
-    // ESP32-C3: esp_deep_sleep_enable_gpio_wakeup() (IDF >=5)
-    // ESP32/S3: esp_sleep_enable_ext1_wakeup()      (IDF <5 oder Legacy)
-#if CONFIG_IDF_TARGET_ESP32C3
     esp_err_t wakeErr = ESP_OK;
-    if (wakeHighMask != 0ULL) {
-        wakeErr = esp_deep_sleep_enable_gpio_wakeup(wakeHighMask, ESP_GPIO_WAKEUP_GPIO_HIGH);
+    wakeErr = aktiviereGpioWakeHigh(wakeHighMask);
+    if (wakeErr == ESP_OK) {
+        wakeErr = aktiviereGpioWakeLow(wakeLowMask);
     }
-    if (wakeLowMask != 0ULL && wakeErr == ESP_OK) {
-        wakeErr = esp_deep_sleep_enable_gpio_wakeup(wakeLowMask, ESP_GPIO_WAKEUP_GPIO_LOW);
-    }
-#else
-    esp_err_t wakeErr = ESP_OK;
-    if (wakeHighMask != 0ULL) {
-        wakeErr = esp_sleep_enable_ext1_wakeup(wakeHighMask, ESP_EXT1_WAKEUP_ANY_HIGH);
-    }
-    if (wakeLowMask != 0ULL) {
-        logf("WARN", "LOW-Level-GPIO-Wake ist fuer dieses Ziel nicht verdrahtet");
-    }
-#endif
 
     if (wakeErr != ESP_OK) {
         logf("WARN", "GPIO-Wake konnte nicht aktiviert werden (err=%d)", (int)wakeErr);
