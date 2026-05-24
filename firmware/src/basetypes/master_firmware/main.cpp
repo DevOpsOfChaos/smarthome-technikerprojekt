@@ -180,6 +180,14 @@ constexpr int STATUS_CODE_NOT_CALIBRATED = -5;     // set_position ohne Kalibrie
 constexpr int STATUS_CODE_UNKNOWN_DEVICE = -6;      // device_id nicht in Registry
 constexpr int STATUS_CODE_REGISTRY_FULL  = -7;      // Registry voll (max. 16 Nodes)
 constexpr int STATUS_CODE_NO_ROUTE       = -8;      // MAC unbekannt, Retry nicht moeglich
+constexpr int STATUS_CODE_META_REQUIRED  = -9;      // HELLO-Meta fehlt fuer sichere Validierung
+
+// Registry-Persistenz im ESP32-NVS. Gespeichert werden nur stabile Meta-Daten
+// aus HELLO, niemals Laufzeitwerte wie online, Pending-CMDs oder Sensorzustaende.
+constexpr char REGISTRY_PREF_NAMESPACE[] = "master_reg";
+constexpr char REGISTRY_PREF_KEY[] = "nodes_v1";
+constexpr uint32_t REGISTRY_PERSIST_MAGIC = 0x53485231UL; // "SHR1"
+constexpr uint16_t REGISTRY_PERSIST_VERSION = 1U;
 
 // =============================================================================
 // STRUKTUREN - Pending-Nachrichten, Node-Registry, Master-Status
@@ -215,6 +223,7 @@ struct PendingConfigRequest {
 struct NodeRuntime {
     bool belegt;                         // Slot belegt (true = Node registriert)
     bool meta_bekannt;                   // HELLO wurde empfangen (Meta vorhanden)
+    bool meta_wiederhergestellt;         // Meta stammt aus NVS und wartet auf frisches HELLO
     bool provisorisch;                   // Slot wurde ohne HELLO aus STATE/HEARTBEAT angelegt
     bool online;                         // Node antwortet (Heartbeat/Kontakt in Timeout)
     bool state_bekannt;                  // Mindestens ein STATE empfangen
@@ -260,6 +269,37 @@ struct NodeRuntime {
     PendingConfigRequest pending_cfg;    // Ausstehendes CFG (falls aktiv)
 };
 
+// PersistedNodeSlot: Flash-Abbild der HELLO-Meta einer Node.
+// Dieses Format ist absichtlich klein und versioniert, damit ein Master-Neustart
+// die bekannten Capabilities wiederherstellen kann, ohne alte Runtime-Zustaende
+// faelschlich als aktuell zu behandeln.
+struct PersistedNodeSlot {
+    uint8_t belegt;                      // 1 = Slot enthaelt gespeicherte Node-Meta
+    uint8_t mac_bekannt;                 // 1 = MAC-Adresse wurde aus HELLO/Kontakt gespeichert
+    uint8_t device_class;                // Geraeteklasse aus HELLO
+    uint8_t power_type;                  // Versorgungstyp aus HELLO
+    uint16_t caps;                       // Capability-Bitmaske aus HELLO
+    uint16_t fw_version;                 // Firmware-Version aus HELLO
+    uint8_t meta_schema_version;         // Meta-Schema-Version aus HELLO
+    uint8_t control_mode;                // Steuerungsmodus aus HELLO
+    uint8_t config_profile;              // Konfigurationsprofil aus HELLO
+    uint8_t reporting_mode;              // Report-Modus aus HELLO
+    char device_id[SH_DEVICE_ID_LEN];    // Geraete-ID
+    char sensor_mask[SH_SENSOR_MASK_LEN];// Sensor-Maske
+    char input_mask[SH_INPUT_MASK_LEN];  // Input-Maske
+    char device_name[SH_DEVICE_NAME_LEN];// Anzeigename
+    uint8_t mac[6];                      // letzte bekannte MAC-Adresse
+};
+
+// PersistedRegistry: Gesamtes Flash-Abbild der dynamischen Registry.
+// magic/version schuetzen vor fremden oder alten Datenlayouts.
+struct PersistedRegistry {
+    uint32_t magic;                      // Kennung fuer gueltiges SmartHome-Registry-Blob
+    uint16_t version;                    // Layout-Version dieser Struktur
+    uint16_t slot_count;                 // Anzahl gespeicherter Slots
+    PersistedNodeSlot slots[MAX_DYNAMIC_NODES]; // Meta-Slots in fester Reihenfolge
+};
+
 // MasterState: Zentraler Master-Status fuer Verbindungen und Sequenznummern.
 struct MasterState {
     bool wlan_verbunden;                 // true = WLAN verbunden
@@ -274,6 +314,7 @@ WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 IPAddress mqttBrokerIp;
 bool mqttBrokerNutzeDirekteIp = false;
+Preferences registryPrefs;
 MasterState masterStatus = {};
 NodeRuntime nodeStates[MAX_DYNAMIC_NODES] = {};
 
@@ -536,6 +577,156 @@ void initialisiereNodeStates() {
     for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
         initialisiereNodeSlot(nodeStates[i]);
     }
+}
+
+// Vorwaertsdeklaration, weil die Persistenz beim Laden bereits State-Felder
+// anhand der gespeicherten Capabilities auf sichere Defaults begrenzt.
+void sanitisiereNodeStateNachCapabilities(size_t nodeIndex);
+
+// Aufgabe: Kopiert einen Runtime-Slot in das persistente Flash-Format.
+// Eingabewerte:
+// - node ist der aktuelle Runtime-Slot.
+// - slot ist der Zielslot fuer das NVS-Abbild.
+// Ausgabewert: keiner; nicht belegte oder unvollstaendige Nodes bleiben leer.
+void fuellePersistSlotAusNode(const NodeRuntime& node, PersistedNodeSlot& slot) {
+    slot = {};
+    if (!node.belegt || !node.meta_bekannt) return;
+
+    // Nur HELLO-Meta wird persistiert. Online, State, Pending und Sensorwerte
+    // bleiben fluechtig, weil sie nach einem Neustart nicht mehr wahr sein muessen.
+    slot.belegt = 1U;
+    slot.mac_bekannt = node.mac_bekannt ? 1U : 0U;
+    slot.device_class = node.device_class;
+    slot.power_type = node.power_type;
+    slot.caps = node.caps;
+    slot.fw_version = node.fw_version;
+    slot.meta_schema_version = node.meta_schema_version;
+    slot.control_mode = node.control_mode;
+    slot.config_profile = node.config_profile;
+    slot.reporting_mode = node.reporting_mode;
+    copyText(slot.device_id, sizeof(slot.device_id), node.device_id);
+    copyText(slot.sensor_mask, sizeof(slot.sensor_mask), node.sensor_mask);
+    copyText(slot.input_mask, sizeof(slot.input_mask), node.input_mask);
+    copyText(slot.device_name, sizeof(slot.device_name), node.device_name);
+    if (node.mac_bekannt) memcpy(slot.mac, node.mac, sizeof(slot.mac));
+}
+
+// Aufgabe: Schreibt die bekannte Node-Meta-Registry in den Flash.
+// Eingabewert: grund beschreibt den Ausloeser fuer Logmeldungen.
+// Ausgabewert: true bedeutet, das NVS-Blob wurde erfolgreich geschrieben.
+bool persistiereRegistrySnapshot(const char* grund) {
+    PersistedRegistry snapshot = {};
+    snapshot.magic = REGISTRY_PERSIST_MAGIC;
+    snapshot.version = REGISTRY_PERSIST_VERSION;
+    snapshot.slot_count = (uint16_t)MAX_DYNAMIC_NODES;
+
+    unsigned int gespeicherteSlots = 0U;
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        fuellePersistSlotAusNode(nodeStates[i], snapshot.slots[i]);
+        if (snapshot.slots[i].belegt != 0U) gespeicherteSlots++;
+    }
+
+    if (!registryPrefs.begin(REGISTRY_PREF_NAMESPACE, false)) {
+        logf("WARN", "Registry-Persistenz: NVS konnte nicht geoeffnet werden");
+        return false;
+    }
+    const size_t written = registryPrefs.putBytes(REGISTRY_PREF_KEY, &snapshot, sizeof(snapshot));
+    registryPrefs.end();
+
+    if (written != sizeof(snapshot)) {
+        logf("WARN", "Registry-Persistenz: Schreiben fehlgeschlagen (%u/%u Bytes)",
+             (unsigned)written,
+             (unsigned)sizeof(snapshot));
+        return false;
+    }
+    logf("INFO", "Registry-Persistenz: %u Node-Meta-Slots gespeichert (%s)",
+         gespeicherteSlots,
+         grund ? grund : "snapshot");
+    return true;
+}
+
+// Aufgabe: Prueft, ob ein gespeicherter Slot plausibel genug zum Wiederherstellen ist.
+// Eingabewert: slot ist der NVS-Slot.
+// Ausgabewert: true bedeutet, device_id, Klasse und Versorgungstyp sind gueltig.
+bool istPersistSlotGueltig(const PersistedNodeSlot& slot) {
+    if (slot.belegt == 0U) return false;
+    if (!SmartHome::isValidDeviceId(slot.device_id)) return false;
+    if (!istDeviceClassGueltig(slot.device_class)) return false;
+    if (!istPowerTypeGueltig(slot.power_type)) return false;
+    if (slot.mac_bekannt != 0U && !SmartHome::isValidMac(slot.mac)) return false;
+    return true;
+}
+
+// Aufgabe: Stellt einen Runtime-Slot aus gespeicherter HELLO-Meta wieder her.
+// Eingabewerte:
+// - slot ist der persistierte NVS-Slot.
+// - node ist der Zielslot in nodeStates[].
+// Ausgabewert: keiner; Runtime-Felder bleiben fuer "frisch gebootet" konservativ.
+void stelleNodeAusPersistSlotWiederHer(const PersistedNodeSlot& slot, NodeRuntime& node) {
+    initialisiereNodeSlot(node);
+    node.belegt = true;
+    node.meta_bekannt = true;
+    node.meta_wiederhergestellt = true;
+    node.provisorisch = false;
+    node.online = false;
+    node.state_bekannt = false;
+    node.mac_bekannt = slot.mac_bekannt != 0U;
+    node.device_class = slot.device_class;
+    node.power_type = slot.power_type;
+    node.caps = slot.caps;
+    node.fw_version = slot.fw_version;
+    node.meta_schema_version = slot.meta_schema_version;
+    node.control_mode = slot.control_mode;
+    node.config_profile = slot.config_profile;
+    node.reporting_mode = slot.reporting_mode;
+    copyText(node.device_id, sizeof(node.device_id), slot.device_id);
+    copyText(node.sensor_mask, sizeof(node.sensor_mask), slot.sensor_mask);
+    copyText(node.input_mask, sizeof(node.input_mask), slot.input_mask);
+    copyText(node.device_name, sizeof(node.device_name), slot.device_name);
+    if (node.mac_bekannt) {
+        memcpy(node.mac, slot.mac, sizeof(node.mac));
+        // Der ESP-NOW-Peer wird erst beim tatsaechlichen Senden angelegt, weil
+        // die Registry vor der ESP-NOW-Initialisierung aus dem Flash geladen wird.
+    }
+}
+
+// Aufgabe: Laedt gespeicherte Node-Meta aus dem Flash in die Runtime-Registry.
+// Eingabewerte: keine.
+// Ausgabewert: true bedeutet, ein gueltiges Registry-Blob wurde gelesen.
+bool ladeRegistrySnapshot() {
+    if (!registryPrefs.begin(REGISTRY_PREF_NAMESPACE, true)) {
+        logf("WARN", "Registry-Persistenz: NVS konnte nicht gelesen werden");
+        return false;
+    }
+    const size_t blobLen = registryPrefs.getBytesLength(REGISTRY_PREF_KEY);
+    if (blobLen != sizeof(PersistedRegistry)) {
+        registryPrefs.end();
+        if (blobLen != 0U) {
+            logf("WARN", "Registry-Persistenz: unerwartete Blob-Laenge %u", (unsigned)blobLen);
+        }
+        return false;
+    }
+
+    PersistedRegistry snapshot = {};
+    const size_t read = registryPrefs.getBytes(REGISTRY_PREF_KEY, &snapshot, sizeof(snapshot));
+    registryPrefs.end();
+    if (read != sizeof(snapshot) ||
+        snapshot.magic != REGISTRY_PERSIST_MAGIC ||
+        snapshot.version != REGISTRY_PERSIST_VERSION ||
+        snapshot.slot_count != (uint16_t)MAX_DYNAMIC_NODES) {
+        logf("WARN", "Registry-Persistenz: Blob ungueltig oder falsche Version");
+        return false;
+    }
+
+    unsigned int geladeneSlots = 0U;
+    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
+        if (!istPersistSlotGueltig(snapshot.slots[i])) continue;
+        stelleNodeAusPersistSlotWiederHer(snapshot.slots[i], nodeStates[i]);
+        sanitisiereNodeStateNachCapabilities(i);
+        geladeneSlots++;
+    }
+    logf("INFO", "Registry-Persistenz: %u Node-Meta-Slots geladen", geladeneSlots);
+    return geladeneSlots > 0U;
 }
 
 // Aufgabe: Prueft, ob eine Node eine bestimmte Capability meldet.
@@ -1282,6 +1473,10 @@ void publishBekannteNodesNachReconnect() {
     }
 }
 
+// Vorwaertsdeklaration, damit Kontakt-Updates nach einem NVS-Restore aktiv ein
+// frisches HELLO anfordern koennen.
+bool sendeHelloRequestAnMac(const uint8_t* mac);
+
 // Aufgabe: Aktualisiert Kontaktzeit, MAC-Adresse, Peer und Online-Status einer Node.
 // Eingabewerte:
 // - nodeIndex ist der Index in nodeStates[].
@@ -1303,6 +1498,21 @@ void aktualisiereNodeKontakt(size_t nodeIndex, const uint8_t* mac) {
             char text[18] = {0};
             macText(mac, text, sizeof(text));
             logf("INFO", "%s MAC aktualisiert: %s", nodeStates[nodeIndex].device_id, text);
+        }
+    }
+
+    if (nodeStates[nodeIndex].meta_wiederhergestellt && nodeStates[nodeIndex].mac_bekannt) {
+        // Persistierte Meta macht den Master sofort handlungsfaehig, bleibt aber
+        // ein Cache. Beim naechsten Kontakt wird deshalb ein echtes HELLO
+        // nachgezogen, damit geaenderte Capabilities/Profile wieder zur Quelle
+        // der Wahrheit werden.
+        const unsigned long now = millis();
+        if (nodeStates[nodeIndex].letzter_hello_request_ms == 0UL ||
+            (now - nodeStates[nodeIndex].letzter_hello_request_ms) >= HELLO_REQUEST_RETRY_INTERVAL_MS) {
+            if (sendeHelloRequestAnMac(nodeStates[nodeIndex].mac)) {
+                nodeStates[nodeIndex].letzter_hello_request_ms = now;
+                logf("INFO", "%s: HELLO_REFRESH nach Registry-Restore angefordert", nodeStates[nodeIndex].device_id);
+            }
         }
     }
 
@@ -1484,6 +1694,7 @@ void verarbeiteHello(const uint8_t* senderMac, const SmartHome::HelloPayload& pa
     }
 
     nodeStates[nodeIndex].meta_bekannt = true;
+    nodeStates[nodeIndex].meta_wiederhergestellt = false;
     nodeStates[nodeIndex].provisorisch = false;
     nodeStates[nodeIndex].caps = holeHelloCaps(payload);
     nodeStates[nodeIndex].fw_version = payload.fw_version;
@@ -1497,6 +1708,7 @@ void verarbeiteHello(const uint8_t* senderMac, const SmartHome::HelloPayload& pa
     copyText(nodeStates[nodeIndex].input_mask, sizeof(nodeStates[nodeIndex].input_mask), payload.input_mask);
     sanitisiereNodeStateNachCapabilities((size_t)nodeIndex);
     aktualisiereNodeKontakt((size_t)nodeIndex, senderMac);
+    persistiereRegistrySnapshot("HELLO");
 
     publishNodeMeta((size_t)nodeIndex);
     publishNodeAvailability((size_t)nodeIndex);
@@ -2518,6 +2730,22 @@ uint8_t ackMsgTypeFuerCommand(const char* cmd) {
     return (cmd != nullptr && strcmp(cmd, "set_config") == 0) ? SH_MSG_CFG : SH_MSG_CMD;
 }
 
+// Aufgabe: Stellt sicher, dass eine Node fuer sicherheitsrelevante Kommandos
+// echte oder wiederhergestellte HELLO-Meta besitzt.
+// Eingabewerte: nodeIndex, requestId, commandChannel, ackMsgType und Grundtext.
+// Ausgabewert: true bedeutet, die Validierung darf mit Caps/Profile fortfahren.
+bool stelleMetaFuerCommandSicher(size_t nodeIndex, const char* requestId, const char* commandChannel, uint8_t ackMsgType, const char* grund) {
+    if (nodeStates[nodeIndex].meta_bekannt) return true;
+
+    // Ohne HELLO-Meta kennt der Master keine Capabilities. Dann waere ein
+    // "unsupported" fachlich falsch: Das Geraet ist nicht als ungeeignet
+    // bewiesen, der Master ist nur noch nicht synchronisiert.
+    const uint8_t* mac = nodeStates[nodeIndex].mac_bekannt ? nodeStates[nodeIndex].mac : nullptr;
+    fordereHelloBeiBedarf(nodeIndex, mac, grund ? grund : "MQTT_COMMAND");
+    publishNodeAck(nodeIndex, requestId, commandChannel, "meta_required", STATUS_CODE_META_REQUIRED, ackMsgType, 0U, "master_registry");
+    return false;
+}
+
 // =============================================================================
 // MQTT-COMMAND-HANDLER - 4 Kommandos: get_state, set_relay, Cover, set_config
 // =============================================================================
@@ -2612,6 +2840,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
 
     if (strcmp(cmd, "set_relay") == 0) {
+        if (!stelleMetaFuerCommandSicher((size_t)nodeIndex, requestId, commandChannel, SH_MSG_CMD, "MQTT_SET_RELAY")) {
+            return;
+        }
         // Pro Node ist nur ein offenes CMD erlaubt. Sonst koennten ACKs mit
         // gleicher Kanalrichtung nicht eindeutig der request_id zugeordnet werden.
         if (nodeStates[nodeIndex].pending_cmd.aktiv) {
@@ -2648,6 +2879,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
 
     if (strcmp(cmd, "open") == 0 || strcmp(cmd, "close") == 0 || strcmp(cmd, "stop") == 0 || strcmp(cmd, "set_position") == 0) {
+        if (!stelleMetaFuerCommandSicher((size_t)nodeIndex, requestId, commandChannel, SH_MSG_CMD, "MQTT_COVER")) {
+            return;
+        }
         // Cover-Kommandos werden nur fuer Nodes zugelassen, die per Control-Mode
         // oder Capability wirklich als Cover erkannt wurden.
         if (!istCoverGeraet((size_t)nodeIndex)) {
@@ -2696,6 +2930,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
 
     if (strcmp(cmd, "set_config") == 0) {
+        if (!stelleMetaFuerCommandSicher((size_t)nodeIndex, requestId, commandChannel, SH_MSG_CFG, "MQTT_SET_CONFIG")) {
+            return;
+        }
         // CFG hat eine eigene Pending-Spur, damit Konfigurations-ACKs nicht mit
         // normalen CMD-ACKs kollidieren.
         if (nodeStates[nodeIndex].pending_cfg.aktiv) {
@@ -3074,10 +3311,11 @@ void setup() {
         delay(150);
     }
 
-    // Runtime-Zustand wird bewusst nicht aus NVS geladen. Die Node-Registry ist
-    // dynamisch und wird durch HELLO/STATE/HEARTBEAT wieder aufgebaut.
+    // Runtime-Zustand bleibt fluechtig, aber stabile HELLO-Meta wird aus NVS
+    // geladen. Dadurch kennt der Master nach Neustart wieder Klassen und Caps.
     masterStatus = {};
     initialisiereNodeStates();
+    ladeRegistrySnapshot();
     gibStartmeldungAus();
     initialisiereHardware();
     initialisiereWlan();
