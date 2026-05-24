@@ -7,12 +7,12 @@ substitutions:
   device_class: bat_sen
   power_type: battery
   fw_version: "1"
-  caps: "768" # Bitmaske: 768 = 0x300 (RAIN=512 + WINDOW=256?)
+  caps: "1536" # Bitmaske: BATTERY(1024) | RAIN(512)
   meta_schema_version: "1"
   control_mode: none
   config_profile: none
   reporting_mode: sleep_event
-  sensor_mask: RXXXXXXXXX
+  sensor_mask: RXXXXXXXXX # Rain an Position 0, Rest unbelegt (Batterie-Sensor)
   input_mask: XXXXX
   setup_ap_password: bat-sen-setup
   setup_status_field_name: wake_interval_s

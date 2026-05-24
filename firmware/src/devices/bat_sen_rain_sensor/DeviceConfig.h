@@ -37,6 +37,8 @@
 #define BAT_SEN_FW_VARIANT "bat_sen_rain_sensor"
 #define BAT_SEN_DEVICE_CAPS (SH_CAP_BATTERY | SH_CAP_RAIN)
 
+// BAT_SEN-Devices verwenden BAT_SEN_*-Praefix ohne _DEVICE_-Infix
+// (anders als NET_ERL_DEVICE_* und NET_SEN_DEVICE_*).
 #define BAT_SEN_REPORTING_MODE SH_REPORTING_SLEEP_EVENT
 
 // Batterie: 2x AA (2000mV leer, 3200mV voll)

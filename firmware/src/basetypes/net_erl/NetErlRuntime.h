@@ -662,17 +662,15 @@ bool sendPacketWithRetry(
     const char* label
 ) {
     // Sequenz-Nummer vorbereiten:
-    // sendPacketOpt() inkrementiert naechste_seq NACH dem Lesen.
-    // Wir dekrementieren VORHER, sodass das gesendete Paket die
-    // erwartete Sequenz hat. Bei 0 → 255 (uint8_t Wrap).
-    constexpr uint8_t UINT8_MAX_VAL = 255;
-    if (runtime.naechste_seq == 0) {
-        runtime.naechste_seq = UINT8_MAX_VAL;
-    } else {
-        runtime.naechste_seq--;
-    }
+    // Sequenznummer sichern, damit Wiederholungen dieselbe Seq verwenden.
+    // sendPacket() inkrementiert runtime.naechste_seq intern;
+    // bei Misserfolg wird der gesicherte Wert wiederhergestellt.
+    const uint8_t savedSeq = runtime.naechste_seq;
 
     for (int attempt = 0; attempt <= NET_ERL_ESPNOW_RETRY_COUNT; attempt++) {
+        if (attempt > 0) {
+            runtime.naechste_seq = savedSeq;  // Gleiche Seq fuer Retry.
+        }
         if (sendPacket(targetMac, msgType, payload, payloadLen, label)) {
             return true;  // Erfolgreich gesendet
         }

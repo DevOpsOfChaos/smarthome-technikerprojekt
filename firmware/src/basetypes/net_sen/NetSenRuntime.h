@@ -577,17 +577,25 @@ bool sendeHeartbeat() {
 //   Standard:    SensorConfigStateReportPayload (temp, hum, lux, motion, fault)
 //   Extended:    ExtendedSensorGasConfigStateReportPayload (+pressure, gas, aqi, tvoc, eco2)
 //   Auswahl:    automatisch via netSenVerwendetErweitertenState()
+//   Deduplizierung: Lambda fillCommonSensorFields befuellt die ersten 4 Felder
+//     (node_id, temp_01c, hum_01pct, lux), die in beiden Structs identische Offsets haben.
+//     motion/fault/report_interval_s liegen in den Structs an unterschiedlichen Offsets
+//     und muessen pro Zweig gesetzt werden.
 bool sendeState() {
     if (!nodeStatus.master_bekannt || !nodeStatus.master_mac_gueltig) return false;
 
     const uint16_t reportIntervalS = (uint16_t)(nodeStatus.state_interval_ms / 1000UL);
-    // Prueft ob erweiterter State noetig ist (Druck- oder AQI-Sensor vorhanden)
-    if (netSenVerwendetErweitertenState()) {
-        SmartHome::ExtendedSensorGasConfigStateReportPayload payload = {};
+
+    auto fillCommonSensorFields = [this](auto& payload) {
         copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
         payload.temp_01c = nodeStatus.sensor.temp_01c;
         payload.hum_01pct = nodeStatus.sensor.hum_01pct;
         payload.lux = nodeStatus.sensor.lux;
+    };
+
+    if (netSenVerwendetErweitertenState()) {
+        SmartHome::ExtendedSensorGasConfigStateReportPayload payload = {};
+        fillCommonSensorFields(payload);
         payload.pressure_pa = nodeStatus.sensor.pressure_pa;
         payload.gas_ohm = nodeStatus.sensor.gas_ohm;
         payload.aqi = nodeStatus.sensor.aqi;
@@ -602,10 +610,7 @@ bool sendeState() {
         }
     } else {
         SmartHome::SensorConfigStateReportPayload payload = {};
-        copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
-        payload.temp_01c = nodeStatus.sensor.temp_01c;
-        payload.hum_01pct = nodeStatus.sensor.hum_01pct;
-        payload.lux = nodeStatus.sensor.lux;
+        fillCommonSensorFields(payload);
         payload.motion = nodeStatus.sensor.motion;
         payload.fault = nodeStatus.sensor.fault ? 1U : 0U;
         payload.report_interval_s = reportIntervalS;

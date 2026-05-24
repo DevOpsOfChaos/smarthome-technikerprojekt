@@ -233,12 +233,13 @@ void copyText(char* target, size_t targetSize, const char* source) {
 
 // deltaU16 – Absolute Differenz zwischen zwei uint16-Werten
 uint16_t deltaU16(uint16_t a, uint16_t b) {
-    return (a >= b) ? (uint16_t)(a - b) : (uint16_t)(b - a);
+    return (a >= b) ? (a - b) : (b - a);
 }
 
 // deltaU8 – Absolute Differenz zwischen zwei uint8-Werten
 uint8_t deltaU8(uint8_t a, uint8_t b) {
-    return (a >= b) ? (uint8_t)(a - b) : (uint8_t)(b - a);
+    // Cast nur fuer uint8_t noetig (Integer-Promotion)
+    return (uint8_t)((a >= b) ? (a - b) : (b - a));
 }
 
 // istBroadcastMac – Prueft ob MAC die Broadcast-Adresse ist
@@ -504,11 +505,15 @@ bool sendePaket(
 #endif
 
 bool sendePaketMitRetry(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
-    // Decrement sequence number so first attempt uses the correct next seq
-    if (nodeStatus.naechste_seq == 0) nodeStatus.naechste_seq = 255;
-    else nodeStatus.naechste_seq--;
+    // Sequenznummer sichern, damit Wiederholungen dieselbe Seq verwenden.
+    // sendePaket() inkrementiert nodeStatus.naechste_seq intern;
+    // bei Misserfolg wird der gesicherte Wert wiederhergestellt.
+    const uint8_t savedSeq = nodeStatus.naechste_seq;
 
     for (int attempt = 0; attempt <= NODE_ESPNOW_RETRY_COUNT; attempt++) {
+        if (attempt > 0) {
+            nodeStatus.naechste_seq = savedSeq;  // Gleiche Seq fuer Retry.
+        }
         if (sendePaket(zielMac, msgType, payload, payloadLen, label)) return true;
         if (attempt < NODE_ESPNOW_RETRY_COUNT) {
             logf("WARN", "%s Retry %d/%d", label, attempt + 1, NODE_ESPNOW_RETRY_COUNT);
@@ -954,6 +959,9 @@ void aktiviereWakeQuellen() {
     }
 
     // GPIO-Wake aktivieren (plattformabhaengig)
+    // Plattformabhaengige GPIO-Wake-API:
+    // ESP32-C3: esp_deep_sleep_enable_gpio_wakeup() (IDF >=5)
+    // ESP32/S3: esp_sleep_enable_ext1_wakeup()      (IDF <5 oder Legacy)
 #if CONFIG_IDF_TARGET_ESP32C3
     esp_err_t wakeErr = ESP_OK;
     if (wakeHighMask != 0ULL) {
@@ -991,6 +999,99 @@ void starteDeepSleep() {
 }
 
 // =============================================================================
+// Hilfsfunktionen fuer setup() – vermeiden Monolith-Funktion.
+// =============================================================================
+
+// Aufgabe: Initialisiert Boot-Counter, Wake-Reason und Grundzustand.
+static void setupBootUndStatus(NodeState& ns) {
+    ns.boot_ms = millis();
+    ns.letztes_hello_ms = ns.boot_ms - HELLO_RETRY_INTERVAL_MS;
+    ns.wake_interval_s = DEFAULT_WAKE_INTERVAL_S;
+    ns.rx_window_ms = DEFAULT_RX_WINDOW_MS;
+    ns.state_report_offen = true;
+    ns.event_report_offen = false;
+    ns.battery_fault = true;
+    ns.wake_reason = wakeReasonCode();
+
+    RTC_BOOT_COUNTER += 1U;
+    ns.boot_counter = RTC_BOOT_COUNTER;
+}
+
+// Aufgabe: Initialisiert den Watchdog-Timer.
+static void setupWatchdog() {
+    esp_task_wdt_deinit();
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = (uint32_t)BAT_SEN_WDT_TIMEOUT_S * 1000UL,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+        .trigger_panic = true
+    };
+    esp_task_wdt_init(&wdt_config);
+    esp_task_wdt_add(NULL);
+}
+
+// Aufgabe: Konfiguriert und startet die Node-Provisioning-Schicht.
+// Rueckgabe: true wenn Provisioning erfolgreich initialisiert wurde.
+static bool setupProvisioning(
+    NodeState& ns,
+    BatSenProvisioningHandler& handler,
+    void (*logCb)(const char*, const char*))
+{
+    SmartHome::ShNodeProvisioning::NodeProvisioningConfig cfg =
+        SmartHome::BatSenProvisioning::makeConfig(
+            DEVICE_ID,
+            DEFAULT_WAKE_INTERVAL_S,
+            DEFAULT_RX_WINDOW_MS,
+            MIN_WAKE_INTERVAL_S,
+            MAX_WAKE_INTERVAL_S,
+            MIN_RX_WINDOW_MS,
+            MAX_RX_WINDOW_MS);
+    cfg.setupButtonPin = SETUP_BUTTON_PIN;
+    cfg.setupButtonActiveLow = SETUP_BUTTON_ACTIVE_LOW != 0;
+    cfg.setupButtonHoldMs = SETUP_BUTTON_HOLD_MS;
+    cfg.setupIndicatorLedPin = SETUP_INDICATOR_LED_PIN;
+    cfg.setupIndicatorLedActiveHigh = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0;
+    cfg.setupIndicatorBlinkMs = SETUP_INDICATOR_BLINK_MS;
+
+    ns.provisioning_bereit = nodeProvisioning.begin(
+        cfg,
+        &ns.master_mac_gueltig,
+        ns.master_mac,
+        &ns.wake_interval_s,
+        &ns.rx_window_ms,
+        &ns.setup_mode,
+        &ns.setup_ap_aktiv,
+        &ns.restart_pending,
+        &ns.restart_requested_at_ms,
+        ns.setup_ap_ssid,
+        sizeof(ns.setup_ap_ssid),
+        &handler,
+        logCb);
+
+    if (!ns.provisioning_bereit) {
+        logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
+        return false;
+    }
+
+    // Batterie-Geraete: Config-Felder umgenutzt (Status-Intervall = Wake, Sensor-Intervall = RX).
+    ns.wake_interval_s = nodeProvisioning.sanitizeStatusSendInterval(ns.wake_interval_s);
+    ns.rx_window_ms     = nodeProvisioning.sanitizeSensorSendInterval(ns.rx_window_ms);
+    return true;
+}
+
+// Aufgabe: Protokolliert den Geraetestart mit allen Kenndaten.
+static void setupBootLog(const NodeState& ns) {
+    logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
+    logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
+    logf("INFO",
+         "WakeReason=%u BootCounter=%lu wake_interval_s=%lu rx_window_ms=%lu battery_profile=%u",
+         ns.wake_reason,
+         (unsigned long)ns.boot_counter,
+         (unsigned long)ns.wake_interval_s,
+         (unsigned long)ns.rx_window_ms,
+         (unsigned)BAT_SEN_BATTERY_PROFILE);
+}
+
+// =============================================================================
 // ARDUINO – setup() und loop()
 // =============================================================================
 
@@ -1001,17 +1102,7 @@ void setup() {
     }
 
     nodeStatus = {};
-    nodeStatus.boot_ms = millis();
-    nodeStatus.letztes_hello_ms = nodeStatus.boot_ms - HELLO_RETRY_INTERVAL_MS;
-    nodeStatus.wake_interval_s = DEFAULT_WAKE_INTERVAL_S;
-    nodeStatus.rx_window_ms = DEFAULT_RX_WINDOW_MS;
-    nodeStatus.state_report_offen = true;
-    nodeStatus.event_report_offen = false;
-    nodeStatus.battery_fault = true;
-    nodeStatus.wake_reason = wakeReasonCode();
-
-    RTC_BOOT_COUNTER += 1U;
-    nodeStatus.boot_counter = RTC_BOOT_COUNTER;
+    setupBootUndStatus(nodeStatus);
 
     initialisiereIO();
     nodeStatus.kanaele = leseDeviceKanaele();
@@ -1021,68 +1112,14 @@ void setup() {
     nodeStatus.letzte_batterie_probe_ms = millis();
     aktualisiereSchlafFenster(DISCOVERY_WINDOW_MS);
 
-    // Watchdog initialisieren
-    esp_task_wdt_deinit();
-    esp_task_wdt_config_t wdt_config = {
-        .timeout_ms = (uint32_t)BAT_SEN_WDT_TIMEOUT_S * 1000,
-        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
-        .trigger_panic = true
-    };
-    esp_task_wdt_init(&wdt_config);
-    esp_task_wdt_add(NULL);
+    setupWatchdog();
 
-    // Provisioning konfigurieren und starten
-    SmartHome::ShNodeProvisioning::NodeProvisioningConfig provisioningConfig =
-        SmartHome::BatSenProvisioning::makeConfig(
-            DEVICE_ID,
-            DEFAULT_WAKE_INTERVAL_S,
-            DEFAULT_RX_WINDOW_MS,
-            MIN_WAKE_INTERVAL_S,
-            MAX_WAKE_INTERVAL_S,
-            MIN_RX_WINDOW_MS,
-            MAX_RX_WINDOW_MS);
-    provisioningConfig.setupButtonPin = SETUP_BUTTON_PIN;
-    provisioningConfig.setupButtonActiveLow = SETUP_BUTTON_ACTIVE_LOW != 0;
-    provisioningConfig.setupButtonHoldMs = SETUP_BUTTON_HOLD_MS;
-    provisioningConfig.setupIndicatorLedPin = SETUP_INDICATOR_LED_PIN;
-    provisioningConfig.setupIndicatorLedActiveHigh = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0;
-    provisioningConfig.setupIndicatorBlinkMs = SETUP_INDICATOR_BLINK_MS;
-
-    nodeStatus.provisioning_bereit = nodeProvisioning.begin(
-        provisioningConfig,
-        &nodeStatus.master_mac_gueltig,
-        nodeStatus.master_mac,
-        &nodeStatus.wake_interval_s,
-        &nodeStatus.rx_window_ms,
-        &nodeStatus.setup_mode,
-        &nodeStatus.setup_ap_aktiv,
-        &nodeStatus.restart_pending,
-        &nodeStatus.restart_requested_at_ms,
-        nodeStatus.setup_ap_ssid,
-        sizeof(nodeStatus.setup_ap_ssid),
-        &batSenProvisioningHandler,
-        provisioningLog);
-
-    if (!nodeStatus.provisioning_bereit) {
-        logf("WARN", "Node-Provisioning-Basis konnte nicht initialisiert werden");
+    if (!setupProvisioning(nodeStatus, batSenProvisioningHandler, provisioningLog)) {
         return;
     }
 
-    // Batterie-Geraete verwenden die Config-Felder um: Status-Intervall = Wake-Intervall, Sensor-Intervall = RX-Fenster.
-    nodeStatus.wake_interval_s = nodeProvisioning.sanitizeStatusSendInterval(nodeStatus.wake_interval_s);
-    nodeStatus.rx_window_ms     = nodeProvisioning.sanitizeSensorSendInterval(nodeStatus.rx_window_ms);
+    setupBootLog(nodeStatus);
 
-    logf("INFO", "%s v%s startet (%s)", DATEI_GERAET, DATEI_VERSION, PROJECT_VERSION);
-    logf("INFO", "Node=%s Name=%s Variant=%s", DEVICE_ID, DEVICE_NAME, FW_VARIANT);
-    logf("INFO",
-         "WakeReason=%u BootCounter=%lu wake_interval_s=%lu rx_window_ms=%lu battery_profile=%u",
-         nodeStatus.wake_reason,
-         (unsigned long)nodeStatus.boot_counter,
-         (unsigned long)nodeStatus.wake_interval_s,
-         (unsigned long)nodeStatus.rx_window_ms,
-         (unsigned)BAT_SEN_BATTERY_PROFILE);
-
-    // Prueft ob Master-MAC bereits provisioniert
     if (!nodeProvisioning.hasStoredMasterMac()) {
         logf("INFO", "Keine persistierte Master-Bindung gefunden, starte Setup-Modus");
         nodeProvisioning.enterSetupMode();

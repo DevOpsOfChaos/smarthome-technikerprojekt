@@ -40,6 +40,9 @@
 #define NET_SEN_DEVICE_CAPS (SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_PRESSURE | SH_CAP_RAIN)
 #define NET_SEN_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
 
+// Reiner Sensor-Node: Kein CONTROL_MODE (none) und kein CONFIG_PROFILE (none).
+// Diese Defines werden bewusst nicht gesetzt; die Runtime verwendet Default-Werte.
+
 #define NET_SEN_ENABLE_I2C_BASE 1
 
 #define NET_SEN_HELLO_RETRY_INTERVAL_MS 5000UL  // 5000 Millisekunden = 5 Sekunden.

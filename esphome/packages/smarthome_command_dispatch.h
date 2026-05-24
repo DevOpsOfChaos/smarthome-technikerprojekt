@@ -28,6 +28,70 @@
 namespace smarthome {
 
 // =============================================================================
+// KANONISCHER COMMAND-HANDLER (Referenzimplementierung)
+// =============================================================================
+// Jedes Device-YAML implementiert diesen Handler im on_json_message-Lambda.
+// Die markierten Abschnitte sind geraeteuebergreifend identisch:
+//
+//   on_json_message:
+//     - topic: smarthome/device/${device_id}/command
+//       then:
+//         - lambda: |-
+//             // === GEMEINSAM: request_id extrahieren ===
+//             std::string request_id;
+//             if (!smarthome::smarthome_extract_request_id(x, request_id)) {
+//               id(contract_fault) = true;
+//               id(contract_last_status_code) = -20;
+//               id(contract_last_status_text) = "missing_request_id";
+//               return;
+//             }
+//
+//             std::string command = "";
+//             if (x["command"].is<const char*>()) {
+//               command = x["command"].as<std::string>();
+//             }
+//
+//             // === GEMEINSAM: queue_ack-Lambda ===
+//             auto queue_ack = [&](const char *status, int code, const char *source) {
+//               id(ack_request_id) = request_id;
+//               id(ack_status) = status;
+//               id(ack_status_code) = code;
+//               id(ack_source) = source;
+//               id(flush_command_ack).execute();
+//             };
+//
+//             // === GEMEINSAM: get_state ===
+//             if (command == "get_state") {
+//               id(clear_contract_fault).execute();
+//               id(PUBLISH_STATE_SCRIPT).execute();
+//               queue_ack("ok", 0, "node_ack");
+//               return;
+//             }
+//
+//             // === GEMEINSAM: set_config (master_mac) ===
+//             if (command == "set_config") {
+//               // ... master_mac-Validierung via smarthome::smarthome_validate_master_mac()
+//             }
+//
+//             // === GERAETESPEZIFISCH: set_relay, calibrate, open, close, ... ===
+//             // Hier folgen die pro Geraet unterschiedlichen Kommandos.
+//
+//             // === GEMEINSAM: unsupported-Fallback ===
+//             id(contract_fault) = true;
+//             id(contract_last_status_code) = -2;
+//             id(contract_last_status_text) = "unsupported";
+//             queue_ack("unsupported", -2, "master_validation");
+//
+// PUBLISH_STATE_SCRIPT ist pro Geraet:
+//   net_erl_hall_module        → publish_net_erl_state
+//   net_erl_hall_module_led_ring → publish_net_erl_led_state
+//   net_sen_weather_station    → publish_net_sen_state
+//   net_zrl_shutter_module     → publish_cover_contract_state
+//   bat_sen_window_contact     → publish_bat_window_state
+//   bat_sen_rain_sensor        → publish_bat_rain_state
+// =============================================================================
+
+// =============================================================================
 // smarthome_extract_request_id – Extrahiert und validiert die request_id aus
 // einem MQTT-Kommando-JSON.
 //
