@@ -18,6 +18,8 @@ services:
     restart: unless-stopped
     ports:
       - "${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
   # ---------------------------------------------------------------------------
   # Node-RED – Anwendungsserver
@@ -31,8 +33,8 @@ services:
       - "${NODE_RED_PORT:-1880}:1880"
     environment:
       TZ: "${TZ:-Europe/Berlin}"
-      MQTT_HOST: mosquitto
-      MQTT_PORT: "1883"
+      MQTT_HOST: "${MQTT_HOST:-mosquitto}"
+      MQTT_PORT: "${MQTT_PORT:-1883}"
       SQLITE_DB_PATH: "${SQLITE_DB_PATH:-/data/sqlite/smarthome_phase1.db}"
     volumes:
       - ./nodered:/data         # Node-RED-Daten (Flows, Settings, Libs)

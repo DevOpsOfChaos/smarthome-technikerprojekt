@@ -33,9 +33,11 @@ esphome:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_bat_window_state
+      - safe_mode.mark_successful
 
 esp32:
   board: esp32-c3-devkitm-1
+  toolchain: platformio
   framework:
     type: arduino
 

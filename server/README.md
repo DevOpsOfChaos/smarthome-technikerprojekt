@@ -58,8 +58,18 @@ Im Ordner `server/`:
 
 Der echte Startpfad liegt aktuell direkt in `docker-compose.yml`:
 - Node-RED startet aus dem offiziellen `nodered/node-red:3.1`-Image.
+- Node-RED nutzt `MQTT_HOST` und `MQTT_PORT` aus `.env`; ohne `.env` ist der Compose-Broker `mosquitto` der Default.
 - SQLite-Schema, kleine Bestandsschema-Migrationen, `flows.json` und die generierten Settings werden beim Containerstart inline vorbereitet.
 - `nodered/settings.js` bleibt die Basisdatei, die Laufzeit erweitert sie beim Start um den benoetigten `functionGlobalContext`.
+
+Wenn ein dauerhaft laufender Mosquitto im Netz genutzt wird, muss `server/.env` denselben Broker setzen, den auch die ESPHome-Secrets verwenden:
+
+```env
+MQTT_HOST=<broker-ip-oder-hostname>
+MQTT_PORT=1883
+```
+
+Der wichtigste Fehlerfall ist ein Broker-Split: ESPHome publiziert an einen Netz-Broker, Node-RED hoert aber auf dem Compose-Broker, oder umgekehrt. Dann sind die YAMLs formal korrekt, aber im Dashboard kommt nichts an.
 
 ## Enger Vertragstest
 

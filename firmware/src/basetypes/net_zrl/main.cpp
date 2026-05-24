@@ -123,7 +123,7 @@ const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #endif
 
 #ifndef NET_ZRL_BUTTON_UP_PIN
-#define NET_ZRL_BUTTON_UP_PIN 2
+#define NET_ZRL_BUTTON_UP_PIN 20
 #endif
 
 #ifndef NET_ZRL_BUTTON_DOWN_PIN

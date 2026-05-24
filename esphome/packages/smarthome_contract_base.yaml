@@ -48,6 +48,13 @@ substitutions:
   input_mask: XXXXX                       # 5-stellige Eingangsmaske (Reserve)
 
 # =============================================================================
+# OTA – Wireless-Update-Dienst fuer alle ESPHome-Geraete
+# =============================================================================
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# =============================================================================
 # GLOBALE VARIABLEN – Contract-uebergreifende Zustaende
 # =============================================================================
 globals:

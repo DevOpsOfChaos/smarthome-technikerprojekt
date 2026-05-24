@@ -46,7 +46,7 @@
 #define NET_ZRL_RELAY_DOWN_ACTIVE_HIGH  1
 
 // Taster-Pins.
-#define NET_ZRL_BUTTON_UP_PIN       2
+#define NET_ZRL_BUTTON_UP_PIN       20
 #define NET_ZRL_BUTTON_DOWN_PIN     4
 #define NET_ZRL_BUTTON_STOP_PIN     3
 

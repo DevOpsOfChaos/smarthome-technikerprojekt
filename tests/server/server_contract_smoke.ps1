@@ -13,6 +13,11 @@ $ComposeFile = Join-Path $RepoRoot "server\docker-compose.yml"
 $ExpectedButtonFlags = 5
 $RequestId = "smoke-{0}" -f (Get-Date -Format "yyyyMMddHHmmss")
 
+# Der Contract-Smoke-Test prueft den lokalen Compose-Broker.
+# Lokale .env-Werte fuer einen Netz-Broker duerfen diesen Test nicht umlenken.
+$env:MQTT_HOST = "mosquitto"
+$env:MQTT_PORT = "1883"
+
 function Invoke-DockerCompose {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]

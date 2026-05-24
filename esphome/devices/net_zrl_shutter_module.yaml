@@ -56,7 +56,7 @@ substitutions:
   relay_up_pin: GPIO10               # bestehende Firmware: NET_ZRL_RELAY_UP_PIN
   relay_down_pin: GPIO5              # bestehende Firmware: NET_ZRL_RELAY_DOWN_PIN
   default_cover_travel_ms: "100000"
-  button_up_pin: GPIO2
+  button_up_pin: GPIO20
   button_down_pin: GPIO4
   button_stop_pin: GPIO3
   led_up_pin: GPIO6
@@ -93,6 +93,7 @@ esphome:
 
 esp32:
   board: esp32-c3-devkitm-1
+  toolchain: platformio
   framework:
     type: arduino
 

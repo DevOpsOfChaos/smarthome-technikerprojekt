@@ -77,6 +77,9 @@ Davon sind lokal und nicht Teil des Repo-Inhalts:
 4. `docker compose ps` prüfen
 5. `http://localhost:1880/dashboard/` öffnen
 
+Wichtig für ESPHome mit dauerhaftem Mosquitto im Netz:
+`MQTT_HOST` in `server/.env` muss auf denselben Broker zeigen wie `mqtt_broker` in den ESPHome-Secrets. Der Compose-Default `mosquitto` ist nur der lokale Repo-Broker für Tests und Standalone-Betrieb.
+
 ## Kleinster Server-Contract-Smoke-Test
 
 Aus dem Repo-Root kann der enge Vertrags-Smoke-Test gestartet werden:

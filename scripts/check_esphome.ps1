@@ -2,6 +2,7 @@ param(
     [string[]]$Device,
     [switch]$Compile,
     [switch]$Clean,
+    [switch]$CleanPlatformioCache,
     [switch]$VerboseOutput,
     [string]$UvPath
 )
@@ -91,6 +92,10 @@ if (!$Device -or $Device.Count -eq 0) {
 if ($Clean -and (Test-Path $workRoot)) {
     Remove-Item -LiteralPath $workRoot -Recurse -Force
 }
+if ($CleanPlatformioCache -and (Test-Path $platformioCoreDir)) {
+    Remove-Item -LiteralPath $platformioCoreDir -Recurse -Force
+    New-Item -ItemType Directory -Path $platformioCoreDir | Out-Null
+}
 if (!(Test-Path $workRoot)) {
     New-Item -ItemType Directory -Path $workRoot | Out-Null
 }
@@ -115,6 +120,7 @@ wifi_password: dummy-password
 mqtt_broker: 127.0.0.1
 mqtt_username: dummy-user
 mqtt_password: dummy-password
+ota_password: dummy-ota-password
 "@
 
     $dummySecrets | Set-Content -Path (Join-Path $workEsphomeRoot "secrets.yaml") -Encoding UTF8

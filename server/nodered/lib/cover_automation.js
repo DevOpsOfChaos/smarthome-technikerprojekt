@@ -634,7 +634,7 @@ function buildDueMessages(runtime, commandMinimal, timestamp) {
 
       messages.push({
         topic: result.command.topic,
-        payload: result.command.payload,
+        payload: JSON.stringify(result.command.payload),
         qos: 0,
         retain: false
       });
