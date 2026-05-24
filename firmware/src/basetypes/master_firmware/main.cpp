@@ -411,6 +411,15 @@ void macText(const uint8_t* mac, char* buffer, size_t bufferSize) {
     copyText(buffer, bufferSize, local);
 }
 
+// Aufgabe: Wandelt eine MAC in einen lesbaren String (AA:BB:CC:DD:EE:FF).
+// Nutzt einen thread-lokalen Puffer – Aufrufer muss das Ergebnis sofort
+// kopieren, falls es ueber mehrere Aufrufe hinweg benoetigt wird.
+static const char* macToText(const uint8_t* mac) {
+    static char buf[18];
+    macText(mac, buf, sizeof(buf));
+    return buf;
+}
+
 // Aufgabe: Beschreibt, ob der MQTT-Broker als IP-Adresse oder Hostname genutzt wird.
 // Eingabewerte: keine.
 // Ausgabewert: "ip" oder "host" fuer Logs und Statusausgaben.
@@ -917,8 +926,7 @@ bool stellePeerSicher(const uint8_t* mac) {
         return false;
     }
 
-    char text[18] = {0};
-    macText(mac, text, sizeof(text));
+    const char* text = macToText(mac);
     logf("INFO", "Peer aktiv: %s", text);
     return true;
 }
@@ -949,17 +957,18 @@ bool sendePaketMitOptionen(
     // Vor dem Paketbau werden alle harten Sendebedingungen geprueft. Ein
     // fehlender Peer oder ein zu grosser Payload darf nicht erst in esp_now_send()
     // scheitern, weil sonst Pending-Requests faelschlich als gesendet gelten.
+    // label ist immer ein String-Literal von der Aufrufstelle.
     if (zielMac == nullptr) {
-        logf("WARN", "%s: verworfen, Ziel-MAC ist null", label ? label : "sendePaket");
+        logf("WARN", "%s: verworfen, Ziel-MAC ist null", label);
         return false;
     }
     if (payloadLen > SH_MAX_PAYLOAD_BYTES) {
-        logf("WARN", "%s: verworfen, payload zu gross (%u)", label ? label : "sendePaket", (unsigned)payloadLen);
+        logf("WARN", "%s: verworfen, payload zu gross (%u)", label, (unsigned)payloadLen);
         return false;
     }
     if (!stellePeerSicher(zielMac)) {
-        char txt[18] = {0}; macText(zielMac, txt, sizeof(txt));
-        logf("WARN", "%s: Peer nicht sicher/angelegt fuer %s", label ? label : "sendePaket", txt);
+        const char* txt = macToText(zielMac);
+        logf("WARN", "%s: Peer nicht sicher/angelegt fuer %s", label, txt);
         return false;
     }
 
@@ -985,8 +994,7 @@ bool sendePaketMitOptionen(
         return false;
     }
 
-    char text[18] = {0};
-    macText(zielMac, text, sizeof(text));
+    const char* text = macToText(zielMac);
     logf("INFO", "%s gesendet an %s", label, text);
     if (verwendeteSeq != nullptr) {
         // Aufrufer mit ACK-Erwartung brauchen exakt diese Sequenz, um das
@@ -1150,6 +1158,12 @@ void schreibeUIntOrNull(char* buffer, size_t bufferSize, unsigned long value, un
     snprintf(buffer, bufferSize, "%lu", value);
 }
 
+// Aufgabe: Wandelt bool in JSON-String "true"/"false" um.
+// Vermeidet 15-fache Wiederholung des ? : -Musters in baueNodeStateJson.
+static const char* boolStr(bool v) {
+    return v ? "true" : "false";
+}
+
 // Aufgabe: Baut das MQTT-State-JSON fuer eine registrierte Node.
 // Eingabewerte:
 // - nodeIndex ist der Index in nodeStates[].
@@ -1197,7 +1211,7 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 bufferSize,
                 "{\"device_id\":\"%s\",\"relay_1\":%s,\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
                 nodeStates[nodeIndex].device_id,
-                nodeStates[nodeIndex].relay_1 ? "true" : "false",
+                boolStr(nodeStates[nodeIndex].relay_1),
                 tempText,
                 humText,
                 luxText,
@@ -1206,8 +1220,8 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 aqiText,
                 tvocText,
                 eco2Text,
-                nodeStates[nodeIndex].motion ? "true" : "false",
-                nodeStates[nodeIndex].fault ? "true" : "false");
+                boolStr(nodeStates[nodeIndex].motion),
+                boolStr(nodeStates[nodeIndex].fault));
             return;
 
         case SH_CLASS_NET_ZRL:
@@ -1225,13 +1239,13 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 bufferSize,
                 "{\"device_id\":\"%s\",\"relay_1\":%s,\"relay_2\":%s,\"cover_mode\":%s,\"cover_state\":\"%s\",\"cover_position\":%s,\"cover_calibrated\":%s,\"fault\":%s}",
                 nodeStates[nodeIndex].device_id,
-                nodeStates[nodeIndex].relay_1 ? "true" : "false",
-                nodeStates[nodeIndex].relay_2 ? "true" : "false",
-                nodeStates[nodeIndex].cover_mode ? "true" : "false",
+                boolStr(nodeStates[nodeIndex].relay_1),
+                boolStr(nodeStates[nodeIndex].relay_2),
+                boolStr(nodeStates[nodeIndex].cover_mode),
                 coverStateText(nodeStates[nodeIndex].cover_state, nodeStates[nodeIndex].cover_calibrated, nodeStates[nodeIndex].cover_position),
                 coverPositionText,
-                nodeStates[nodeIndex].cover_calibrated ? "true" : "false",
-                nodeStates[nodeIndex].fault ? "true" : "false");
+                boolStr(nodeStates[nodeIndex].cover_calibrated),
+                boolStr(nodeStates[nodeIndex].fault));
             return;
 
         case SH_CLASS_NET_SEN:
@@ -1258,8 +1272,8 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 aqiText,
                 tvocText,
                 eco2Text,
-                nodeStates[nodeIndex].motion ? "true" : "false",
-                nodeStates[nodeIndex].fault ? "true" : "false");
+                boolStr(nodeStates[nodeIndex].motion),
+                boolStr(nodeStates[nodeIndex].fault));
             return;
 
         case SH_CLASS_BAT_SEN:
@@ -1279,12 +1293,12 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 windowText,
                 rainText,
                 (unsigned)nodeStates[nodeIndex].button_flags,
-                nodeStates[nodeIndex].fault ? "true" : "false");
+                boolStr(nodeStates[nodeIndex].fault));
             return;
 
         default:
-            // Sollte nur bei unvollstaendigen oder unbekannten Klassen auftreten.
-            // publishNodeState() wird normalerweise erst nach erfolgreichem Parser gesetzt.
+            // Unreachable: state wird nur nach erfolgreichem Class-Parser veroeffentlicht.
+            // Falls je erreicht, liegt ein Programmierfehler in verarbeiteStateReport() vor.
             copyText(buffer, bufferSize, "{}");
             return;
     }
@@ -1495,8 +1509,7 @@ void aktualisiereNodeKontakt(size_t nodeIndex, const uint8_t* mac) {
         nodeStates[nodeIndex].mac_bekannt = true;
         stellePeerSicher(nodeStates[nodeIndex].mac);
         if (neueMac) {
-            char text[18] = {0};
-            macText(mac, text, sizeof(text));
+            const char* text = macToText(mac);
             logf("INFO", "%s MAC aktualisiert: %s", nodeStates[nodeIndex].device_id, text);
         }
     }
@@ -1612,8 +1625,7 @@ int registriereProvisorischMitId(const uint8_t* senderMac, const char* deviceId,
         return -1;
     }
 
-    char macTxt[18] = {0};
-    macText(senderMac, macTxt, sizeof(macTxt));
+    const char* macTxt = macToText(senderMac);
     logf("INFO", "Provisorische Registration: device_id=%s mac=%s inferredClass=%u powerType=%u", deviceId ? deviceId : "?", macTxt, (unsigned)inferredClass, (unsigned)powerType);
 
     const int idIndex = findeNodeIndex(deviceId);
@@ -1735,8 +1747,7 @@ bool fordereHelloBeiBedarf(size_t nodeIndex, const uint8_t* senderMac, const cha
         return false;
     }
 
-    char macTxt[18] = {0};
-    macText(senderMac, macTxt, sizeof(macTxt));
+    const char* macTxt = macToText(senderMac);
     logf("INFO", "%s: Meta fuer %s fehlt, sende HELLO_REQUEST an %s",
          grund ? grund : "HELLO_SYNC",
          nodeStates[nodeIndex].device_id,
@@ -2258,8 +2269,7 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* daten, int laenge)
 // Eingabewerte: mac ist das Ziel, status ist der ESP-NOW-Sendestatus.
 // Ausgabewert: keiner.
 void logEspNowSendStatus(const uint8_t* mac, esp_now_send_status_t status) {
-    char text[18] = {0};
-    macText(mac, text, sizeof(text));
+    const char* text = macToText(mac);
     logf(
         status == ESP_NOW_SEND_SUCCESS ? "INFO" : "WARN",
         "ESP-NOW Sendestatus an %s: %s",
@@ -2353,7 +2363,7 @@ bool sendeHelloRequestAnMac(const uint8_t* mac) {
         logf("WARN", "HELLO_REQUEST: ungueltige MAC, Abbruch");
         return false;
     }
-    char mactxt[18] = {0}; macText(mac, mactxt, sizeof(mactxt));
+    const char* mactxt = macToText(mac);
     SmartHome::CmdPayload payload = {};
     payload.cmd_type = SH_CMD_HELLO_REQUEST;
     const bool ok = sendePaket(mac, SH_MSG_CMD, &payload, sizeof(payload), "HELLO_REQUEST");
@@ -2746,6 +2756,110 @@ bool stelleMetaFuerCommandSicher(size_t nodeIndex, const char* requestId, const 
     return false;
 }
 
+// Aufgabe: Behandelt das get_state-MQTT-Kommando fuer eine registrierte Node.
+static void handleMqttGetState(size_t nodeIndex, const char* requestId, const char* commandChannel) {
+    if (!sendeStateRequest(nodeIndex)) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+        return;
+    }
+    publishNodeAck(nodeIndex, requestId, commandChannel, "sent", 0, SH_MSG_CMD, 0U, "master_send");
+}
+
+// Aufgabe: Behandelt das set_relay-MQTT-Kommando (relay_1 oder relay_2).
+static void handleMqttSetRelay(size_t nodeIndex, const char* requestId, const char* commandChannel, const char* json) {
+    if (!stelleMetaFuerCommandSicher(nodeIndex, requestId, commandChannel, SH_MSG_CMD, "MQTT_SET_RELAY")) return;
+    if (nodeStates[nodeIndex].pending_cmd.aktiv) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
+        return;
+    }
+
+    bool relayState = false;
+    if (jsonHoleBool(json, "relay_1", &relayState)) {
+        if (!istRelayBefehlZulaessig(nodeIndex, 0U)) {
+            publishNodeAck(nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
+            return;
+        }
+        if (!sendeRelayCommand(nodeIndex, 0U, relayState, requestId, commandChannel)) {
+            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+        }
+        return;
+    }
+    if (jsonHoleBool(json, "relay_2", &relayState)) {
+        if (!istRelayBefehlZulaessig(nodeIndex, 1U)) {
+            publishNodeAck(nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
+            return;
+        }
+        if (!sendeRelayCommand(nodeIndex, 1U, relayState, requestId, commandChannel)) {
+            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+        }
+        return;
+    }
+    publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
+}
+
+// Aufgabe: Behandelt Cover-MQTT-Kommandos (open, close, stop, set_position).
+static void handleMqttCoverCommand(size_t nodeIndex, const char* cmd, const char* requestId, const char* commandChannel, const char* json) {
+    if (!stelleMetaFuerCommandSicher(nodeIndex, requestId, commandChannel, SH_MSG_CMD, "MQTT_COVER")) return;
+    if (!istCoverGeraet(nodeIndex)) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
+        return;
+    }
+    if (nodeStates[nodeIndex].pending_cmd.aktiv) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
+        return;
+    }
+
+    if (strcmp(cmd, "open") == 0) {
+        if (!sendeCoverCommand(nodeIndex, SH_COVER_CMD_OPEN, 0U, requestId, commandChannel))
+            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+        return;
+    }
+    if (strcmp(cmd, "close") == 0) {
+        if (!sendeCoverCommand(nodeIndex, SH_COVER_CMD_CLOSE, 0U, requestId, commandChannel))
+            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+        return;
+    }
+    if (strcmp(cmd, "stop") == 0) {
+        if (!sendeCoverCommand(nodeIndex, SH_COVER_CMD_STOP, 0U, requestId, commandChannel))
+            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+        return;
+    }
+
+    // set_position
+    long position = -1L;
+    if (!jsonHoleZahl(json, "position", &position) || position < 0L || position > 100L) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
+        return;
+    }
+    if (!nodeStates[nodeIndex].cover_calibrated && position != 0L && position != 100L) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "not_calibrated", STATUS_CODE_NOT_CALIBRATED, SH_MSG_CMD, 0U, "master_validation");
+        return;
+    }
+    if (!sendeCoverCommand(nodeIndex, SH_COVER_CMD_SET_POSITION, (uint8_t)position, requestId, commandChannel))
+        publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+}
+
+// Aufgabe: Behandelt das set_config-MQTT-Kommando.
+static void handleMqttSetConfig(size_t nodeIndex, const char* requestId, const char* commandChannel, const char* json) {
+    if (!stelleMetaFuerCommandSicher(nodeIndex, requestId, commandChannel, SH_MSG_CFG, "MQTT_SET_CONFIG")) return;
+    if (nodeStates[nodeIndex].pending_cfg.aktiv) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CFG, nodeStates[nodeIndex].pending_cfg.seq, "master_busy");
+        return;
+    }
+
+    uint8_t paramId = 0U;
+    uint16_t value = 0U;
+    char errorText[96] = {0};
+    if (!parseSetConfigMinimal(nodeIndex, json, &paramId, &value, errorText, sizeof(errorText))) {
+        logf("WARN", "set_config fuer %s verworfen: %s", nodeStates[nodeIndex].device_id, errorText);
+        publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CFG, 0U, "master_validation");
+        return;
+    }
+    if (!sendeConfigCommand(nodeIndex, paramId, value, requestId, commandChannel)) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CFG, 0U, "master_send");
+    }
+}
+
 // =============================================================================
 // MQTT-COMMAND-HANDLER - 4 Kommandos: get_state, set_relay, Cover, set_config
 // =============================================================================
@@ -2829,135 +2943,24 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
 
     if (strcmp(cmd, "get_state") == 0) {
-        // get_state ist nicht pending: Der Master bestaetigt nur, dass die
-        // Anfrage gesendet wurde. Der eigentliche State kommt spaeter separat.
-        if (!sendeStateRequest((size_t)nodeIndex)) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-            return;
-        }
-        publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "sent", 0, SH_MSG_CMD, 0U, "master_send");
+        handleMqttGetState((size_t)nodeIndex, requestId, commandChannel);
         return;
     }
-
     if (strcmp(cmd, "set_relay") == 0) {
-        if (!stelleMetaFuerCommandSicher((size_t)nodeIndex, requestId, commandChannel, SH_MSG_CMD, "MQTT_SET_RELAY")) {
-            return;
-        }
-        // Pro Node ist nur ein offenes CMD erlaubt. Sonst koennten ACKs mit
-        // gleicher Kanalrichtung nicht eindeutig der request_id zugeordnet werden.
-        if (nodeStates[nodeIndex].pending_cmd.aktiv) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
-            return;
-        }
-
-        bool relayState = false;
-        if (jsonHoleBool(json, "relay_1", &relayState)) {
-            // Relaisbefehle werden gegen HELLO-Caps validiert. Ein Cover-Geraet
-            // darf nicht versehentlich als normales Relais geschaltet werden.
-            if (!istRelayBefehlZulaessig((size_t)nodeIndex, 0U)) {
-                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
-                return;
-            }
-            if (!sendeRelayCommand((size_t)nodeIndex, 0U, relayState, requestId, commandChannel)) {
-                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-            }
-            return;
-        }
-        if (jsonHoleBool(json, "relay_2", &relayState)) {
-            if (!istRelayBefehlZulaessig((size_t)nodeIndex, 1U)) {
-                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
-                return;
-            }
-            if (!sendeRelayCommand((size_t)nodeIndex, 1U, relayState, requestId, commandChannel)) {
-                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-            }
-            return;
-        }
-
-        publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
+        handleMqttSetRelay((size_t)nodeIndex, requestId, commandChannel, json);
         return;
     }
-
     if (strcmp(cmd, "open") == 0 || strcmp(cmd, "close") == 0 || strcmp(cmd, "stop") == 0 || strcmp(cmd, "set_position") == 0) {
-        if (!stelleMetaFuerCommandSicher((size_t)nodeIndex, requestId, commandChannel, SH_MSG_CMD, "MQTT_COVER")) {
-            return;
-        }
-        // Cover-Kommandos werden nur fuer Nodes zugelassen, die per Control-Mode
-        // oder Capability wirklich als Cover erkannt wurden.
-        if (!istCoverGeraet((size_t)nodeIndex)) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
-            return;
-        }
-        if (nodeStates[nodeIndex].pending_cmd.aktiv) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
-            return;
-        }
-
-        if (strcmp(cmd, "open") == 0) {
-            if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_OPEN, 0U, requestId, commandChannel)) {
-                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-            }
-            return;
-        }
-        if (strcmp(cmd, "close") == 0) {
-            if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_CLOSE, 0U, requestId, commandChannel)) {
-                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-            }
-            return;
-        }
-        if (strcmp(cmd, "stop") == 0) {
-            if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_STOP, 0U, requestId, commandChannel)) {
-                publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-            }
-            return;
-        }
-
-        long position = -1L;
-        if (!jsonHoleZahl(json, "position", &position) || position < 0L || position > 100L) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
-            return;
-        }
-        if (!nodeStates[nodeIndex].cover_calibrated && position != 0L && position != 100L) {
-            // Ohne Kalibrierung bleiben nur die echten Endlagen 0/100 erlaubt.
-            // Zwischenpositionen waeren geraten und koennten die Mechanik falsch fahren.
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "not_calibrated", STATUS_CODE_NOT_CALIBRATED, SH_MSG_CMD, 0U, "master_validation");
-            return;
-        }
-        if (!sendeCoverCommand((size_t)nodeIndex, SH_COVER_CMD_SET_POSITION, (uint8_t)position, requestId, commandChannel)) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-        }
+        handleMqttCoverCommand((size_t)nodeIndex, cmd, requestId, commandChannel, json);
         return;
     }
-
     if (strcmp(cmd, "set_config") == 0) {
-        if (!stelleMetaFuerCommandSicher((size_t)nodeIndex, requestId, commandChannel, SH_MSG_CFG, "MQTT_SET_CONFIG")) {
-            return;
-        }
-        // CFG hat eine eigene Pending-Spur, damit Konfigurations-ACKs nicht mit
-        // normalen CMD-ACKs kollidieren.
-        if (nodeStates[nodeIndex].pending_cfg.aktiv) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CFG, nodeStates[nodeIndex].pending_cfg.seq, "master_busy");
-            return;
-        }
-
-        uint8_t paramId = 0U;
-        uint16_t value = 0U;
-        char errorText[96] = {0};
-        // parseSetConfigMinimal uebersetzt das JSON-Feld in das kompakte
-        // Protokollformat param_id/value. Der MQTT-Handler kennt danach keine
-        // Details mehr ueber einzelne Konfigurationsfelder.
-        if (!parseSetConfigMinimal((size_t)nodeIndex, json, &paramId, &value, errorText, sizeof(errorText))) {
-            logf("WARN", "set_config fuer %s verworfen: %s", nodeId, errorText);
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CFG, 0U, "master_validation");
-            return;
-        }
-
-        if (!sendeConfigCommand((size_t)nodeIndex, paramId, value, requestId, commandChannel)) {
-            publishNodeAck((size_t)nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CFG, 0U, "master_send");
-        }
+        handleMqttSetConfig((size_t)nodeIndex, requestId, commandChannel, json);
         return;
     }
 
+    // Unreachable: alle Kommandos werden oben abgefangen. Nur noch als
+    // Sicherheitsnetz fuer zukuenftige, hier nicht behandelte Kommandos.
     logf("WARN", "MQTT Kommando ignoriert fuer %s", nodeId);
 }
 
@@ -3118,107 +3121,92 @@ void pruefeMqttVerbindung() {
 // PENDING-TIMEOUTS - CMD und CFG Timeouts mit Retry-Logik
 // =============================================================================
 
-// Aufgabe: Prueft ausstehende CMD-ACKs und sendet Retries oder Timeout-ACKs.
-// Eingabewerte: keine.
-// Ausgabewert: keiner; pending_cmd-Eintraege werden aktualisiert oder geloescht.
-void pruefePendingCmdTimeouts() {
+// Aufgabe: Gemeinsame Timeout-/Retry-Logik fuer CMD- und CFG-Pending-Slots.
+// Eingabewerte:
+// - pendSlot: Member-Pointer auf das Pending-Feld in NodeRuntime
+// - msgType: SH_MSG_CMD oder SH_MSG_CFG
+// - logLabel: Kurzer Log-Prefix ("CMD" oder "CFG")
+// - retryLogLabel: Label fuer den ESP-NOW-Retry-Sendevorgang
+// - fillPayload: Callback zum Befuellen des Spezial-Payloads aus dem Pending-Slot
+// Ausgabewert: keiner.
+template<typename Pending, typename Payload>
+static void pruefePendingTimeoutsImpl(
+    Pending NodeRuntime::*pendSlot,
+    uint8_t msgType,
+    const char* logLabel,
+    const char* retryLogLabel,
+    void (*fillPayload)(Payload&, const Pending&))
+{
     for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
-        if (!nodeStates[i].belegt || !nodeStates[i].pending_cmd.aktiv) continue;
-        if ((millis() - nodeStates[i].pending_cmd.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) continue;
+        if (!nodeStates[i].belegt) continue;
+        Pending& pend = nodeStates[i].*pendSlot;
+        if (!pend.aktiv) continue;
+        if ((millis() - pend.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) continue;
 
         // MAC muss bekannt sein, bevor ein Retry versucht wird. Ist sie unbekannt,
         // gibt es keine Route zur Node und der Auftrag muss sofort abgebrochen werden.
         if (!nodeStates[i].mac_bekannt) {
-            logf("WARN", "CMD Retry abgebrochen: MAC fuer %s unbekannt", nodeStates[i].device_id);
-            publishNodeAck(i, nodeStates[i].pending_cmd.request_id, nodeStates[i].pending_cmd.command_channel, "no_route", STATUS_CODE_NO_ROUTE, SH_MSG_CMD, nodeStates[i].pending_cmd.seq, "master_no_route");
-            nodeStates[i].pending_cmd = {};
+            logf("WARN", "%s Retry abgebrochen: MAC fuer %s unbekannt", logLabel, nodeStates[i].device_id);
+            publishNodeAck(i, pend.request_id, pend.command_channel, "no_route", STATUS_CODE_NO_ROUTE, msgType, pend.seq, "master_no_route");
+            pend = {};
             continue;
         }
 
-        if (nodeStates[i].pending_cmd.retries < COMMAND_MAX_RETRIES) {
-            // Retry nutzt dieselbe Sequenznummer wie der Ursprungsbefehl. Dadurch
-            // bestaetigt ein spaetes ACK weiterhin denselben MQTT-Auftrag.
-            SmartHome::CmdPayload payload = {};
-            payload.cmd_type = nodeStates[i].pending_cmd.cmd_type;
-            payload.param1   = nodeStates[i].pending_cmd.param1;
-            payload.param2   = nodeStates[i].pending_cmd.param2;
+        if (pend.retries < COMMAND_MAX_RETRIES) {
+            // Retry mit unveraenderter Sequenznummer: Ein spaetes ACK bestaetigt
+            // weiterhin denselben MQTT-Auftrag.
+            Payload payload = {};
+            fillPayload(payload, pend);
             const bool gesendet = sendePaketMitOptionen(
                 nodeStates[i].mac,
-                SH_MSG_CMD,
+                msgType,
                 &payload,
-                sizeof(payload),
-                "COMMAND retry",
+                sizeof(Payload),
+                retryLogLabel,
                 (uint8_t)(SH_FLAG_ACK_REQUEST | SH_FLAG_RETRANSMIT),
                 true,
-                nodeStates[i].pending_cmd.seq,
+                pend.seq,
                 nullptr);
             if (gesendet) {
-                nodeStates[i].pending_cmd.retries++;
-                nodeStates[i].pending_cmd.letztes_senden_ms = millis();
+                pend.retries++;
+                pend.letztes_senden_ms = millis();
                 continue;
             }
             // Sendefehler beim Retry: sofort abbrechen, nicht als Timeout melden.
-            logf("WARN", "CMD Retry send-fail fuer %s, Auftrag wird abgebrochen", nodeStates[i].device_id);
-            publishNodeAck(i, nodeStates[i].pending_cmd.request_id, nodeStates[i].pending_cmd.command_channel, "send_failed", -4, SH_MSG_CMD, nodeStates[i].pending_cmd.seq, "master_send");
-            nodeStates[i].pending_cmd = {};
+            logf("WARN", "%s Retry send-fail fuer %s, Auftrag wird abgebrochen", logLabel, nodeStates[i].device_id);
+            publishNodeAck(i, pend.request_id, pend.command_channel, "send_failed", -4, msgType, pend.seq, "master_send");
+            pend = {};
             continue;
         }
 
         // Retries erschoepft: MQTT-Auftrag aktiv beenden. Ohne dieses ACK wuerde
         // der Server endlos auf Antwort warten.
-        publishNodeAck(i, nodeStates[i].pending_cmd.request_id, nodeStates[i].pending_cmd.command_channel, "timeout", (int)SH_ERROR_ACK_TIMEOUT, SH_MSG_CMD, nodeStates[i].pending_cmd.seq, "master_timeout");
-        nodeStates[i].pending_cmd = {};
+        publishNodeAck(i, pend.request_id, pend.command_channel, "timeout", (int)SH_ERROR_ACK_TIMEOUT, msgType, pend.seq, "master_timeout");
+        pend = {};
     }
 }
 
+// Aufgabe: Prueft ausstehende CMD-ACKs und sendet Retries oder Timeout-ACKs.
+static void pruefePendingCmdTimeouts() {
+    auto fillCmd = [](SmartHome::CmdPayload& p, const PendingCmdRequest& pend) {
+        p.cmd_type = pend.cmd_type;
+        p.param1   = pend.param1;
+        p.param2   = pend.param2;
+    };
+    pruefePendingTimeoutsImpl<PendingCmdRequest, SmartHome::CmdPayload>(
+        &NodeRuntime::pending_cmd, SH_MSG_CMD, "CMD", "COMMAND retry", fillCmd);
+}
+
 // Aufgabe: Prueft ausstehende CFG-ACKs und sendet Retries oder Timeout-ACKs.
-// Eingabewerte: keine.
-// Ausgabewert: keiner; pending_cfg-Eintraege werden aktualisiert oder geloescht.
-void pruefePendingCfgTimeouts() {
-    for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
-        if (!nodeStates[i].belegt || !nodeStates[i].pending_cfg.aktiv) continue;
-        if ((millis() - nodeStates[i].pending_cfg.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) continue;
-
-        // MAC muss bekannt sein, bevor ein Retry versucht wird.
-        if (!nodeStates[i].mac_bekannt) {
-            logf("WARN", "CFG Retry abgebrochen: MAC fuer %s unbekannt", nodeStates[i].device_id);
-            publishNodeAck(i, nodeStates[i].pending_cfg.request_id, nodeStates[i].pending_cfg.command_channel, "no_route", STATUS_CODE_NO_ROUTE, SH_MSG_CFG, nodeStates[i].pending_cfg.seq, "master_no_route");
-            nodeStates[i].pending_cfg = {};
-            continue;
-        }
-
-        if (nodeStates[i].pending_cfg.retries < COMMAND_MAX_RETRIES) {
-            // CFG-Retry ist getrennt von CMD-Retry, weil Nodes ACKs mit
-            // ack_msg_type unterscheiden und Konfigurationsfehler anders melden.
-            SmartHome::CfgPayload payload = {};
-            payload.param_id = nodeStates[i].pending_cfg.param_id;
-            payload.value    = nodeStates[i].pending_cfg.value;
-            const bool gesendet = sendePaketMitOptionen(
-                nodeStates[i].mac,
-                SH_MSG_CFG,
-                &payload,
-                sizeof(payload),
-                "CONFIG retry",
-                (uint8_t)(SH_FLAG_ACK_REQUEST | SH_FLAG_RETRANSMIT),
-                true,
-                nodeStates[i].pending_cfg.seq,
-                nullptr);
-            if (gesendet) {
-                nodeStates[i].pending_cfg.retries++;
-                nodeStates[i].pending_cfg.letztes_senden_ms = millis();
-                continue;
-            }
-            // Sendefehler beim Retry: sofort abbrechen, nicht als Timeout melden.
-            logf("WARN", "CFG Retry send-fail fuer %s, Auftrag wird abgebrochen", nodeStates[i].device_id);
-            publishNodeAck(i, nodeStates[i].pending_cfg.request_id, nodeStates[i].pending_cfg.command_channel, "send_failed", -4, SH_MSG_CFG, nodeStates[i].pending_cfg.seq, "master_send");
-            nodeStates[i].pending_cfg = {};
-            continue;
-        }
-
-        // Retries erschoepft: MQTT-Auftrag aktiv beenden.
-        publishNodeAck(i, nodeStates[i].pending_cfg.request_id, nodeStates[i].pending_cfg.command_channel, "timeout", (int)SH_ERROR_ACK_TIMEOUT, SH_MSG_CFG, nodeStates[i].pending_cfg.seq, "master_timeout");
-        nodeStates[i].pending_cfg = {};
-    }
+static void pruefePendingCfgTimeouts() {
+    // CFG-Retry ist getrennt von CMD-Retry, weil Nodes ACKs mit
+    // ack_msg_type unterscheiden und Konfigurationsfehler anders melden.
+    auto fillCfg = [](SmartHome::CfgPayload& p, const PendingConfigRequest& pend) {
+        p.param_id = pend.param_id;
+        p.value    = pend.value;
+    };
+    pruefePendingTimeoutsImpl<PendingConfigRequest, SmartHome::CfgPayload>(
+        &NodeRuntime::pending_cfg, SH_MSG_CFG, "CFG", "CONFIG retry", fillCfg);
 }
 
 // Aufgabe: Markiert Nodes nach Ablauf ihres Offline-Timeouts als nicht online.

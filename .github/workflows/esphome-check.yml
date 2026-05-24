@@ -1,0 +1,42 @@
+name: ESPHome Config Check
+
+# Lauft bei jedem Push und Pull Request auf main.
+# Validiert alle ESPHome YAML-Dateien ohne sie zu flashen.
+on:
+  push:
+    paths:
+      - 'esphome/**'
+  pull_request:
+    paths:
+      - 'esphome/**'
+  workflow_dispatch:  # Manuell ausloesbar
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        device:
+          - net_erl_hall_module
+          - net_erl_hall_module_led_ring
+          - net_sen_weather_station
+          - net_zrl_shutter_module
+          - bat_sen_window_contact
+          - bat_sen_rain_sensor
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ESPHome
+        run: pip install esphome
+
+      - name: Validate ${{ matrix.device }}
+        run: |
+          esphome config esphome/devices/${{ matrix.device }}.yaml
