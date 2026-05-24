@@ -1,0 +1,188 @@
+[
+  {
+    "id": "tab_automation_runner_v1",
+    "type": "tab",
+    "label": "71 Automation Runner",
+    "disabled": false,
+    "info": "Automation-Runner: Läuft jede Minute, prüft alle enabled Automatisierungen, wertet Bedingungen aus und sendet valide Befehle via MQTT. Commands werden ausschliesslich über commandMinimal erzeugt. Duplikatsschutz per flow-context (Minutenschlüssel pro automation_id)."
+  },
+  {
+    "id": "inject_runner_tick_v1",
+    "type": "inject",
+    "z": "tab_automation_runner_v1",
+    "name": "Tick jede Minute",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{}",
+    "payloadType": "json",
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "fn_runner_load_automations_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_runner_load_automations_v1",
+    "type": "function",
+    "z": "tab_automation_runner_v1",
+    "name": "Aktive Automatisierungen abfragen",
+    "func": "// Alle enabled=1 Automatisierungen aus der DB laden.\n// Ergebnis wird im nächsten Schritt mit den Bedingungen zusammengeführt.\nconst store = global.get('automationStore');\nif (!store) {\n    node.warn('automationStore nicht verfügbar – Runner übersprungen');\n    return null;\n}\nmsg.topic = store.buildEnabledListQuery();\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 100,
+    "wires": [
+      [
+        "sqlite_runner_load_automations_v1"
+      ]
+    ]
+  },
+  {
+    "id": "sqlite_runner_load_automations_v1",
+    "type": "sqlite",
+    "z": "tab_automation_runner_v1",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Automatisierungen lesen",
+    "x": 660,
+    "y": 100,
+    "wires": [
+      [
+        "fn_runner_load_conditions_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_runner_load_conditions_v1",
+    "type": "function",
+    "z": "tab_automation_runner_v1",
+    "name": "Bedingungen abfragen",
+    "func": "// Alle Bedingungen aller aktiven Automatisierungen in einem Abfrage laden.\n// Die Automations-Rows werden im flow-context zwischengespeichert.\nconst store = global.get('automationStore');\nif (!store) {\n    return null;\n}\nconst automationRows = Array.isArray(msg.payload) ? msg.payload : [];\nif (automationRows.length === 0) {\n    // Keine aktiven Automatisierungen – direkt fertig\n    return null;\n}\n// Automations für den nächsten Schritt im flow-context merken\nflow.set('runner_automations', automationRows);\nmsg.topic = store.buildAllConditionsForEnabledQuery();\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 900,
+    "y": 100,
+    "wires": [
+      [
+        "sqlite_runner_load_conditions_v1"
+      ]
+    ]
+  },
+  {
+    "id": "sqlite_runner_load_conditions_v1",
+    "type": "sqlite",
+    "z": "tab_automation_runner_v1",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Bedingungen lesen",
+    "x": 1140,
+    "y": 100,
+    "wires": [
+      [
+        "fn_runner_evaluate_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_runner_evaluate_v1",
+    "type": "function",
+    "z": "tab_automation_runner_v1",
+    "name": "Bedingungen auswerten + Befehle bauen",
+    "func": "// Kernlogik des Runners:\n//   1. Bedingungen pro Automatisierung aus den DB-Rows zusammenführen\n//   2. shouldTrigger() aufrufen (Duplikatsschutz + Bedingungsprüfung)\n//   3. Für jede ausgelöste Automatisierung commandMinimal aufrufen\n//   4. MQTT-Befehle und Run-Ergebnisse getrennt ausgeben\n\nconst store = global.get('automationStore');\nconst engine = global.get('automationEngine');\nconst commandMinimal = global.get('commandMinimal');\n\nif (!store || !engine || !commandMinimal) {\n    node.warn('Mindestens ein Hilfsmodul fehlt (automationStore/automationEngine/commandMinimal)');\n    return null;\n}\n\n// Aktive Automatisierungen aus flow-context laden (aus vorherigem Schritt).\nconst automationRows = flow.get('runner_automations') || [];\nconst conditionRows = Array.isArray(msg.payload) ? msg.payload : [];\n\n// Bedingungen nach automation_id gruppieren (O(n) statt verschachtelter Schleifen).\nconst conditionsByAutomation = {};\nconditionRows.forEach(function(c) {\n    if (!conditionsByAutomation[c.automation_id]) {\n        conditionsByAutomation[c.automation_id] = [];\n    }\n    conditionsByAutomation[c.automation_id].push(c);\n});\n\n// Duplikatsschutz-Map aus flow-context laden (Minutenschlüssel pro automation_id).\nlet lastRunMap = flow.get('runner_last_run_map') || {};\n\n// smarthome_runtime enthält alle aktuellen Gerätezustände (wird von 20_device_store befüllt).\nconst runtime = global.get('smarthome_runtime') || { devices: {}, masters: {} };\n\nconst now = new Date();\nconst outMessages = [];\nconst resultStatements = [];\n\nfunction merkeRunResult(automationId, resultText) {\n    const sql = store.buildUpdateRunResultStatement(automationId, resultText);\n    if (sql) {\n        resultStatements.push(sql);\n    }\n}\n\nautomationRows.forEach(function(automation) {\n    const conditions = conditionsByAutomation[automation.automation_id] || [];\n\n    // Duplikatsschutz + alle Bedingungen prüfen.\n    const triggerResult = engine.shouldTrigger(automation, conditions, {\n        runtime: runtime,\n        now: now,\n        lastRunMap: lastRunMap\n    });\n\n    if (!triggerResult.trigger) {\n        node.debug('Automatisierung ' + automation.automation_id + ' nicht ausgelöst: ' + triggerResult.reason);\n        return;\n    }\n\n    // Ab hier gilt die Automation als Ausführungsversuch. Auch Fehler werden\n    // in last_result geschrieben, damit die UI nicht schweigend veraltet bleibt.\n    lastRunMap[automation.automation_id] = engine.currentMinuteKey(now);\n\n    const actionInput = engine.buildActionInput(automation, runtime);\n    if (!actionInput.ok) {\n        const resultText = 'error: ' + actionInput.error;\n        node.warn('Automatisierung ' + automation.automation_id + ': ' + actionInput.error);\n        merkeRunResult(automation.automation_id, resultText);\n        return;\n    }\n\n    // Befehl ausschliesslich über commandMinimal erzeugen – keine direkte MQTT-Payload-Erfindung.\n    let commandResult;\n    if (actionInput.actionKind === 'net_erl_relay_1') {\n        commandResult = commandMinimal.buildNetErlRelay1Command(runtime, actionInput.commandInput);\n    } else if (actionInput.actionKind === 'net_zrl_cover') {\n        commandResult = commandMinimal.buildCoverCommand(runtime, actionInput.commandInput);\n    } else {\n        const resultText = 'error: unbekannte action_kind ' + actionInput.actionKind;\n        node.warn(resultText);\n        merkeRunResult(automation.automation_id, resultText);\n        return;\n    }\n\n    if (!commandResult.ok) {\n        const resultText = 'error: ' + (commandResult.error || commandResult.message || 'command_failed');\n        node.warn('Automatisierung ' + automation.automation_id + ' – Befehlsfehler: ' + commandResult.message);\n        merkeRunResult(automation.automation_id, resultText);\n        return;\n    }\n\n    // MQTT-Nachricht für den mqtt out Node vorbereiten.\n    outMessages.push({\n        topic: commandResult.command.topic,\n        payload: JSON.stringify(commandResult.command.payload),\n        qos: 1,\n        retain: false,\n        _automationId: automation.automation_id\n    });\n\n    merkeRunResult(automation.automation_id, 'ok');\n    node.log('Automatisierung ausgelöst: ' + automation.name + ' → ' + commandResult.command.topic);\n});\n\n// Aktualisierten Duplikatsschutz in flow-context zurückschreiben.\nflow.set('runner_last_run_map', lastRunMap);\n\nconst resultMsg = resultStatements.length > 0\n    ? { topic: ['BEGIN IMMEDIATE;', ...resultStatements, 'COMMIT;'].join('\\n') }\n    : null;\n\n// Output 1: mehrere MQTT-Nachrichten auf einem Ausgang als Array.\n// Output 2: ein SQLite-Batch mit allen last_run_at/last_result-Updates.\nreturn [outMessages.length > 0 ? outMessages : null, resultMsg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 220,
+    "wires": [
+      [
+        "mqtt_runner_publish_v1"
+      ],
+      [
+        "sqlite_runner_update_results_v1"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_runner_publish_v1",
+    "type": "mqtt out",
+    "z": "tab_automation_runner_v1",
+    "name": "Befehl veröffentlichen",
+    "topic": "",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "cfg_mqtt_broker",
+    "x": 700,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "catch_runner_v1",
+    "type": "catch",
+    "z": "tab_automation_runner_v1",
+    "name": "Runner-Fehler",
+    "scope": null,
+    "uncaught": false,
+    "x": 160,
+    "y": 340,
+    "wires": [
+      [
+        "fn_runner_error_v1"
+      ]
+    ]
+  },
+  {
+    "id": "fn_runner_error_v1",
+    "type": "function",
+    "z": "tab_automation_runner_v1",
+    "name": "Fehler loggen",
+    "func": "// Unerwartete Fehler im Runner als Warnung loggen.\n// Kein Re-Throw – Runner soll beim nächsten Tick erneut versuchen.\nconst errText = (msg.error && msg.error.message) || String(msg.error) || 'Unbekannter Fehler';\nnode.warn('Automation-Runner Fehler: ' + errText);\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "sqlite_runner_update_results_v1",
+    "type": "sqlite",
+    "z": "tab_automation_runner_v1",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "batch",
+    "sql": "",
+    "name": "Ausführungsergebnis speichern",
+    "x": 730,
+    "y": 280,
+    "wires": [
+      []
+    ]
+  }
+]

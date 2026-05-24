@@ -262,3 +262,77 @@ Wait-DbProjection
 Assert-NoSqlMigrationErrors
 
 Write-Host "Smoke test passed: numeric caps, button_flags, ACK snapshot fields and SQL/migration startup gate are ok."
+
+# =============================================================================
+# Erweiterung: Automatisierungs-Schema-Prüfung
+# =============================================================================
+# Prüft, ob die Tabellen automations und automation_conditions nach dem Start
+# korrekt angelegt wurden und FOREIGN KEY-Constraints aktiv sind.
+# Keine Daten werden geschrieben – nur Schema-Prüfung (idempotent).
+# =============================================================================
+
+function Test-AutomationsSchema {
+    $checkScript = @'
+const sqlite3 = require('/data/node_modules/sqlite3');
+const db = new sqlite3.Database('/data/sqlite/smarthome_phase1.db');
+
+function all(sql) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, [], (error, rows) => {
+      if (error) { reject(error); return; }
+      resolve(rows || []);
+    });
+  });
+}
+
+(async () => {
+  const failures = [];
+
+  // Tabelle automations prüfen
+  const autoInfo = await all("PRAGMA table_info(automations)");
+  const autoColNames = autoInfo.map(c => c.name);
+  for (const col of ['automation_id','name','enabled','target_device_id','action_kind','action_payload','created_at','updated_at','last_run_at','last_result']) {
+    if (!autoColNames.includes(col)) {
+      failures.push('automations: Spalte fehlt: ' + col);
+    }
+  }
+
+  // Tabelle automation_conditions prüfen
+  const condInfo = await all("PRAGMA table_info(automation_conditions)");
+  const condColNames = condInfo.map(c => c.name);
+  for (const col of ['condition_id','automation_id','condition_scope','condition_kind','source_device_id','field_name','operator','expected_value','weekdays','time_start','time_end','created_at','updated_at']) {
+    if (!condColNames.includes(col)) {
+      failures.push('automation_conditions: Spalte fehlt: ' + col);
+    }
+  }
+
+  // FOREIGN KEY auf automation_id prüfen
+  const fkInfo = await all("PRAGMA foreign_key_list(automation_conditions)");
+  const hasFk = fkInfo.some(fk => fk.table === 'automations' && fk.from === 'automation_id');
+  if (!hasFk) {
+    failures.push('automation_conditions: FOREIGN KEY auf automations fehlt');
+  }
+
+  console.log(JSON.stringify({ ok: failures.length === 0, failures }, null, 2));
+  if (failures.length > 0) { process.exit(1); }
+})().catch(e => {
+  console.error(String(e));
+  process.exit(1);
+}).finally(() => db.close());
+'@
+
+    $output = & docker compose -f $ComposeFile exec -T nodered node -e $checkScript 2>&1
+    $exitCode = $LASTEXITCODE
+    return @{
+        ExitCode = $exitCode
+        Output   = ($output -join "`n")
+    }
+}
+
+Write-Host "`nPrüfe Automatisierungs-Schema..."
+$schemaCheck = Test-AutomationsSchema
+Write-Host $schemaCheck.Output
+if ($schemaCheck.ExitCode -ne 0) {
+    throw "Automatisierungs-Schema-Prüfung fehlgeschlagen.`n$($schemaCheck.Output)"
+}
+Write-Host "Schema-Prüfung bestanden: automations und automation_conditions korrekt angelegt."

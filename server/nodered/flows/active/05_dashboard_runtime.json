@@ -137,5 +137,105 @@
     "visible": true,
     "disabled": false,
     "groupType": "default"
+  },
+  {
+    "id": "cfg_ui_page_master_v1",
+    "type": "ui-page",
+    "name": "Master",
+    "ui": "cfg_ui_base_v1",
+    "path": "/master",
+    "icon": "router-wireless",
+    "layout": "grid",
+    "theme": "cfg_ui_theme_v1",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": 0,
+        "cols": 3
+      },
+      {
+        "name": "Tablet",
+        "px": 576,
+        "cols": 6
+      },
+      {
+        "name": "Small Desktop",
+        "px": 768,
+        "cols": 9
+      },
+      {
+        "name": "Desktop",
+        "px": 1024,
+        "cols": 12
+      }
+    ],
+    "order": 3,
+    "className": "",
+    "visible": true,
+    "disabled": false
+  },
+  {
+    "id": "cfg_ui_page_automations_v1",
+    "type": "ui-page",
+    "name": "Automatisierungen",
+    "ui": "cfg_ui_base_v1",
+    "path": "/automatisierungen",
+    "icon": "cog-play-outline",
+    "layout": "grid",
+    "theme": "cfg_ui_theme_v1",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": 0,
+        "cols": 3
+      },
+      {
+        "name": "Tablet",
+        "px": 576,
+        "cols": 6
+      },
+      {
+        "name": "Small Desktop",
+        "px": 768,
+        "cols": 9
+      },
+      {
+        "name": "Desktop",
+        "px": 1024,
+        "cols": 12
+      }
+    ],
+    "order": 4,
+    "className": "",
+    "visible": true,
+    "disabled": false
+  },
+  {
+    "id": "cfg_ui_group_master_v1",
+    "type": "ui-group",
+    "name": "Master",
+    "page": "cfg_ui_page_master_v1",
+    "width": 12,
+    "height": 0,
+    "order": 1,
+    "showTitle": false,
+    "className": "",
+    "visible": true,
+    "disabled": false,
+    "groupType": "default"
+  },
+  {
+    "id": "cfg_ui_group_automations_v1",
+    "type": "ui-group",
+    "name": "Automatisierungen",
+    "page": "cfg_ui_page_automations_v1",
+    "width": 12,
+    "height": 0,
+    "order": 1,
+    "showTitle": false,
+    "className": "",
+    "visible": true,
+    "disabled": false,
+    "groupType": "default"
   }
 ]

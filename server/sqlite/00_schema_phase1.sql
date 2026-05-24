@@ -111,3 +111,47 @@ CREATE TABLE IF NOT EXISTS master_status (
     last_seen_at TEXT,
     updated_at   TEXT NOT NULL
 );
+
+-- ---------------------------------------------------------------------------
+-- Tabelle: automations – Automatisierungsregeln
+-- ---------------------------------------------------------------------------
+-- Enthält je eine Automatisierung mit Zielgerät, Aktion und globalem Status.
+-- action_payload ist JSON – erzeugt ausschliesslich über commandMinimal.
+-- last_result speichert das Ergebnis (ok/error) des letzten Ausführungsversuchs.
+CREATE TABLE IF NOT EXISTS automations (
+    automation_id  TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    target_device_id TEXT NOT NULL,
+    action_kind    TEXT NOT NULL,
+    action_payload TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    last_run_at    TEXT,
+    last_result    TEXT
+);
+
+-- ---------------------------------------------------------------------------
+-- Tabelle: automation_conditions – Bedingungen pro Automatisierung
+-- ---------------------------------------------------------------------------
+-- Eine Automatisierung kann mehrere Bedingungen haben (AND-Verknüpfung).
+-- condition_scope: 'global' (Zeit/Wochentag) oder 'local' (Gerätezustand).
+-- condition_kind:  'weekdays', 'time_exact', 'time_window', 'device_state'.
+-- Operatoren:      eq, neq, gt, gte, lt, lte (nur diese sechs erlaubt).
+-- ON DELETE CASCADE löscht Bedingungen automatisch bei Löschung der Automatisierung.
+CREATE TABLE IF NOT EXISTS automation_conditions (
+    condition_id      TEXT PRIMARY KEY,
+    automation_id     TEXT NOT NULL,
+    condition_scope   TEXT NOT NULL,
+    condition_kind    TEXT NOT NULL,
+    source_device_id  TEXT,
+    field_name        TEXT,
+    operator          TEXT,
+    expected_value    TEXT,
+    weekdays          TEXT,
+    time_start        TEXT,
+    time_end          TEXT,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    FOREIGN KEY (automation_id) REFERENCES automations(automation_id) ON DELETE CASCADE
+);

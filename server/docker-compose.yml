@@ -104,6 +104,12 @@ services:
           await ensureColumn(db, "device_state_latest", "cover_calibrated", "INTEGER");
           await ensureColumn(db, "device_state_latest", "button_flags", "INTEGER");
           await ensureColumn(db, "device_state_latest", "last_ack_source", "TEXT");
+
+          // --- Migrationen Phase 1.1: Automatisierungen ---
+          // Die Tabellen automations und automation_conditions werden idempotent
+          // über IF NOT EXISTS im Schema angelegt – kein ALTER TABLE nötig.
+          // FOREIGN KEY-Unterstützung explizit aktivieren (SQLite-Standard: aus).
+          await runSql(db, "PRAGMA foreign_keys = ON");
         }
 
         // Schema-Gesamtablauf: CREATE TABLE + Migrationen
@@ -169,7 +175,9 @@ services:
             "    timeHelpers: require('/data/lib/time_helpers'),",
             "    commandMinimal: require('/data/lib/command_minimal'),",
             "    coverAutomation: require('/data/lib/cover_automation'),",
-            "    dashboardV1: require('/data/lib/dashboard_v1')",
+            "    dashboardV1: require('/data/lib/dashboard_v1'),",
+            "    automationStore: require('/data/lib/automation_store'),",
+            "    automationEngine: require('/data/lib/automation_engine')",
             '  }',
             '};',
             ''

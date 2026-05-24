@@ -1,0 +1,70 @@
+[
+  {
+    "id": "tab_dashboard_master_v1",
+    "type": "tab",
+    "label": "65 Dashboard Master",
+    "disabled": false,
+    "info": "Master-Statusseite: Zeigt alle Einträge aus master_status (master_id, online, wifi, mqtt, espnow, fw, last_seen_at, updated_at). Keine Steuerkommandos – reine Anzeige. Daten werden vom ui-template-Event angefordert und über SQLite geladen."
+  },
+  {
+    "id": "ui_template_master_v1",
+    "type": "ui-template",
+    "z": "tab_dashboard_master_v1",
+    "group": "cfg_ui_group_master_v1",
+    "name": "Master View",
+    "order": 1,
+    "width": 12,
+    "height": 0,
+    "format": "<template>\n  <div class=\"sh-page\" :class=\"{ 'sh-light': isLight }\">\n    <div class=\"sh-toolbar\">\n      <div>\n        <h2>Master-Status</h2>\n        <p class=\"sh-muted\">Gateway-Verbindungsstatus aus master_status.</p>\n      </div>\n      <div class=\"sh-toolbar-actions\">\n        <button class=\"sh-btn\" @click=\"reload\">Neu laden</button>\n        <button class=\"sh-theme-btn\" @click=\"toggleTheme\" :title=\"isLight ? 'Zum Dark Mode wechseln' : 'Zum Light Mode wechseln'\">\n          <i :class=\"isLight ? 'mdi mdi-weather-night' : 'mdi mdi-white-balance-sunny'\"></i>\n        </button>\n      </div>\n    </div>\n\n    <div class=\"sh-empty\" v-if=\"!masters.length\">Noch keine Master-Einträge in master_status vorhanden.</div>\n\n    <div class=\"sh-master-grid\" v-else>\n      <article\n        v-for=\"master in masters\"\n        :key=\"master.master_id\"\n        class=\"sh-panel sh-master-card\">\n\n        <div class=\"sh-card-head\">\n          <div>\n            <span class=\"sh-kicker\"><i class=\"mdi mdi-router-wireless\"></i>Master-Gateway</span>\n            <h3>{{ master.master_id }}</h3>\n          </div>\n          <div class=\"sh-chip-stack\">\n            <span class=\"sh-chip\" :class=\"master.online ? 'sh-chip-online' : 'sh-chip-offline'\">\n              {{ master.online ? 'online' : 'offline' }}\n            </span>\n          </div>\n        </div>\n\n        <div class=\"sh-state-list\">\n          <div class=\"sh-state-row\">\n            <span>WLAN</span>\n            <strong :class=\"master.wifi ? 'sh-val-ok' : 'sh-val-warn'\">\n              {{ master.wifi ? 'verbunden' : 'getrennt' }}\n            </strong>\n          </div>\n          <div class=\"sh-state-row\">\n            <span>MQTT</span>\n            <strong :class=\"master.mqtt ? 'sh-val-ok' : 'sh-val-warn'\">\n              {{ master.mqtt ? 'verbunden' : 'getrennt' }}\n            </strong>\n          </div>\n          <div class=\"sh-state-row\">\n            <span>ESP-NOW</span>\n            <strong :class=\"master.espnow ? 'sh-val-ok' : 'sh-val-warn'\">\n              {{ master.espnow ? 'aktiv' : 'inaktiv' }}\n            </strong>\n          </div>\n          <div class=\"sh-state-row\" v-if=\"master.fw\">\n            <span>Firmware</span>\n            <strong>{{ master.fw }}</strong>\n          </div>\n          <div class=\"sh-state-row\" v-if=\"master.last_seen_at\">\n            <span>Zuletzt gesehen</span>\n            <strong :title=\"master.last_seen_at\">{{ formatRelative(master.last_seen_at) }}</strong>\n          </div>\n          <div class=\"sh-state-row\" v-if=\"master.updated_at\">\n            <span>Aktualisiert</span>\n            <strong :title=\"master.updated_at\">{{ formatRelative(master.updated_at) }}</strong>\n          </div>\n        </div>\n\n      </article>\n    </div>\n  </div>\n</template>\n<script>\nexport default {\n  data() {\n    return {\n      isLight: false,\n      autoRefreshTimer: null,\n      autoRefreshMs: 10000\n    }\n  },\n  computed: {\n    masters() {\n      const rows = this.msg?.payload?.masters\n      return Array.isArray(rows) ? rows : []\n    }\n  },\n  methods: {\n    reload() {\n      this.send({ payload: { action: 'load' } })\n    },\n    loadTheme() {\n      this.isLight = localStorage.getItem('sh-theme') === 'light'\n      this.applyTheme()\n    },\n    toggleTheme() {\n      this.isLight = !this.isLight\n      localStorage.setItem('sh-theme', this.isLight ? 'light' : 'dark')\n      this.applyTheme()\n      window.dispatchEvent(new CustomEvent('sh-theme-change', { detail: { light: this.isLight } }))\n    },\n    applyTheme() {\n      document.documentElement.classList.toggle('sh-light', this.isLight)\n      document.body.classList.toggle('sh-light', this.isLight)\n      if (this.$el) this.$el.classList.toggle('sh-light', this.isLight)\n    },\n    onThemeChange(event) {\n      if (event?.detail && 'light' in event.detail) {\n        this.isLight = event.detail.light\n        this.applyTheme()\n      }\n    },\n    formatRelative(iso) {\n      if (!iso) return '-'\n      const ts = Date.parse(iso)\n      if (!isFinite(ts)) return iso\n      const delta = Math.max(0, Math.floor((Date.now() - ts) / 1000))\n      if (delta < 60) return 'vor ' + delta + ' s'\n      if (delta < 3600) return 'vor ' + Math.floor(delta / 60) + ' min'\n      if (delta < 86400) return 'vor ' + Math.floor(delta / 3600) + ' h'\n      return new Date(ts).toLocaleString('de-DE')\n    },\n    startAutoRefresh() {\n      this.stopAutoRefresh()\n      this.autoRefreshTimer = window.setInterval(() => {\n        if (!document.hidden) this.reload()\n      }, this.autoRefreshMs)\n    },\n    stopAutoRefresh() {\n      if (this.autoRefreshTimer) {\n        window.clearInterval(this.autoRefreshTimer)\n        this.autoRefreshTimer = null\n      }\n    }\n  },\n  mounted() {\n    setTimeout(() => this.reload(), 120)\n    this.startAutoRefresh()\n    this.loadTheme()\n    window.addEventListener('sh-theme-change', this.onThemeChange)\n    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.reload() })\n  },\n  unmounted() {\n    this.stopAutoRefresh()\n    window.removeEventListener('sh-theme-change', this.onThemeChange)\n  }\n}\n</script>\n<style>\n.sh-page{--sh-border:#2a3846;--sh-text:#ecf3fa;--sh-muted:#9db0c3;color:var(--sh-text);padding:.35rem 0 .6rem;width:100%}\n.sh-page *{box-sizing:border-box;min-width:0}\n.sh-toolbar,.sh-toolbar-actions,.sh-chip-stack{display:flex;gap:.45rem;flex-wrap:wrap}\n.sh-toolbar{justify-content:space-between;align-items:flex-start;margin-bottom:.8rem}\n.sh-muted{color:var(--sh-muted);margin:.15rem 0 0}\n.sh-btn{min-height:44px;border:1px solid var(--sh-border);border-radius:999px;background:linear-gradient(180deg,rgba(22,33,45,.96),rgba(10,17,25,.98));color:var(--sh-text);padding:.62rem .95rem;cursor:pointer;touch-action:manipulation}\n.sh-theme-btn{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid var(--sh-border);border-radius:999px;background:linear-gradient(180deg,rgba(22,33,45,.96),rgba(10,17,25,.98));color:var(--sh-text);cursor:pointer;font-size:1.2rem;padding:0}\n.sh-chip{display:inline-flex;align-items:center;border-radius:999px;border:1px solid transparent;background:#182432;color:var(--sh-text);padding:.3rem .6rem;font-size:.82rem}\n.sh-chip-stack{justify-content:flex-end}\n.sh-chip-online{background:rgba(21,78,53,.82);color:#9af3c2;border-color:rgba(86,185,129,.3)}\n.sh-chip-offline{background:rgba(86,28,38,.86);color:#ffb5bf;border-color:rgba(185,89,105,.28)}\n.sh-empty{border:1px solid var(--sh-border);border-radius:18px;background:linear-gradient(180deg,rgba(18,27,38,.97),rgba(11,18,25,.99));padding:.9rem 1rem}\n.sh-master-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,20rem),1fr));gap:.75rem;align-items:start}\n.sh-panel{border:1px solid var(--sh-border);border-radius:18px;background:linear-gradient(180deg,rgba(21,32,43,.98),rgba(11,18,24,.99));padding:.85rem;width:100%}\n.sh-master-card{border-color:rgba(99,168,207,.45)}\n.sh-card-head{display:flex;justify-content:space-between;gap:.7rem;align-items:flex-start;margin-bottom:.7rem}\n.sh-card-head>div:first-child{min-width:0;flex:1 1 auto}\n.sh-card-head h3{margin:0;overflow-wrap:anywhere}\n.sh-kicker{display:inline-flex;align-items:center;gap:.35rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:#a8c4de;margin-bottom:.2rem}\n.sh-state-list{display:grid;gap:.25rem}\n.sh-state-row{display:grid;grid-template-columns:minmax(7rem,auto) minmax(0,1fr);gap:.7rem;border-bottom:1px solid rgba(31,45,58,.9);padding-bottom:.28rem}\n.sh-state-row span,.sh-state-row strong{overflow-wrap:anywhere;word-break:break-word}\n.sh-state-row strong{text-align:right}\n.sh-val-ok{color:#9af3c2}.sh-val-warn{color:#ffb5bf}\n.sh-page.sh-light{--sh-border:#d0d7e2;--sh-text:#1a2332;--sh-muted:#687690;color:var(--sh-text)}\n.sh-page.sh-light .sh-panel{background:#fff;border-color:#dde3ec}\n.sh-page.sh-light .sh-master-card{border-color:rgba(69,138,177,.45)}\n.sh-page.sh-light .sh-empty{background:#fff;border-color:#dde3ec}\n.sh-page.sh-light .sh-btn{background:#36c6aa;border-color:#36c6aa;color:#fff}\n.sh-page.sh-light .sh-theme-btn{background:#fff;border-color:#c8d0dc;color:#1a2332}\n.sh-page.sh-light .sh-chip-online{background:#d4f5e2;color:#0d5c2e}\n.sh-page.sh-light .sh-chip-offline{background:#fde4e8;color:#8c1f2e}\n.sh-page.sh-light .sh-state-row{border-bottom-color:#e4e9f0}\n.sh-page.sh-light .sh-val-ok{color:#0d5c2e}.sh-page.sh-light .sh-val-warn{color:#8c1f2e}\n.sh-page.sh-light .sh-kicker{color:#4a6a8e}\n.sh-page.sh-light .sh-muted{color:#687690}\n@media (max-width:640px){.sh-toolbar{flex-direction:column;align-items:stretch}.sh-toolbar-actions{width:100%}.sh-master-grid{grid-template-columns:1fr}}\n</style>",
+    "storeOutMessages": true,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 220,
+    "y": 140,
+    "wires": [["fn_master_build_query_v1"]]
+  },
+  {
+    "id": "fn_master_build_query_v1",
+    "type": "function",
+    "z": "tab_dashboard_master_v1",
+    "name": "Master-Abfrage bauen",
+    "func": "// Alle Master-Einträge aus master_status laden.\n// Sortierung: zuerst online, dann nach master_id.\nmsg.topic = [\n    \"SELECT\",\n    \"  master_id, online, wifi, mqtt, espnow, fw, last_seen_at, updated_at\",\n    \"FROM master_status\",\n    \"ORDER BY\",\n    \"  CASE WHEN online = 1 THEN 0 ELSE 1 END,\",\n    \"  lower(master_id);\"\n].join(\" \");\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 140,
+    "wires": [["sqlite_master_read_v1"]]
+  },
+  {
+    "id": "sqlite_master_read_v1",
+    "type": "sqlite",
+    "z": "tab_dashboard_master_v1",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "msg.topic",
+    "sql": "",
+    "name": "Master-Status lesen",
+    "x": 680,
+    "y": 140,
+    "wires": [["fn_master_build_payload_v1"]]
+  },
+  {
+    "id": "fn_master_build_payload_v1",
+    "type": "function",
+    "z": "tab_dashboard_master_v1",
+    "name": "Master-Payload bauen",
+    "func": "// SQLite-Rows in ein Dashboard-Payload übersetzen.\n// online/wifi/mqtt/espnow werden auf boolean normiert (SQLite speichert 0/1).\nconst rows = Array.isArray(msg.payload) ? msg.payload : [];\nconst masters = rows.map(function(row) {\n    return {\n        master_id:   row.master_id,\n        online:      row.online  === 1 || row.online  === true,\n        wifi:        row.wifi    === 1 || row.wifi    === true,\n        mqtt:        row.mqtt    === 1 || row.mqtt    === true,\n        espnow:      row.espnow  === 1 || row.espnow  === true,\n        fw:          row.fw      || null,\n        last_seen_at: row.last_seen_at || null,\n        updated_at:  row.updated_at   || null\n    };\n});\nmsg.payload = { masters: masters };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 920,
+    "y": 140,
+    "wires": [["ui_template_master_v1"]]
+  }
+]

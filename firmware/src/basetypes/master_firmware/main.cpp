@@ -193,29 +193,29 @@ constexpr uint16_t REGISTRY_PERSIST_VERSION = 1U;
 // STRUKTUREN - Pending-Nachrichten, Node-Registry, Master-Status
 // =============================================================================
 
-// PendingCmdRequest: Ausstehende CMD-Nachricht, deren ACK noch nicht eingetroffen ist.
-struct PendingCmdRequest {
+// PendingHeader: Gemeinsame Felder fuer ausstehende ACK-pflichtige Nachrichten.
+struct PendingHeader {
     bool aktiv;                          // true = Pending laeuft
-    uint8_t seq;                         // ESP-NOW-Sequenznummer der Nachricht
-    uint8_t retries;                     // Anzahl bereits erfolgter Retries
-    uint8_t cmd_type;                    // Kommando-Typ (SH_CMD_SET_RELAY, SH_CMD_COVER, ...)
-    uint8_t param1;                      // Parameter 1 (z.B. Relais-Index)
-    uint8_t param2;                      // Parameter 2 (z.B. Ziel-Zustand)
+    uint8_t seq;                         // ESP-NOW-Sequenznummer
+    uint8_t retries;                     // Retry-Zaehler
     unsigned long letztes_senden_ms;     // Zeitstempel letzter Sendevorgang
     char request_id[REQUEST_ID_LEN];     // request_id aus MQTT-Kommando (fuer ACK)
     char command_channel[24];            // MQTT-Channel (fuer ACK-Routing)
 };
 
+// PendingCmdRequest: Ausstehende CMD-Nachricht, deren ACK noch nicht eingetroffen ist.
+struct PendingCmdRequest {
+    PendingHeader hdr;                   // Gemeinsame Pending-Felder (aktiv, seq, retries, ...)
+    uint8_t cmd_type;                    // Kommando-Typ (SH_CMD_SET_RELAY, SH_CMD_COVER, ...)
+    uint8_t param1;                      // Parameter 1 (z.B. Relais-Index)
+    uint8_t param2;                      // Parameter 2 (z.B. Ziel-Zustand)
+};
+
 // PendingConfigRequest: Ausstehende CFG-Nachricht, deren ACK noch nicht eingetroffen ist.
 struct PendingConfigRequest {
-    bool aktiv;                          // true = Pending laeuft
-    uint8_t seq;                         // ESP-NOW-Sequenznummer
-    uint8_t retries;                     // Retry-Zaehler
+    PendingHeader hdr;                   // Gemeinsame Pending-Felder (aktiv, seq, retries, ...)
     uint8_t param_id;                    // Konfig-Parameter-ID (z.B. SH_CFG_REPORT_INTERVAL_S)
     uint16_t value;                      // Konfig-Wert
-    unsigned long letztes_senden_ms;     // Zeitstempel letzter Sendevorgang
-    char request_id[REQUEST_ID_LEN];     // request_id aus MQTT-Kommando
-    char command_channel[24];            // MQTT-Channel
 };
 
 // NodeRuntime: Laufzeitzustand einer einzelnen Node in der Registry.
@@ -1786,6 +1786,244 @@ void verarbeiteHeartbeat(const uint8_t* senderMac, const SmartHome::HeartbeatPay
     logf("INFO", "HEARTBEAT von %s (uptime=%lus)", payload.node_id, (unsigned long)payload.uptime_s);
 }
 
+// =============================================================================
+// DEVICE-CLASS STATE PARSER – je einer pro Geraeteklasse
+// =============================================================================
+// Jeder Parser interpretiert die Payload-Bytes gemaess der Payload-Laenge.
+// Rueckgabe: true = erfolgreich geparst, false = ungueltige Laenge.
+
+static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t payloadLen) {
+    // NET-ERL hat die meisten Varianten: vom einfachen Relais bis zum
+    // LED-Ring-Modul mit erweiterten Luftqualitaetswerten. Die Reihenfolge
+    // ist wichtig, weil manche Config-/State-Layouts gleich gross sind.
+    if (payloadLen == sizeof(SmartHome::StateReportPayload)) {
+        const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
+        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        // Einfaches Relais: keine Sensor-Erweiterungsfelder.
+        setzeNetSenZusatzwerteUnbekannt(nodeIndex);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::StateConfigReportPayload)) {
+        const SmartHome::StateConfigReportPayload& state = *reinterpret_cast<const SmartHome::StateConfigReportPayload*>(payload);
+        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        // Einfaches Relais mit Config: keine Sensor-Erweiterungsfelder.
+        setzeNetSenZusatzwerteUnbekannt(nodeIndex);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload) ||
+        payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)) {
+        const SmartHome::RelayComfortStateReportPayload& state = *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
+        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+        nodeStates[nodeIndex].temp_01c = state.temp_01c;
+        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+        nodeStates[nodeIndex].lux = state.lux;
+        // Sensor-Erweiterungsfelder sind in diesem Payload-Typ nicht belegt.
+        setzeNetSenZusatzwerteUnbekannt(nodeIndex);
+        nodeStates[nodeIndex].motion = (state.motion != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    // ExtendedRelayComfortConfigStateReportPayload und
+    // ExtendedRelayComfortGasStateReportPayload sind beide 41 Bytes.
+    // statePayloadNeedsHelloMeta() haelt Frames dieser Laenge zurueck,
+    // bis SH_CAP_LED_RING aus dem HELLO bekannt ist.
+    // Nach HELLO gilt:
+    //   SH_CAP_LED_RING gesetzt: Config-State-Layout (kein Gas-Sensor)
+    //   SH_CAP_LED_RING nicht:   Gas-State-Layout
+    // Ohne HELLO darf dieser Block nie erreicht werden.
+    if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortStateReportPayload)) {
+        const SmartHome::ExtendedRelayComfortStateReportPayload& state =
+            *reinterpret_cast<const SmartHome::ExtendedRelayComfortStateReportPayload*>(payload);
+        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+        nodeStates[nodeIndex].temp_01c = state.temp_01c;
+        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+        nodeStates[nodeIndex].lux = state.lux;
+        nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+        nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+        nodeStates[nodeIndex].aqi = state.aqi;
+        nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+        nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+        nodeStates[nodeIndex].motion = (state.motion != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload)) {
+        // 41 Bytes: Config-State (kein Gas-Sensor, SH_CAP_LED_RING gesetzt) ODER
+        // Gas-State (Gas-Sensor vorhanden, SH_CAP_LED_RING nicht gesetzt).
+        // Die Entscheidung haengt an SH_CAP_LED_RING aus dem HELLO-Payload.
+        if (nodeHasCap(nodeIndex, SH_CAP_LED_RING)) {
+            // LED-Ring-Node: Config-State-Layout parsen.
+            const SmartHome::ExtendedRelayComfortConfigStateReportPayload& state =
+                *reinterpret_cast<const SmartHome::ExtendedRelayComfortConfigStateReportPayload*>(payload);
+            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+            nodeStates[nodeIndex].temp_01c = state.temp_01c;
+            nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+            nodeStates[nodeIndex].lux = state.lux;
+            nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+            nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+            nodeStates[nodeIndex].aqi = state.aqi;
+            nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+            nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+            nodeStates[nodeIndex].motion = (state.motion != 0U);
+            nodeStates[nodeIndex].fault = (state.fault != 0U);
+        } else {
+            // Standard-ERL ohne LED-Ring: Gas-State-Layout parsen.
+            const SmartHome::ExtendedRelayComfortGasStateReportPayload& state =
+                *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasStateReportPayload*>(payload);
+            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+            nodeStates[nodeIndex].temp_01c = state.temp_01c;
+            nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+            nodeStates[nodeIndex].lux = state.lux;
+            nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+            nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
+            nodeStates[nodeIndex].aqi = state.aqi;
+            nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+            nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+            nodeStates[nodeIndex].motion = (state.motion != 0U);
+            nodeStates[nodeIndex].fault = (state.fault != 0U);
+        }
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasConfigStateReportPayload)) {
+        const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload& state =
+            *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
+        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+        nodeStates[nodeIndex].temp_01c = state.temp_01c;
+        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+        nodeStates[nodeIndex].lux = state.lux;
+        nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+        nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
+        nodeStates[nodeIndex].aqi = state.aqi;
+        nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+        nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+        nodeStates[nodeIndex].motion = (state.motion != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
+    return false;
+}
+
+static bool parseNetZrlState(size_t nodeIndex, const uint8_t* payload, uint16_t payloadLen) {
+    // NET-ZRL liefert Rolladen-/Cover-Zustand. Config-State enthaelt
+    // zusaetzliche Konfigwerte, aber dieselben Live-Felder.
+    if (payloadLen == sizeof(SmartHome::ZrlStateReportPayload)) {
+        const SmartHome::ZrlStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload);
+        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+        nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
+        nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
+        nodeStates[nodeIndex].cover_state = state.cover_state;
+        nodeStates[nodeIndex].cover_position = state.cover_position;
+        nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
+        // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
+        // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
+        const SmartHome::ZrlConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlConfigStateReportPayload*>(payload);
+        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+        nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
+        nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
+        nodeStates[nodeIndex].cover_state = state.cover_state;
+        nodeStates[nodeIndex].cover_position = state.cover_position;
+        nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
+    return false;
+}
+
+static bool parseNetSenState(size_t nodeIndex, const uint8_t* payload, uint16_t payloadLen) {
+    // NET-SEN kennt Basis-, Extended- und Gas-Varianten. Felder, die in
+    // einer Variante fehlen, werden explizit auf Unknown gesetzt.
+    if (payloadLen == sizeof(SmartHome::SensorStateReportPayload)) {
+        const SmartHome::SensorStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorStateReportPayload*>(payload);
+        nodeStates[nodeIndex].temp_01c = state.temp_01c;
+        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+        nodeStates[nodeIndex].lux = state.lux;
+        nodeStates[nodeIndex].motion = (state.motion != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        setzeNetSenZusatzwerteUnbekannt(nodeIndex);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::SensorConfigStateReportPayload)) {
+        const SmartHome::SensorConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorConfigStateReportPayload*>(payload);
+        nodeStates[nodeIndex].temp_01c = state.temp_01c;
+        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+        nodeStates[nodeIndex].lux = state.lux;
+        nodeStates[nodeIndex].motion = (state.motion != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        setzeNetSenZusatzwerteUnbekannt(nodeIndex);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::ExtendedSensorStateReportPayload) ||
+        payloadLen == sizeof(SmartHome::ExtendedSensorConfigStateReportPayload)) {
+        const SmartHome::ExtendedSensorStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorStateReportPayload*>(payload);
+        nodeStates[nodeIndex].temp_01c = state.temp_01c;
+        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+        nodeStates[nodeIndex].lux = state.lux;
+        nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+        nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
+        nodeStates[nodeIndex].aqi = state.aqi;
+        nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+        nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+        nodeStates[nodeIndex].motion = (state.motion != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::ExtendedSensorGasStateReportPayload) ||
+        payloadLen == sizeof(SmartHome::ExtendedSensorGasConfigStateReportPayload)) {
+        const SmartHome::ExtendedSensorGasStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorGasStateReportPayload*>(payload);
+        nodeStates[nodeIndex].temp_01c = state.temp_01c;
+        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+        nodeStates[nodeIndex].lux = state.lux;
+        nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+        nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
+        nodeStates[nodeIndex].aqi = state.aqi;
+        nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+        nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+        nodeStates[nodeIndex].motion = (state.motion != 0U);
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
+    return false;
+}
+
+static bool parseBatSenState(size_t nodeIndex, const uint8_t* payload, uint16_t payloadLen) {
+    // BAT-SEN sendet kurze Batteriestates. Diese Laengen ueberschneiden
+    // sich mit NET-SEN, deshalb darf die Klasse nicht nur aus sizeof()
+    // geraten werden.
+    if (payloadLen == sizeof(SmartHome::BatteryStateReportPayload)) {
+        const SmartHome::BatteryStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryStateReportPayload*>(payload);
+        nodeStates[nodeIndex].battery_pct = state.battery_pct;
+        nodeStates[nodeIndex].battery_mv = state.battery_mv;
+        nodeStates[nodeIndex].window_open = state.window_open;
+        nodeStates[nodeIndex].rain_raw = state.rain_raw;
+        nodeStates[nodeIndex].button_flags = state.button_flags;
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    if (payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
+        // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
+        // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
+        const SmartHome::BatteryConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryConfigStateReportPayload*>(payload);
+        nodeStates[nodeIndex].battery_pct = state.battery_pct;
+        nodeStates[nodeIndex].battery_mv = state.battery_mv;
+        nodeStates[nodeIndex].window_open = state.window_open;
+        nodeStates[nodeIndex].rain_raw = state.rain_raw;
+        nodeStates[nodeIndex].button_flags = state.button_flags;
+        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        return true;
+    }
+    logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
+    return false;
+}
+
 // Aufgabe: Verarbeitet einen eingehenden STATE-Report und uebernimmt ihn in die Node-Registry.
 // Eingabewerte:
 // - senderMac ist die MAC-Adresse des Senders.
@@ -1860,243 +2098,21 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
         return;
     }
 
+    bool parsed = false;
     switch (nodeStates[nodeIndex].device_class) {
-        case SH_CLASS_NET_ERL: {
-            // NET-ERL hat die meisten Varianten: vom einfachen Relais bis zum
-            // LED-Ring-Modul mit erweiterten Luftqualitaetswerten. Die Reihenfolge
-            // ist wichtig, weil manche Config-/State-Layouts gleich gross sind.
-            if (payloadLen == sizeof(SmartHome::StateReportPayload)) {
-                const SmartHome::StateReportPayload& state = *reinterpret_cast<const SmartHome::StateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                // Einfaches Relais: keine Sensor-Erweiterungsfelder.
-                setzeNetSenZusatzwerteUnbekannt(nodeIndex);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::StateConfigReportPayload)) {
-                const SmartHome::StateConfigReportPayload& state = *reinterpret_cast<const SmartHome::StateConfigReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                // Einfaches Relais mit Config: keine Sensor-Erweiterungsfelder.
-                setzeNetSenZusatzwerteUnbekannt(nodeIndex);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload) ||
-                payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)) {
-                const SmartHome::RelayComfortStateReportPayload& state = *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                // Sensor-Erweiterungsfelder sind in diesem Payload-Typ nicht belegt.
-                setzeNetSenZusatzwerteUnbekannt(nodeIndex);
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            // ExtendedRelayComfortConfigStateReportPayload und
-            // ExtendedRelayComfortGasStateReportPayload sind beide 41 Bytes.
-            // statePayloadNeedsHelloMeta() haelt Frames dieser Laenge zurueck,
-            // bis SH_CAP_LED_RING aus dem HELLO bekannt ist.
-            // Nach HELLO gilt:
-            //   SH_CAP_LED_RING gesetzt: Config-State-Layout (kein Gas-Sensor)
-            //   SH_CAP_LED_RING nicht:   Gas-State-Layout
-            // Ohne HELLO darf dieser Block nie erreicht werden.
-            if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortStateReportPayload)) {
-                const SmartHome::ExtendedRelayComfortStateReportPayload& state =
-                    *reinterpret_cast<const SmartHome::ExtendedRelayComfortStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload)) {
-                // 41 Bytes: Config-State (kein Gas-Sensor, SH_CAP_LED_RING gesetzt) ODER
-                // Gas-State (Gas-Sensor vorhanden, SH_CAP_LED_RING nicht gesetzt).
-                // Die Entscheidung haengt an SH_CAP_LED_RING aus dem HELLO-Payload.
-                if (nodeHasCap((size_t)nodeIndex, SH_CAP_LED_RING)) {
-                    // LED-Ring-Node: Config-State-Layout parsen.
-                    const SmartHome::ExtendedRelayComfortConfigStateReportPayload& state =
-                        *reinterpret_cast<const SmartHome::ExtendedRelayComfortConfigStateReportPayload*>(payload);
-                    nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                    nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                    nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                    nodeStates[nodeIndex].lux = state.lux;
-                    nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                    nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
-                    nodeStates[nodeIndex].aqi = state.aqi;
-                    nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                    nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                    nodeStates[nodeIndex].motion = (state.motion != 0U);
-                    nodeStates[nodeIndex].fault = (state.fault != 0U);
-                } else {
-                    // Standard-ERL ohne LED-Ring: Gas-State-Layout parsen.
-                    const SmartHome::ExtendedRelayComfortGasStateReportPayload& state =
-                        *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasStateReportPayload*>(payload);
-                    nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                    nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                    nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                    nodeStates[nodeIndex].lux = state.lux;
-                    nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                    nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-                    nodeStates[nodeIndex].aqi = state.aqi;
-                    nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                    nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                    nodeStates[nodeIndex].motion = (state.motion != 0U);
-                    nodeStates[nodeIndex].fault = (state.fault != 0U);
-                }
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasConfigStateReportPayload)) {
-                const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload& state =
-                    *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-            return;
-        }
+        case SH_CLASS_NET_ERL: parsed = parseNetErlState((size_t)nodeIndex, payload, payloadLen); break;
 
-        case SH_CLASS_NET_ZRL: {
-            // NET-ZRL liefert Rolladen-/Cover-Zustand. Config-State enthaelt
-            // zusaetzliche Konfigwerte, aber dieselben Live-Felder.
-            if (payloadLen == sizeof(SmartHome::ZrlStateReportPayload)) {
-                const SmartHome::ZrlStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
-                nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
-                nodeStates[nodeIndex].cover_state = state.cover_state;
-                nodeStates[nodeIndex].cover_position = state.cover_position;
-                nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
-                // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
-                // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
-                const SmartHome::ZrlConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-                nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
-                nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
-                nodeStates[nodeIndex].cover_state = state.cover_state;
-                nodeStates[nodeIndex].cover_position = state.cover_position;
-                nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-            return;
-        }
+        case SH_CLASS_NET_ZRL: parsed = parseNetZrlState((size_t)nodeIndex, payload, payloadLen); break;
 
-        case SH_CLASS_NET_SEN: {
-            // NET-SEN kennt Basis-, Extended- und Gas-Varianten. Felder, die in
-            // einer Variante fehlen, werden explizit auf Unknown gesetzt.
-            if (payloadLen == sizeof(SmartHome::SensorStateReportPayload)) {
-                const SmartHome::SensorStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                setzeNetSenZusatzwerteUnbekannt((size_t)nodeIndex);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::SensorConfigStateReportPayload)) {
-                const SmartHome::SensorConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::SensorConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                setzeNetSenZusatzwerteUnbekannt((size_t)nodeIndex);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::ExtendedSensorStateReportPayload) ||
-                payloadLen == sizeof(SmartHome::ExtendedSensorConfigStateReportPayload)) {
-                const SmartHome::ExtendedSensorStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::ExtendedSensorGasStateReportPayload) ||
-                payloadLen == sizeof(SmartHome::ExtendedSensorGasConfigStateReportPayload)) {
-                const SmartHome::ExtendedSensorGasStateReportPayload& state = *reinterpret_cast<const SmartHome::ExtendedSensorGasStateReportPayload*>(payload);
-                nodeStates[nodeIndex].temp_01c = state.temp_01c;
-                nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-                nodeStates[nodeIndex].lux = state.lux;
-                nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-                nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-                nodeStates[nodeIndex].aqi = state.aqi;
-                nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-                nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-                nodeStates[nodeIndex].motion = (state.motion != 0U);
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-            return;
-        }
+        case SH_CLASS_NET_SEN: parsed = parseNetSenState((size_t)nodeIndex, payload, payloadLen); break;
 
-        case SH_CLASS_BAT_SEN: {
-            // BAT-SEN sendet kurze Batteriestates. Diese Laengen ueberschneiden
-            // sich mit NET-SEN, deshalb darf die Klasse nicht nur aus sizeof()
-            // geraten werden.
-            if (payloadLen == sizeof(SmartHome::BatteryStateReportPayload)) {
-                const SmartHome::BatteryStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryStateReportPayload*>(payload);
-                nodeStates[nodeIndex].battery_pct = state.battery_pct;
-                nodeStates[nodeIndex].battery_mv = state.battery_mv;
-                nodeStates[nodeIndex].window_open = state.window_open;
-                nodeStates[nodeIndex].rain_raw = state.rain_raw;
-                nodeStates[nodeIndex].button_flags = state.button_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            if (payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
-                // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
-                // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
-                const SmartHome::BatteryConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryConfigStateReportPayload*>(payload);
-                nodeStates[nodeIndex].battery_pct = state.battery_pct;
-                nodeStates[nodeIndex].battery_mv = state.battery_mv;
-                nodeStates[nodeIndex].window_open = state.window_open;
-                nodeStates[nodeIndex].rain_raw = state.rain_raw;
-                nodeStates[nodeIndex].button_flags = state.button_flags;
-                nodeStates[nodeIndex].fault = (state.fault != 0U);
-                break;
-            }
-            logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeId);
-            return;
-        }
+        case SH_CLASS_BAT_SEN: parsed = parseBatSenState((size_t)nodeIndex, payload, payloadLen); break;
 
         default:
             logf("WARN", "STATE_REPORT ohne Handler fuer %s", nodeId);
             return;
     }
+    if (!parsed) return;
 
     nodeStates[nodeIndex].state_bekannt = true;
     sanitisiereNodeStateNachCapabilities((size_t)nodeIndex);
@@ -2149,24 +2165,24 @@ void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payloa
         return;
     }
 
-    if (nodeStates[nodeIndex].pending_cfg.aktiv &&
+    if (nodeStates[nodeIndex].pending_cfg.hdr.aktiv &&
         payload.ack_msg_type == SH_MSG_CFG &&
-        payload.ack_seq == nodeStates[nodeIndex].pending_cfg.seq) {
+        payload.ack_seq == nodeStates[nodeIndex].pending_cfg.hdr.seq) {
         // CFG-ACK bestaetigt genau eine offene Konfigurationsnachricht. Danach
         // wird der Pending-Slot sofort geloescht, damit neue CFGs erlaubt sind.
         const char* statusText = payload.status == SH_ACK_OK ? "ok" : (payload.status == SH_ACK_REJECTED ? "rejected" : "error");
-        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cfg.request_id, nodeStates[nodeIndex].pending_cfg.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
+        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cfg.hdr.request_id, nodeStates[nodeIndex].pending_cfg.hdr.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
         nodeStates[nodeIndex].pending_cfg = {};
         return;
     }
 
-    if (nodeStates[nodeIndex].pending_cmd.aktiv &&
+    if (nodeStates[nodeIndex].pending_cmd.hdr.aktiv &&
         payload.ack_msg_type == SH_MSG_CMD &&
-        payload.ack_seq == nodeStates[nodeIndex].pending_cmd.seq) {
+        payload.ack_seq == nodeStates[nodeIndex].pending_cmd.hdr.seq) {
         // CMD-ACK laeuft getrennt von CFG-ACK. Entscheidend sind Nachrichtentyp
         // und Sequenz, nicht nur die Absender-MAC.
         const char* statusText = payload.status == SH_ACK_OK ? "ok" : (payload.status == SH_ACK_REJECTED ? "rejected" : "error");
-        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cmd.request_id, nodeStates[nodeIndex].pending_cmd.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
+        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cmd.hdr.request_id, nodeStates[nodeIndex].pending_cmd.hdr.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
         nodeStates[nodeIndex].pending_cmd = {};
         return;
     }
@@ -2193,11 +2209,15 @@ void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payloa
 // 3. HELLO, HEARTBEAT, STATE, EVENT und ACK werden an eigene Handler verteilt.
 // 4. Unbekannte Nachrichtentypen werden geloggt und ignoriert.
 void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* daten, int laenge) {
+    // senderMac, daten und laenge werden von onEspNowReceive teilweise
+    // geprueft, bleiben aber als defensive Massnahme fuer direkte Aufrufe
+    // (z. B. aus Tests) und onEspNowReceive (v2) erhalten.
     if (!senderMac || !daten || laenge < (int)sizeof(SmartHome::MsgHeader)) {
         logf("WARN", "ESP-NOW Paket verworfen: ungueltige Eingabe");
         return;
     }
 
+    // CRC-Pruefung ist nur hier vorhanden und wird nicht doppelt validiert.
     if (!SmartHome::hasValidPacketCrc(daten, (size_t)laenge)) {
         logf("WARN", "ESP-NOW Paket verworfen: CRC/Header ungueltig");
         return;
@@ -2310,6 +2330,16 @@ bool sendeStateRequest(size_t nodeIndex) {
     return sendePaket(nodeStates[nodeIndex].mac, SH_MSG_CMD, &payload, sizeof(payload), "STATE_REQUEST");
 }
 
+// Aufgabe: Befuellt den gemeinsamen Pending-Header nach erfolgreichem ESP-NOW-Versand.
+static void fuellePendingHeader(PendingHeader* slot, uint8_t seq, const char* requestId, const char* channel) {
+    slot->aktiv = true;
+    slot->seq  = seq;
+    slot->retries = 0U;
+    slot->letztes_senden_ms = millis();
+    copyText(slot->request_id, sizeof(slot->request_id), requestId);
+    copyText(slot->command_channel, sizeof(slot->command_channel), channel ? channel : "command");
+}
+
 // Aufgabe: Sendet ein bestaetigungspflichtiges CMD an eine Node und merkt es als pending_cmd.
 // Eingabewerte: nodeIndex, cmdType, param1, param2, requestId, Channel und Log-Label.
 // Ausgabewert: true bedeutet, das CMD wurde gesendet und als Pending eingetragen.
@@ -2343,15 +2373,10 @@ bool sendeCmdRequest(size_t nodeIndex, uint8_t cmdType, uint8_t param1, uint8_t 
     // Pending wird erst nach erfolgreichem esp_now_send gesetzt. Sonst koennte
     // ein nicht gesendeter Auftrag spaeter faelschlich timeouten.
     nodeStates[nodeIndex].pending_cmd = {};
-    nodeStates[nodeIndex].pending_cmd.aktiv = true;
-    nodeStates[nodeIndex].pending_cmd.seq = seq;
-    nodeStates[nodeIndex].pending_cmd.retries = 0U;
     nodeStates[nodeIndex].pending_cmd.cmd_type = cmdType;
     nodeStates[nodeIndex].pending_cmd.param1 = param1;
     nodeStates[nodeIndex].pending_cmd.param2 = param2;
-    nodeStates[nodeIndex].pending_cmd.letztes_senden_ms = millis();
-    copyText(nodeStates[nodeIndex].pending_cmd.request_id, sizeof(nodeStates[nodeIndex].pending_cmd.request_id), requestId);
-    copyText(nodeStates[nodeIndex].pending_cmd.command_channel, sizeof(nodeStates[nodeIndex].pending_cmd.command_channel), channel ? channel : "command");
+    fuellePendingHeader(&nodeStates[nodeIndex].pending_cmd.hdr, seq, requestId, channel);
     return true;
 }
 
@@ -2418,14 +2443,9 @@ bool sendeConfigCommand(size_t nodeIndex, uint8_t paramId, uint16_t value, const
     // request_id und command_channel bleiben bis ACK/Timeout erhalten, damit die
     // spaetere MQTT-Antwort exakt zum urspruenglichen Auftrag passt.
     nodeStates[nodeIndex].pending_cfg = {};
-    nodeStates[nodeIndex].pending_cfg.aktiv = true;
-    nodeStates[nodeIndex].pending_cfg.seq = seq;
-    nodeStates[nodeIndex].pending_cfg.retries = 0U;
     nodeStates[nodeIndex].pending_cfg.param_id = paramId;
     nodeStates[nodeIndex].pending_cfg.value = value;
-    nodeStates[nodeIndex].pending_cfg.letztes_senden_ms = millis();
-    copyText(nodeStates[nodeIndex].pending_cfg.request_id, sizeof(nodeStates[nodeIndex].pending_cfg.request_id), requestId);
-    copyText(nodeStates[nodeIndex].pending_cfg.command_channel, sizeof(nodeStates[nodeIndex].pending_cfg.command_channel), channel ? channel : "command");
+    fuellePendingHeader(&nodeStates[nodeIndex].pending_cfg.hdr, seq, requestId, channel);
     return true;
 }
 
@@ -2768,8 +2788,8 @@ static void handleMqttGetState(size_t nodeIndex, const char* requestId, const ch
 // Aufgabe: Behandelt das set_relay-MQTT-Kommando (relay_1 oder relay_2).
 static void handleMqttSetRelay(size_t nodeIndex, const char* requestId, const char* commandChannel, const char* json) {
     if (!stelleMetaFuerCommandSicher(nodeIndex, requestId, commandChannel, SH_MSG_CMD, "MQTT_SET_RELAY")) return;
-    if (nodeStates[nodeIndex].pending_cmd.aktiv) {
-        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
+    if (nodeStates[nodeIndex].pending_cmd.hdr.aktiv) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.hdr.seq, "master_busy");
         return;
     }
 
@@ -2804,8 +2824,8 @@ static void handleMqttCoverCommand(size_t nodeIndex, const char* cmd, const char
         publishNodeAck(nodeIndex, requestId, commandChannel, "unsupported", -3, SH_MSG_CMD, 0U, "master_validation");
         return;
     }
-    if (nodeStates[nodeIndex].pending_cmd.aktiv) {
-        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.seq, "master_busy");
+    if (nodeStates[nodeIndex].pending_cmd.hdr.aktiv) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CMD, nodeStates[nodeIndex].pending_cmd.hdr.seq, "master_busy");
         return;
     }
 
@@ -2842,8 +2862,8 @@ static void handleMqttCoverCommand(size_t nodeIndex, const char* cmd, const char
 // Aufgabe: Behandelt das set_config-MQTT-Kommando.
 static void handleMqttSetConfig(size_t nodeIndex, const char* requestId, const char* commandChannel, const char* json) {
     if (!stelleMetaFuerCommandSicher(nodeIndex, requestId, commandChannel, SH_MSG_CFG, "MQTT_SET_CONFIG")) return;
-    if (nodeStates[nodeIndex].pending_cfg.aktiv) {
-        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CFG, nodeStates[nodeIndex].pending_cfg.seq, "master_busy");
+    if (nodeStates[nodeIndex].pending_cfg.hdr.aktiv) {
+        publishNodeAck(nodeIndex, requestId, commandChannel, "busy", -2, SH_MSG_CFG, nodeStates[nodeIndex].pending_cfg.hdr.seq, "master_busy");
         return;
     }
 
@@ -3140,19 +3160,19 @@ static void pruefePendingTimeoutsImpl(
     for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
         if (!nodeStates[i].belegt) continue;
         Pending& pend = nodeStates[i].*pendSlot;
-        if (!pend.aktiv) continue;
-        if ((millis() - pend.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) continue;
+        if (!pend.hdr.aktiv) continue;
+        if ((millis() - pend.hdr.letztes_senden_ms) < COMMAND_ACK_TIMEOUT_MS) continue;
 
         // MAC muss bekannt sein, bevor ein Retry versucht wird. Ist sie unbekannt,
         // gibt es keine Route zur Node und der Auftrag muss sofort abgebrochen werden.
         if (!nodeStates[i].mac_bekannt) {
             logf("WARN", "%s Retry abgebrochen: MAC fuer %s unbekannt", logLabel, nodeStates[i].device_id);
-            publishNodeAck(i, pend.request_id, pend.command_channel, "no_route", STATUS_CODE_NO_ROUTE, msgType, pend.seq, "master_no_route");
+            publishNodeAck(i, pend.hdr.request_id, pend.hdr.command_channel, "no_route", STATUS_CODE_NO_ROUTE, msgType, pend.hdr.seq, "master_no_route");
             pend = {};
             continue;
         }
 
-        if (pend.retries < COMMAND_MAX_RETRIES) {
+        if (pend.hdr.retries < COMMAND_MAX_RETRIES) {
             // Retry mit unveraenderter Sequenznummer: Ein spaetes ACK bestaetigt
             // weiterhin denselben MQTT-Auftrag.
             Payload payload = {};
@@ -3165,23 +3185,23 @@ static void pruefePendingTimeoutsImpl(
                 retryLogLabel,
                 (uint8_t)(SH_FLAG_ACK_REQUEST | SH_FLAG_RETRANSMIT),
                 true,
-                pend.seq,
+                pend.hdr.seq,
                 nullptr);
             if (gesendet) {
-                pend.retries++;
-                pend.letztes_senden_ms = millis();
+                pend.hdr.retries++;
+                pend.hdr.letztes_senden_ms = millis();
                 continue;
             }
             // Sendefehler beim Retry: sofort abbrechen, nicht als Timeout melden.
             logf("WARN", "%s Retry send-fail fuer %s, Auftrag wird abgebrochen", logLabel, nodeStates[i].device_id);
-            publishNodeAck(i, pend.request_id, pend.command_channel, "send_failed", -4, msgType, pend.seq, "master_send");
+            publishNodeAck(i, pend.hdr.request_id, pend.hdr.command_channel, "send_failed", -4, msgType, pend.hdr.seq, "master_send");
             pend = {};
             continue;
         }
 
         // Retries erschoepft: MQTT-Auftrag aktiv beenden. Ohne dieses ACK wuerde
         // der Server endlos auf Antwort warten.
-        publishNodeAck(i, pend.request_id, pend.command_channel, "timeout", (int)SH_ERROR_ACK_TIMEOUT, msgType, pend.seq, "master_timeout");
+        publishNodeAck(i, pend.hdr.request_id, pend.hdr.command_channel, "timeout", (int)SH_ERROR_ACK_TIMEOUT, msgType, pend.hdr.seq, "master_timeout");
         pend = {};
     }
 }

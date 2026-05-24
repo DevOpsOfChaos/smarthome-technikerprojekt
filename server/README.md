@@ -22,9 +22,11 @@ Der Server liefert die kleine serverseitige Grundlage plus einen engen Dashboard
 - Topic-Routing in Device- und Masterpfad
 - gemeinsames Laufzeitobjekt pro Geraet
 - separater Masterzustand
-- minimale SQLite-Persistenz fuer `devices`, `device_state_latest` und `master_status`
+- minimale SQLite-Persistenz fuer `devices`, `device_state_latest`, `master_status`, `automations` und `automation_conditions`
 - eine zentrale Geraeteuebersicht
 - eine versteckte Detailseite pro Geraet
+- eine Master-Statusseite (nur Anzeige, keine Steuerung)
+- eine Automatisierungsseite (CRUD: erstellen, anzeigen, bearbeiten, loeschen)
 - Aktorsteuerung im engen aktuellen Rahmen
 
 ## Bewusst nicht Teil dieser Stufe
@@ -34,7 +36,8 @@ Der Server liefert die kleine serverseitige Grundlage plus einen engen Dashboard
 - Wetter
 - volle Logs- oder MQTT-Konsole
 - Commands als breite Komfortwelt
-- Automationen
+- Freie JavaScript-Automatisierungen oder Blockly-Editor
+- Verschachtelte Bedingungsbaeume (nur AND-Verknuepfung, 6 Operatoren)
 - SIM-spezifischer Ausbau
 - grosse Konfigurationswelt
 
