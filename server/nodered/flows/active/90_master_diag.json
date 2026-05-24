@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "90_master_diag",
     "disabled": false,
-    "info": "Hält Master-Status und Master-Events getrennt vom normalen Gerätepfad. Masterdiagnose bleibt außerhalb des normalen device stores. Die Fachlogik liegt zentral in /data/lib/topic_handlers.js."
+    "info": "Hält Master-Status und Master-Events getrennt vom normalen Gerätepfad. Masterdiagnose bleibt außerhalb des normalen device stores. Fehler werden durch einen Catch-Node protokolliert."
   },
   {
     "id": "comment_90_master",
     "type": "comment",
     "z": "tab_90_master",
     "name": "Master getrennt halten",
-    "info": "Masterdiagnose bleibt außerhalb des normalen device stores. Die Fachlogik liegt zentral in /data/lib/topic_handlers.js. SQLite-Batches werden über linkout_90_sqlite an den zentralen Persistenz-Tab weitergeleitet.",
+    "info": "Masterdiagnose bleibt außerhalb des normalen device stores.\nDie Fachlogik liegt zentral in /data/lib/topic_handlers.js.\nSQLite-Batches werden über linkout_90_sqlite an den zentralen Persistenz-Tab weitergeleitet.\nFehler landen im Catch-Node dieses Tabs.",
     "x": 180,
     "y": 60,
     "wires": []
@@ -22,9 +22,7 @@
     "z": "tab_90_master",
     "name": "to SQLite writes",
     "mode": "link",
-    "links": [
-      "linkin_30_writes"
-    ],
+    "links": ["linkin_30_writes"],
     "x": 635,
     "y": 300,
     "wires": []
@@ -34,34 +32,53 @@
     "type": "link in",
     "z": "tab_90_master",
     "name": "handleMasterStatus",
-    "links": [
-      "linkout_10_master_status"
-    ],
+    "links": ["linkout_10_master_status"],
     "x": 115,
     "y": 140,
-    "wires": [
-      [
-        "func_90_master_status"
-      ]
-    ]
+    "wires": [["func_90_master_status"]]
   },
   {
     "id": "func_90_master_status",
     "type": "function",
     "z": "tab_90_master",
-    "name": "handleMasterStatus",
-    "func": "// Zweck: Verarbeitet eine Status-Meldung eines Master-Geräts (Gateway).\n// Eingaben: msg.sh (Routing-State), msg.payload mit online, wifi, mqtt, espnow, fw.\n// Ergebnis: msg.payload mit aktualisiertem Master-Objekt, msg.sqlite_batch für die Persistenzschicht.\n// Seiteneffekt: Schreibt das aktualisierte Master-Objekt in smarthome_runtime (global).\nconst topicHandlers = global.get(\"topicHandlers\");\nconst result = topicHandlers.handleRoutedMessage(global.get(\"smarthome_runtime\"), msg.sh, msg.payload);\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master status without master_id\");\n    return null;\n}\nglobal.set(\"smarthome_runtime\", result.runtime);\nmsg.payload = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
+    "name": "Master-Status verarbeiten",
+    "func":
+"// Zweck: Status-Meldung eines Master-Geräts (Gateway) verarbeiten.\n// Eingaben:\n//   msg.sh      – Routing-State aus dem Ingest-Tab (scope='master', topic_type='status')\n//   msg.payload – Status-Payload mit online, wifi, mqtt, espnow, fw\n// Ausgaben:\n//   msg.payload      – aktualisiertes Master-Objekt\n//   msg.sqlite_batch – SQL-Batch für die Persistenzschicht\n// Seiteneffekt:\n//   smarthome_runtime (global) wird mit dem aktualisierten Master-Eintrag überschrieben.\n\nconst topicHandlers = global.get(\"topicHandlers\");\n\n// Sicherheitscheck: Lib-Helper müssen vorhanden sein.\nif (!topicHandlers || typeof topicHandlers.handleRoutedMessage !== \"function\") {\n    node.error(\"topicHandlers fehlt – Boot-Flow prüfen (00_boot)\", msg);\n    return null;\n}\n\nconst result = topicHandlers.handleRoutedMessage(\n    global.get(\"smarthome_runtime\"),\n    msg.sh,\n    msg.payload\n);\n\n// Wenn kein Master erkannt wurde, Nachricht verwerfen.\nif (!result || !result.payload || !result.payload.master) {\n    node.warn(\"master status: Master-ID fehlt im Payload\");\n    return null;\n}\n\n// Aktualisierten Runtime-State zurückschreiben.\nglobal.set(\"smarthome_runtime\", result.runtime);\n\nmsg.payload      = result.payload;\nmsg.sqlite_batch = result.sqlite_batch || null;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 340,
+    "x": 350,
     "y": 140,
-    "wires": [
-      [
-        "linkout_90_sqlite"
-      ]
-    ]
+    "wires": [["linkout_90_sqlite"]]
+  },
+  {
+    "id": "catch_90_master",
+    "type": "catch",
+    "z": "tab_90_master",
+    "name": "Master-Fehler",
+    "scope": ["func_90_master_status"],
+    "uncaught": false,
+    "x": 160,
+    "y": 240,
+    "wires": [["debug_90_master_error"]]
+  },
+  {
+    "id": "debug_90_master_error",
+    "type": "debug",
+    "z": "tab_90_master",
+    "name": "Master-Fehler",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "error",
+    "targetType": "msg",
+    "statusVal": "error.message",
+    "statusType": "msg",
+    "x": 380,
+    "y": 240,
+    "wires": []
   }
 ]

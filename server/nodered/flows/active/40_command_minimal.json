@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "40_command_minimal",
     "disabled": false,
-    "info": "Enge offizielle Command-Endpunkte für net_erl relay_1 und Rolladen (cover) mit serverseitiger request_id. Baut bewusst nur enge Pfade: HTTP POST → request_id erzeugen → MQTT command publizieren. Ack und State kommen über die bestehende Ingest-Kette zurück."
+    "info": "Enge offizielle Command-Endpunkte für net_erl relay_1 und Rolladen (cover) mit serverseitiger request_id. Validierung und Befehlserzeugung liegen in /data/lib/command_minimal.js. Fehlerbehandlung mit HTTP-Statuscodes (400/500) direkt in den Functions."
   },
   {
     "id": "comment_40_command_minimal",
     "type": "comment",
     "z": "tab_40_command_minimal",
     "name": "Minimaler Command-Pfad",
-    "info": "Dieser Tab baut absichtlich nur enge Pfade: POST → request_id erzeugen → MQTT command publizieren. ACK und State kommen über die bestehende Ingest-Kette zurück. Validierung und Befehlserzeugung liegen in /data/lib/command_minimal.js.",
+    "info": "Absichtlich enger Pfad: POST → request_id erzeugen → MQTT command publizieren.\nACK und State kommen über die bestehende Ingest-Kette zurück (10_mqtt_ingest).\nBeide Endpunkte nutzen dasselbe commandMinimal-Muster aus /data/lib/command_minimal.js.\nFehler geben strukturierte JSON-Antworten mit passendem HTTP-Statuscode zurück.",
     "x": 180,
     "y": 60,
     "wires": []
@@ -27,11 +27,7 @@
     "swaggerDoc": "",
     "x": 170,
     "y": 140,
-    "wires": [
-      [
-        "json_40_command_minimal"
-      ]
-    ]
+    "wires": [["json_40_command_minimal"]]
   },
   {
     "id": "json_40_command_minimal",
@@ -41,34 +37,27 @@
     "property": "payload",
     "action": "",
     "pretty": false,
-    "x": 370,
+    "x": 380,
     "y": 140,
-    "wires": [
-      [
-        "func_40_command_minimal"
-      ]
-    ]
+    "wires": [["func_40_command_minimal"]]
   },
   {
     "id": "func_40_command_minimal",
     "type": "function",
     "z": "tab_40_command_minimal",
-    "name": "Build relay_1 command",
-    "func": "const commandMinimal = global.get(\"commandMinimal\");\nif (!commandMinimal || typeof commandMinimal.buildNetErlRelay1Command !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload = {\n        error: \"command_minimal_unavailable\",\n        message: \"command helper missing\"\n    };\n    return [null, msg];\n}\n\ntry {\n    const runtime = global.get(\"smarthome_runtime\");\n    const result = commandMinimal.buildNetErlRelay1Command(runtime, msg.payload);\n    if (!result.ok) {\n        msg.statusCode = result.statusCode || 400;\n        msg.payload = {\n            error: result.error,\n            message: result.message\n        };\n        return [null, msg];\n    }\n\n    const mqttMsg = {\n        topic: result.command.topic,\n        payload: JSON.stringify(result.command.payload),\n        qos: 0,\n        retain: false\n    };\n    const responseMsg = {\n        req: msg.req,\n        res: msg.res,\n        statusCode: 202,\n        payload: result.response\n    };\n    return [mqttMsg, responseMsg];\n} catch (error) {\n    node.error(error, msg);\n    msg.statusCode = 500;\n    msg.payload = {\n        error: \"command_minimal_internal\",\n        message: error.message\n    };\n    return [null, msg];\n}",
+    "name": "Relay-1-Befehl bauen",
+    "func":
+"// Zweck: HTTP-POST für relay_1 in einen MQTT-Befehl umwandeln.\n// Eingabe:  msg.payload – JSON-Body mit device_id und relay_1 (true/false)\n// Ausgaben:\n//   Output 1 – MQTT-Nachricht für den Broker (topic + payload aus commandMinimal)\n//   Output 2 – HTTP-Antwort an den Aufrufer (202 Accepted oder Fehler)\n//\n// Fehlerverhalten:\n//   - Helper fehlt         → 500 Internal Server Error\n//   - Validierungsfehler  → 400 Bad Request mit error/message\n//   - Unerwarteter Fehler → 500 mit error.message\n\nconst commandMinimal = global.get(\"commandMinimal\");\n\n// Sicherheitscheck: commandMinimal muss als globaler Helper vorhanden sein.\nif (!commandMinimal || typeof commandMinimal.buildNetErlRelay1Command !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload    = { error: \"command_minimal_unavailable\", message: \"command helper missing\" };\n    return [null, msg];\n}\n\ntry {\n    const runtime = global.get(\"smarthome_runtime\");\n    const result  = commandMinimal.buildNetErlRelay1Command(runtime, msg.payload);\n\n    // Fachlogik hat den Befehl abgelehnt (z. B. Gerät offline, unbekannte device_id).\n    if (!result.ok) {\n        msg.statusCode = result.statusCode || 400;\n        msg.payload    = { error: result.error, message: result.message };\n        return [null, msg];\n    }\n\n    // Erfolg: MQTT-Nachricht und HTTP-Antwort parallel zurückgeben.\n    const mqttMsg = {\n        topic:   result.command.topic,\n        payload: JSON.stringify(result.command.payload),\n        qos:     0,\n        retain:  false\n    };\n    const responseMsg = {\n        req:        msg.req,\n        res:        msg.res,\n        statusCode: 202,\n        payload:    result.response\n    };\n    return [mqttMsg, responseMsg];\n\n} catch (error) {\n    // Unerwarteter Laufzeitfehler – vollständig loggen.\n    node.error(error, msg);\n    msg.statusCode = 500;\n    msg.payload    = { error: \"command_minimal_internal\", message: error.message };\n    return [null, msg];\n}",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 610,
+    "x": 620,
     "y": 140,
     "wires": [
-      [
-        "mqttout_40_command_minimal"
-      ],
-      [
-        "httpresp_40_command_minimal"
-      ]
+      ["mqttout_40_command_minimal"],
+      ["httpresp_40_command_minimal"]
     ]
   },
   {
@@ -85,7 +74,7 @@
     "correl": "",
     "expiry": "",
     "broker": "cfg_mqtt_broker",
-    "x": 880,
+    "x": 900,
     "y": 120,
     "wires": []
   },
@@ -96,7 +85,7 @@
     "name": "HTTP response",
     "statusCode": "",
     "headers": {},
-    "x": 860,
+    "x": 880,
     "y": 180,
     "wires": []
   },
@@ -111,11 +100,7 @@
     "swaggerDoc": "",
     "x": 165,
     "y": 300,
-    "wires": [
-      [
-        "json_40_cover_command"
-      ]
-    ]
+    "wires": [["json_40_cover_command"]]
   },
   {
     "id": "json_40_cover_command",
@@ -125,20 +110,17 @@
     "property": "payload",
     "action": "",
     "pretty": false,
-    "x": 365,
+    "x": 375,
     "y": 300,
-    "wires": [
-      [
-        "func_40_cover_command"
-      ]
-    ]
+    "wires": [["func_40_cover_command"]]
   },
   {
     "id": "func_40_cover_command",
     "type": "function",
     "z": "tab_40_command_minimal",
-    "name": "Build cover command",
-    "func": "const commandMinimal = global.get(\"commandMinimal\");\nif (!commandMinimal || typeof commandMinimal.buildCoverCommand !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload = {\n        error: \"command_minimal_unavailable\",\n        message: \"command helper missing\"\n    };\n    return [null, msg];\n}\n\ntry {\n    const runtime = global.get(\"smarthome_runtime\");\n    const result = commandMinimal.buildCoverCommand(runtime, msg.payload);\n    if (!result.ok) {\n        msg.statusCode = result.statusCode || 400;\n        msg.payload = {\n            error: result.error,\n            message: result.message\n        };\n        return [null, msg];\n    }\n\n    const mqttMsg = {\n        topic: result.command.topic,\n        payload: JSON.stringify(result.command.payload),\n        qos: 0,\n        retain: false\n    };\n    const responseMsg = {\n        req: msg.req,\n        res: msg.res,\n        statusCode: 202,\n        payload: result.response\n    };\n    return [mqttMsg, responseMsg];\n} catch (error) {\n    node.error(error, msg);\n    msg.statusCode = 500;\n    msg.payload = {\n        error: \"command_minimal_internal\",\n        message: error.message\n    };\n    return [null, msg];\n}",
+    "name": "Cover-Befehl bauen",
+    "func":
+"// Zweck: HTTP-POST für Rolladen-Befehle (open/close/stop/set_position) in MQTT umwandeln.\n// Eingabe:  msg.payload – JSON-Body mit device_id, command, ggf. position\n// Ausgaben:\n//   Output 1 – MQTT-Nachricht für den Broker\n//   Output 2 – HTTP-Antwort an den Aufrufer (202 Accepted oder Fehler)\n//\n// Gleiche Fehlerbehandlungsstruktur wie Relay-1-Endpunkt (400/500 mit JSON-Body).\n\nconst commandMinimal = global.get(\"commandMinimal\");\n\nif (!commandMinimal || typeof commandMinimal.buildCoverCommand !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload    = { error: \"command_minimal_unavailable\", message: \"command helper missing\" };\n    return [null, msg];\n}\n\ntry {\n    const runtime = global.get(\"smarthome_runtime\");\n    const result  = commandMinimal.buildCoverCommand(runtime, msg.payload);\n\n    if (!result.ok) {\n        msg.statusCode = result.statusCode || 400;\n        msg.payload    = { error: result.error, message: result.message };\n        return [null, msg];\n    }\n\n    const mqttMsg = {\n        topic:   result.command.topic,\n        payload: JSON.stringify(result.command.payload),\n        qos:     0,\n        retain:  false\n    };\n    const responseMsg = {\n        req:        msg.req,\n        res:        msg.res,\n        statusCode: 202,\n        payload:    result.response\n    };\n    return [mqttMsg, responseMsg];\n\n} catch (error) {\n    node.error(error, msg);\n    msg.statusCode = 500;\n    msg.payload    = { error: \"command_minimal_internal\", message: error.message };\n    return [null, msg];\n}",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
@@ -147,12 +129,8 @@
     "x": 605,
     "y": 300,
     "wires": [
-      [
-        "mqttout_40_cover_command"
-      ],
-      [
-        "httpresp_40_cover_command"
-      ]
+      ["mqttout_40_cover_command"],
+      ["httpresp_40_cover_command"]
     ]
   },
   {

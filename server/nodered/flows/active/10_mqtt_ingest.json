@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "10_mqtt_ingest",
     "disabled": false,
-    "info": "Abonniert die relevanten MQTT-Themen (smarthome/device/+/+ und smarthome/master/+/+) und verteilt eingehende Nachrichten an die passenden Handler. Topic-Erkennung liegt zentral in /data/lib/topic_router.js. JSON-Parsing vor dem Routing, um ungültige Payloads früh abzufangen."
+    "info": "Abonniert die relevanten MQTT-Themen (smarthome/device/+/+ und smarthome/master/+/+) und verteilt eingehende Nachrichten an die passenden Handler. Topic-Erkennung liegt zentral in /data/lib/topic_router.js. Leere Payloads (MQTT-Retained-Clears) werden vor dem JSON-Parsing herausgefiltert."
   },
   {
     "id": "comment_10_ingest",
     "type": "comment",
     "z": "tab_10_ingest",
     "name": "MQTT Ingest",
-    "info": "Der aktuelle Server verarbeitet meta, availability, state, event, ack sowie master status. Topic-Erkennung liegt zentral in /data/lib/topic_router.js. Die Flow-Nodes bleiben nur Node-RED-Brücken – die Fachlogik liegt in den Lib-Dateien.",
+    "info": "Verarbeitet: meta, availability, state, event, ack (Device) sowie status (Master).\nTopic-Erkennung zentral in /data/lib/topic_router.js.\nFlowHelpers.isEmptyPayload wird aus dem globalen Kontext (registriert in 00_boot) genutzt.\nFehler in den Route-Funktionen landen im zentralen Catch-Node dieses Tabs.",
     "x": 150,
     "y": 60,
     "wires": []
@@ -68,6 +68,25 @@
     ]
   },
   {
+    "id": "func_10_device_drop_empty",
+    "type": "function",
+    "z": "tab_10_ingest",
+    "name": "Leere Device-Payload verwerfen",
+    "func": "function fallbackIsEmptyPayload(payload) {\n    if (payload === undefined || payload === null) return true;\n    if (Buffer.isBuffer(payload) && payload.length === 0) return true;\n    if (typeof payload === \"string\" && payload.trim() === \"\") return true;\n    return false;\n}\n\n// Zweck: Leere retained MQTT-Clears herausfiltern, bevor sie den JSON-Parser erreichen.\n// flowHelpers kommt normalerweise aus 00_boot. Falls retained Messages frueher eintreffen,\n// nutzt dieser Node die lokale Fallback-Pruefung, statt echte Startdaten zu verwerfen.\nconst flowHelpers = global.get(\"flowHelpers\");\nconst isEmptyPayload = flowHelpers && typeof flowHelpers.isEmptyPayload === \"function\"\n    ? flowHelpers.isEmptyPayload\n    : fallbackIsEmptyPayload;\n\nif (isEmptyPayload(msg.payload)) {\n    return null;\n}\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 350,
+    "y": 140,
+    "wires": [
+      [
+        "json_10_device"
+      ]
+    ]
+  },
+  {
     "id": "json_10_device",
     "type": "json",
     "z": "tab_10_ingest",
@@ -75,7 +94,7 @@
     "property": "payload",
     "action": "",
     "pretty": false,
-    "x": 350,
+    "x": 570,
     "y": 140,
     "wires": [
       [
@@ -87,14 +106,14 @@
     "id": "func_10_device_route",
     "type": "function",
     "z": "tab_10_ingest",
-    "name": "Route device topic",
-    "func": "// Zweck: Wertet das MQTT-Topic aus und entscheidet, ob es ein Gerätethema ist.\n// Eingaben: msg.topic (MQTT-Topicstring), nowIso() als Empfangszeitpunkt.\n// Ergebnis: msg.sh mit Routing-State (scope, topic_type, entity_id, received_at),\n//           oder null bei unbekanntem oder nicht gerätezugehörigem Topic.\nconst topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\nif (!routed || routed.scope !== \"device\") {\n    return null;\n}\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\nmsg.sh = routed;\nreturn msg;",
+    "name": "Device-Topic routen",
+    "func": "// Zweck: Topic auswerten und als Device-Nachricht einordnen.\n// Eingabe:  msg.topic (MQTT-Topicstring)\n// Ausgabe:  msg.sh mit Routing-State (scope, topic_type, entity_id, received_at)\n//           oder null, wenn das Topic kein Device-Topic ist.\nconst topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\n\n// Sicherheitscheck: Wenn die Lib-Helper fehlen (z. B. nach Teil-Redeploy),\n// Fehler loggen statt still zu ignorieren.\nif (!topicRouter || !timeHelpers) {\n    node.error(\"topicRouter oder timeHelpers fehlen – Boot-Flow prüfen\", msg);\n    return null;\n}\n\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\n\n// Kein Device-Topic oder unbekanntes Format → verwerfen.\nif (!routed || routed.scope !== \"device\") {\n    return null;\n}\n\n// Sicherstellen, dass immer ein Payload-Objekt vorhanden ist (defensive Initialisierung).\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\n\nmsg.sh = routed;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 580,
+    "x": 800,
     "y": 140,
     "wires": [
       [
@@ -139,7 +158,7 @@
     "checkall": "true",
     "repair": false,
     "outputs": 5,
-    "x": 810,
+    "x": 1030,
     "y": 140,
     "wires": [
       [
@@ -168,7 +187,7 @@
     "links": [
       "linkin_20_meta"
     ],
-    "x": 1065,
+    "x": 1265,
     "y": 80,
     "wires": []
   },
@@ -181,7 +200,7 @@
     "links": [
       "linkin_20_availability"
     ],
-    "x": 1085,
+    "x": 1285,
     "y": 120,
     "wires": []
   },
@@ -194,7 +213,7 @@
     "links": [
       "linkin_20_state"
     ],
-    "x": 1055,
+    "x": 1255,
     "y": 160,
     "wires": []
   },
@@ -207,7 +226,7 @@
     "links": [
       "linkin_20_event"
     ],
-    "x": 1065,
+    "x": 1265,
     "y": 200,
     "wires": []
   },
@@ -220,7 +239,7 @@
     "links": [
       "linkin_20_ack"
     ],
-    "x": 1055,
+    "x": 1255,
     "y": 240,
     "wires": []
   },
@@ -238,10 +257,29 @@
     "rh": 0,
     "inputs": 0,
     "x": 150,
-    "y": 280,
+    "y": 300,
     "wires": [
       [
         "func_10_master_drop_empty"
+      ]
+    ]
+  },
+  {
+    "id": "func_10_master_drop_empty",
+    "type": "function",
+    "z": "tab_10_ingest",
+    "name": "Leere Master-Payload verwerfen",
+    "func": "function fallbackIsEmptyPayload(payload) {\n    if (payload === undefined || payload === null) return true;\n    if (Buffer.isBuffer(payload) && payload.length === 0) return true;\n    if (typeof payload === \"string\" && payload.trim() === \"\") return true;\n    return false;\n}\n\n// Zweck: Leere retained MQTT-Clears herausfiltern, bevor sie den JSON-Parser erreichen.\n// flowHelpers kommt normalerweise aus 00_boot. Falls retained Messages frueher eintreffen,\n// nutzt dieser Node die lokale Fallback-Pruefung, statt echte Startdaten zu verwerfen.\nconst flowHelpers = global.get(\"flowHelpers\");\nconst isEmptyPayload = flowHelpers && typeof flowHelpers.isEmptyPayload === \"function\"\n    ? flowHelpers.isEmptyPayload\n    : fallbackIsEmptyPayload;\n\nif (isEmptyPayload(msg.payload)) {\n    return null;\n}\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 355,
+    "y": 300,
+    "wires": [
+      [
+        "json_10_master"
       ]
     ]
   },
@@ -253,8 +291,8 @@
     "property": "payload",
     "action": "",
     "pretty": false,
-    "x": 350,
-    "y": 280,
+    "x": 570,
+    "y": 300,
     "wires": [
       [
         "func_10_master_route"
@@ -265,15 +303,15 @@
     "id": "func_10_master_route",
     "type": "function",
     "z": "tab_10_ingest",
-    "name": "Route master topic",
-    "func": "// Zweck: Wertet das MQTT-Topic aus und entscheidet, ob es ein Master-Thema ist.\n// Eingaben: msg.topic (MQTT-Topicstring), nowIso() als Empfangszeitpunkt.\n// Ergebnis: msg.sh mit Routing-State (scope, topic_type, entity_id, received_at),\n//           oder null bei unbekanntem oder nicht master-zugehörigem Topic.\nconst topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\nif (!routed || routed.scope !== \"master\") {\n    return null;\n}\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\nmsg.sh = routed;\nreturn msg;",
+    "name": "Master-Topic routen",
+    "func": "// Zweck: Topic auswerten und als Master-Nachricht einordnen.\n// Eingabe:  msg.topic (MQTT-Topicstring)\n// Ausgabe:  msg.sh mit Routing-State (scope, topic_type, entity_id, received_at)\n//           oder null, wenn das Topic kein Master-Topic ist.\nconst topicRouter = global.get(\"topicRouter\");\nconst timeHelpers = global.get(\"timeHelpers\");\n\nif (!topicRouter || !timeHelpers) {\n    node.error(\"topicRouter oder timeHelpers fehlen – Boot-Flow prüfen\", msg);\n    return null;\n}\n\nconst routed = topicRouter.buildRoutingState(msg.topic, timeHelpers.nowIso());\n\n// Kein Master-Topic oder unbekanntes Format → verwerfen.\nif (!routed || routed.scope !== \"master\") {\n    return null;\n}\n\nif (msg.payload === undefined || msg.payload === null) {\n    msg.payload = {};\n}\n\nmsg.sh = routed;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 580,
-    "y": 280,
+    "x": 800,
+    "y": 300,
     "wires": [
       [
         "switch_10_master"
@@ -297,8 +335,8 @@
     "checkall": "true",
     "repair": false,
     "outputs": 1,
-    "x": 810,
-    "y": 280,
+    "x": 1030,
+    "y": 300,
     "wires": [
       [
         "linkout_10_master_status"
@@ -314,46 +352,45 @@
     "links": [
       "linkin_90_master_status"
     ],
-    "x": 1095,
-    "y": 260,
+    "x": 1295,
+    "y": 280,
     "wires": []
   },
   {
-    "id": "func_10_device_drop_empty",
-    "type": "function",
+    "id": "catch_10_ingest",
+    "type": "catch",
     "z": "tab_10_ingest",
-    "name": "Drop empty device payload",
-    "func": "// Leere retained MQTT-Clears nicht an den JSON-Parser weiterreichen.\nif (msg.payload === undefined || msg.payload === null) {\n    return null;\n}\nif (Buffer.isBuffer(msg.payload) && msg.payload.length === 0) {\n    return null;\n}\nif (typeof msg.payload === 'string' && msg.payload.trim() === '') {\n    return null;\n}\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 330,
-    "y": 140,
+    "name": "Ingest-Fehler",
+    "scope": [
+      "func_10_device_drop_empty",
+      "func_10_device_route",
+      "func_10_master_drop_empty",
+      "func_10_master_route"
+    ],
+    "uncaught": false,
+    "x": 200,
+    "y": 400,
     "wires": [
       [
-        "json_10_device"
+        "debug_10_ingest_error"
       ]
     ]
   },
   {
-    "id": "func_10_master_drop_empty",
-    "type": "function",
+    "id": "debug_10_ingest_error",
+    "type": "debug",
     "z": "tab_10_ingest",
-    "name": "Drop empty master payload",
-    "func": "// Leere retained MQTT-Clears nicht an den JSON-Parser weiterreichen.\nif (msg.payload === undefined || msg.payload === null) {\n    return null;\n}\nif (Buffer.isBuffer(msg.payload) && msg.payload.length === 0) {\n    return null;\n}\nif (typeof msg.payload === 'string' && msg.payload.trim() === '') {\n    return null;\n}\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 330,
-    "y": 280,
-    "wires": [
-      [
-        "json_10_master"
-      ]
-    ]
+    "name": "Ingest-Fehler",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "error",
+    "targetType": "msg",
+    "statusVal": "error.message",
+    "statusType": "msg",
+    "x": 430,
+    "y": 400,
+    "wires": []
   }
 ]

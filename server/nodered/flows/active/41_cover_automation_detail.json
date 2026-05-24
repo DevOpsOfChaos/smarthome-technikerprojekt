@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "41_cover_automation_detail",
     "disabled": false,
-    "info": "Kleine Cover-Detailseite mit zwei lokalen Zeit/Wert-Slots für die Zeitautomatik. Kein Teil des MQTT-Vertrags – die Fahrten nutzen intern denselben Cover-Command-Builder, aber es werden keine Zeitfelder in das Geräteobjekt oder den MQTT-Vertrag gezogen."
+    "info": "Kleine Cover-Detailseite mit zwei lokalen Zeit/Wert-Slots für die Zeitautomatik. Kein Teil des MQTT-Vertrags. Der Minuten-Tick prüft fällige Automatisierungen und publiziert deren Befehle direkt via MQTT."
   },
   {
     "id": "comment_41_cover_automation_detail",
     "type": "comment",
     "z": "tab_41_cover_automation_detail",
     "name": "Lokale Cover-Zeitautomatik",
-    "info": "Diese Einbaustelle bleibt bewusst lokal zur Detailseite. Die Fahrten nutzen intern denselben Cover-Command-Builder aus /data/lib/command_minimal.js. Zeitkonfiguration wird nur in /data/cover_automation.json gespeichert – nicht im Geräteobjekt.",
+    "info": "Zeitkonfiguration wird nur in /data/cover_automation.json gespeichert – nicht im Geräteobjekt.\nDer Minuten-Tick gibt direkt die fertigen MQTT-Messages zurück (kein zweiter Output mehr).\nFahrten nutzen intern denselben Cover-Command-Builder aus /data/lib/command_minimal.js.",
     "x": 220,
     "y": 60,
     "wires": []
@@ -27,18 +27,15 @@
     "swaggerDoc": "",
     "x": 170,
     "y": 140,
-    "wires": [
-      [
-        "func_41_cover_detail"
-      ]
-    ]
+    "wires": [["func_41_cover_detail"]]
   },
   {
     "id": "func_41_cover_detail",
     "type": "function",
     "z": "tab_41_cover_automation_detail",
-    "name": "Render cover detail page",
-    "func": "const coverAutomation = global.get(\"coverAutomation\");\nif (!coverAutomation || typeof coverAutomation.renderDetailPage !== \"function\") {\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"text/plain; charset=utf-8\" };\n    msg.payload = \"cover automation helper missing\";\n    return msg;\n}\n\nconst runtime = global.get(\"smarthome_runtime\");\nconst params = msg.req && msg.req.params ? msg.req.params : {};\nconst query = msg.req && msg.req.query ? msg.req.query : {};\nconst deviceId = params.device_id || \"\";\nconst notice = query.saved === \"1\" ? \"Zeitautomatik gespeichert.\" : \"\";\nconst result = coverAutomation.renderDetailPage(runtime, deviceId, notice);\nmsg.statusCode = result.statusCode || 200;\nmsg.headers = { \"Content-Type\": \"text/html; charset=utf-8\" };\nmsg.payload = result.html;\nreturn msg;",
+    "name": "Cover-Detailseite rendern",
+    "func":
+"// Zweck: Detailseite für ein einzelnes Cover-Gerät als HTML ausliefern.\n// Eingabe:  msg.req.params.device_id – Geräte-ID aus der URL\n//           msg.req.query.saved     – '1' wenn gerade gespeichert wurde (Notice anzeigen)\n// Ausgabe:  msg.payload – vollständiger HTML-String\n//           msg.statusCode – 200 oder 500\n\nconst coverAutomation = global.get(\"coverAutomation\");\n\n// Sicherheitscheck: Helper muss aus /data/lib/ geladen sein.\nif (!coverAutomation || typeof coverAutomation.renderDetailPage !== \"function\") {\n    msg.statusCode = 500;\n    msg.headers    = { \"Content-Type\": \"text/plain; charset=utf-8\" };\n    msg.payload    = \"cover automation helper fehlt – /data/lib/cover_automation.js prüfen\";\n    return msg;\n}\n\nconst runtime  = global.get(\"smarthome_runtime\");\nconst params   = msg.req && msg.req.params ? msg.req.params : {};\nconst query    = msg.req && msg.req.query  ? msg.req.query  : {};\nconst deviceId = params.device_id || \"\";\n\n// Kurze Erfolgsmeldung nach dem Speichern der Zeitkonfiguration.\nconst notice = query.saved === \"1\" ? \"Zeitautomatik gespeichert.\" : \"\";\n\nconst result = coverAutomation.renderDetailPage(runtime, deviceId, notice);\nmsg.statusCode = result.statusCode || 200;\nmsg.headers    = { \"Content-Type\": \"text/html; charset=utf-8\" };\nmsg.payload    = result.html;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -46,11 +43,7 @@
     "libs": [],
     "x": 430,
     "y": 140,
-    "wires": [
-      [
-        "httpresp_41_cover_detail"
-      ]
-    ]
+    "wires": [["httpresp_41_cover_detail"]]
   },
   {
     "id": "httpresp_41_cover_detail",
@@ -74,11 +67,7 @@
     "swaggerDoc": "",
     "x": 180,
     "y": 240,
-    "wires": [
-      [
-        "json_41_cover_automation_save"
-      ]
-    ]
+    "wires": [["json_41_cover_automation_save"]]
   },
   {
     "id": "json_41_cover_automation_save",
@@ -90,18 +79,15 @@
     "pretty": false,
     "x": 410,
     "y": 240,
-    "wires": [
-      [
-        "func_41_cover_automation_save"
-      ]
-    ]
+    "wires": [["func_41_cover_automation_save"]]
   },
   {
     "id": "func_41_cover_automation_save",
     "type": "function",
     "z": "tab_41_cover_automation_detail",
-    "name": "Save cover automation",
-    "func": "const coverAutomation = global.get(\"coverAutomation\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst runtime = global.get(\"smarthome_runtime\");\nif (!coverAutomation || typeof coverAutomation.saveDeviceConfig !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload = { ok: false, error: \"cover_automation_unavailable\", message: \"cover automation helper missing\" };\n    return msg;\n}\n\nconst params = msg.req && msg.req.params ? msg.req.params : {};\nconst deviceId = params.device_id || \"\";\nconst device = runtime && runtime.devices ? runtime.devices[deviceId] : null;\nif (!device) {\n    msg.statusCode = 404;\n    msg.payload = { ok: false, error: \"device_not_found\", message: \"device not found\" };\n    return msg;\n}\n\nconst result = coverAutomation.saveDeviceConfig(deviceId, msg.payload, timeHelpers.nowIso());\nmsg.statusCode = result.ok ? 200 : 400;\nmsg.payload = result.ok\n    ? { ok: true, device_id: deviceId, config: result.config }\n    : { ok: false, error: result.error, message: result.message };\nreturn msg;",
+    "name": "Zeitautomatik speichern",
+    "func":
+"// Zweck: Zeitautomatik-Konfiguration für ein Cover-Gerät persistent speichern.\n// Eingabe:  msg.req.params.device_id – Geräte-ID aus der URL\n//           msg.payload – JSON-Body mit den Zeitslots (time, position, enabled)\n// Ausgabe:  msg.payload – { ok, device_id, config } oder { ok: false, error, message }\n\nconst coverAutomation = global.get(\"coverAutomation\");\nconst timeHelpers     = global.get(\"timeHelpers\");\nconst runtime         = global.get(\"smarthome_runtime\");\n\nif (!coverAutomation || typeof coverAutomation.saveDeviceConfig !== \"function\") {\n    msg.statusCode = 500;\n    msg.payload    = { ok: false, error: \"cover_automation_unavailable\", message: \"cover automation helper fehlt\" };\n    return msg;\n}\n\nconst params   = msg.req && msg.req.params ? msg.req.params : {};\nconst deviceId = params.device_id || \"\";\n\n// Gerät muss im Runtime bekannt sein, bevor eine Konfiguration gespeichert wird.\nconst device = runtime && runtime.devices ? runtime.devices[deviceId] : null;\nif (!device) {\n    msg.statusCode = 404;\n    msg.payload    = { ok: false, error: \"device_not_found\", message: `Gerät '${deviceId}' nicht gefunden` };\n    return msg;\n}\n\nconst result = coverAutomation.saveDeviceConfig(deviceId, msg.payload, timeHelpers.nowIso());\nmsg.statusCode = result.ok ? 200 : 400;\nmsg.payload    = result.ok\n    ? { ok: true,  device_id: deviceId, config: result.config }\n    : { ok: false, error: result.error, message: result.message };\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -109,11 +95,7 @@
     "libs": [],
     "x": 660,
     "y": 240,
-    "wires": [
-      [
-        "httpresp_41_cover_automation_save"
-      ]
-    ]
+    "wires": [["httpresp_41_cover_automation_save"]]
   },
   {
     "id": "httpresp_41_cover_automation_save",
@@ -131,11 +113,7 @@
     "type": "inject",
     "z": "tab_41_cover_automation_detail",
     "name": "Tick jede Minute",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
+    "props": [{ "p": "payload" }],
     "repeat": "",
     "crontab": "* * * * *",
     "once": false,
@@ -145,31 +123,23 @@
     "payloadType": "date",
     "x": 160,
     "y": 360,
-    "wires": [
-      [
-        "func_41_cover_automation_tick"
-      ]
-    ]
+    "wires": [["func_41_cover_automation_tick"]]
   },
   {
     "id": "func_41_cover_automation_tick",
     "type": "function",
     "z": "tab_41_cover_automation_detail",
-    "name": "Build due automation commands",
-    "func": "const coverAutomation = global.get(\"coverAutomation\");\nconst commandMinimal = global.get(\"commandMinimal\");\nconst timeHelpers = global.get(\"timeHelpers\");\nconst runtime = global.get(\"smarthome_runtime\");\nif (!coverAutomation || typeof coverAutomation.buildDueMessages !== \"function\") {\n    return null;\n}\n\nconst now = timeHelpers.nowIso();\nconst result = coverAutomation.buildDueMessages(runtime, commandMinimal, now);\nif (Array.isArray(result.errors) && result.errors.length > 0) {\n    node.warn(result.errors.map((entry) => `${entry.device_id} ${entry.slot}: ${entry.error}`).join(\" | \"));\n}\nif (!Array.isArray(result.messages) || result.messages.length === 0) {\n    return null;\n}\nreturn [result.messages, null];",
-    "outputs": 2,
+    "name": "Fällige Automatisierungsbefehle bauen",
+    "func":
+"// Zweck: Minütlich prüfen, ob ein Zeitslot für ein Cover-Gerät fällig ist,\n//        und die entsprechenden MQTT-Befehle direkt ausgeben.\n//\n// Ausgabe: Array von MQTT-Nachrichten (je Gerät und fälligem Slot eine Message)\n//          oder null, wenn keine Befehle fällig sind.\n//\n// OPTIMIERUNG: Vorher hatte diese Function fälschlicherweise zwei Outputs\n// (Output 1 = Messages, Output 2 = null). Der zweite Output war nie verdrahtet.\n// Jetzt: Ein Output, direkte Rückgabe des Message-Arrays oder null.\n\nconst coverAutomation = global.get(\"coverAutomation\");\nconst commandMinimal  = global.get(\"commandMinimal\");\nconst timeHelpers     = global.get(\"timeHelpers\");\nconst runtime         = global.get(\"smarthome_runtime\");\n\n// Wenn Helper fehlen, still abbrechen – kein Fehler-Spam jede Minute.\nif (!coverAutomation || typeof coverAutomation.buildDueMessages !== \"function\") {\n    return null;\n}\n\nconst now    = timeHelpers.nowIso();\nconst result = coverAutomation.buildDueMessages(runtime, commandMinimal, now);\n\n// Aufgetretene Fehler (z. B. ungültige Konfiguration) als Warnung loggen.\nif (Array.isArray(result.errors) && result.errors.length > 0) {\n    node.warn(result.errors.map(\n        (entry) => `${entry.device_id} ${entry.slot}: ${entry.error}`\n    ).join(\" | \"));\n}\n\n// Keine fälligen Befehle → Nachricht verwerfen, kein unnötiger MQTT-Traffic.\nif (!Array.isArray(result.messages) || result.messages.length === 0) {\n    return null;\n}\n\n// Direkte Rückgabe: Node-RED sendet jede Message im Array einzeln an den MQTT-Out.\nreturn result.messages;",
+    "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 450,
+    "x": 460,
     "y": 360,
-    "wires": [
-      [
-        "mqttout_41_cover_automation_tick"
-      ],
-      []
-    ]
+    "wires": [["mqttout_41_cover_automation_tick"]]
   },
   {
     "id": "mqttout_41_cover_automation_tick",

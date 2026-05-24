@@ -4,15 +4,15 @@
     "type": "tab",
     "label": "30_sqlite_persist",
     "disabled": false,
-    "info": "Führt die zentral vorbereiteten SQLite-Batches aus. Alle Handler liefern nur noch vorbereitete Batch-Statements – dieser Tab führt sie atomar (BEGIN IMMEDIATE … COMMIT) gegen die Serverdatenbank aus. Fehler werden über catch+debug protokolliert."
+    "info": "Führt die zentral vorbereiteten SQLite-Batches aus. Alle Handler liefern nur noch vorbereitete Batch-Statements – dieser Tab führt sie atomar gegen die Serverdatenbank aus. Fehler werden über catch+debug protokolliert und am Node als Status angezeigt."
   },
   {
     "id": "comment_30_sqlite",
     "type": "comment",
     "z": "tab_30_sqlite",
-    "name": "Zentraler SQLite-Pfad",
-    "info": "Die Handler liefern nur noch vorbereitete Batch-Statements (msg.sqlite_batch). Dieser Tab führt sie gesammelt gegen die Serverdatenbank aus. Die SQL-Fachlogik bleibt in /data/lib/sqlite_writes.js.",
-    "x": 190,
+    "name": "Zentraler SQLite-Schreibpfad",
+    "info": "Eingehende Nachrichten enthalten fertige SQL-Batches in msg.sqlite_batch.\nDieser Tab ist der einzige Ort, der SQLite-Schreibzugriffe ausführt (Single Writer).\nDas verhindert Datei-Locking-Konflikte und erleichtert die Fehlersuche.\nFehler landen im Catch-Node und werden als Node-Status angezeigt.",
+    "x": 210,
     "y": 60,
     "wires": []
   },
@@ -21,36 +21,26 @@
     "type": "link in",
     "z": "tab_30_sqlite",
     "name": "sqlite writes",
-    "links": [
-      "linkout_20_sqlite",
-      "linkout_90_sqlite"
-    ],
+    "links": ["linkout_20_sqlite", "linkout_90_sqlite"],
     "x": 110,
     "y": 180,
-    "wires": [
-      [
-        "func_30_batch_topic"
-      ]
-    ]
+    "wires": [["func_30_batch_topic"]]
   },
   {
     "id": "func_30_batch_topic",
     "type": "function",
     "z": "tab_30_sqlite",
-    "name": "Batch nach msg.topic",
-    "func": "const batch = typeof msg.sqlite_batch === \"string\" ? msg.sqlite_batch.trim() : \"\";\nif (!batch) {\n    return null;\n}\nmsg.topic = batch;\nreturn msg;",
+    "name": "Batch nach msg.topic übertragen",
+    "func":
+"// Zweck: msg.sqlite_batch in msg.topic übertragen, damit der SQLite-Node\n// das vorbereitete SQL-Statement im Batch-Modus ausführen kann.\n//\n// Warum dieser Zwischenschritt?\n// Die Handler-Functions schreiben ihren SQL-Block nach msg.sqlite_batch.\n// Der SQLite-Node im Batch-Modus liest aus msg.topic.\n// Dieser Node ist die Brücke zwischen beiden Konventionen.\n\nconst batch = typeof msg.sqlite_batch === \"string\" ? msg.sqlite_batch.trim() : \"\";\n\n// Leere Batches still verwerfen – passiert z. B. wenn ein Handler\n// nichts zu persistieren hat (kein DB-relevanter State-Wechsel).\nif (!batch) {\n    return null;\n}\n\nmsg.topic = batch;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 340,
+    "x": 350,
     "y": 180,
-    "wires": [
-      [
-        "sqlite_30_phase1"
-      ]
-    ]
+    "wires": [["sqlite_30_phase1"]]
   },
   {
     "id": "sqlite_30_phase1",
@@ -60,28 +50,20 @@
     "sqlquery": "batch",
     "sql": "",
     "name": "Server SQLite batch",
-    "x": 600,
+    "x": 620,
     "y": 180,
-    "wires": [
-      []
-    ]
+    "wires": [[]]
   },
   {
     "id": "catch_30_sqlite",
     "type": "catch",
     "z": "tab_30_sqlite",
     "name": "SQLite-Fehler",
-    "scope": [
-      "sqlite_30_phase1"
-    ],
+    "scope": ["sqlite_30_phase1", "func_30_batch_topic"],
     "uncaught": false,
-    "x": 140,
-    "y": 260,
-    "wires": [
-      [
-        "debug_30_sqlite"
-      ]
-    ]
+    "x": 160,
+    "y": 280,
+    "wires": [["debug_30_sqlite"]]
   },
   {
     "id": "debug_30_sqlite",
@@ -96,8 +78,8 @@
     "targetType": "msg",
     "statusVal": "error.message",
     "statusType": "msg",
-    "x": 370,
-    "y": 260,
+    "x": 390,
+    "y": 280,
     "wires": []
   },
   {

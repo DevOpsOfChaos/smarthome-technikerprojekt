@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "00_boot",
     "disabled": false,
-    "info": "Initialisiert den minimalen Laufzeitzustand (smarthome_runtime) beim Serverstart. Legt das gemeinsame Runtime-Objekt im globalen Node-RED-Kontext an, damit alle nachfolgenden Handler darauf zugreifen können."
+    "info": "Initialisiert den minimalen Laufzeitzustand (smarthome_runtime) beim Serverstart. Legt das gemeinsame Runtime-Objekt sowie die gemeinsamen flowHelpers im globalen Node-RED-Kontext an, damit alle nachfolgenden Handler darauf zugreifen können."
   },
   {
     "id": "comment_00_boot",
     "type": "comment",
     "z": "tab_00_boot",
     "name": "Server-Boot",
-    "info": "Legt den gemeinsamen Runtime-State an. Die Fachlogik kommt über die globale Lib-Brücke aus /data/lib/*.js. Wird einmalig beim Start (once: true) ausgeführt.",
+    "info": "Legt den gemeinsamen Runtime-State und die flowHelpers an.\nDie Fachlogik kommt über die globale Lib-Brücke aus /data/lib/*.js.\nWird einmalig beim Start (once: true) ausgeführt.\n\nflowHelpers enthält:\n  - isEmptyPayload(payload)  → prüft leere MQTT-Retained-Clears\n  - readPayloadObject(payload) → liest Payload sicher als Objekt",
     "x": 170,
     "y": 80,
     "wires": []
@@ -21,11 +21,7 @@
     "type": "inject",
     "z": "tab_00_boot",
     "name": "Init beim Start",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
+    "props": [{ "p": "payload" }],
     "repeat": "",
     "crontab": "",
     "once": true,
@@ -35,30 +31,23 @@
     "payloadType": "date",
     "x": 160,
     "y": 140,
-    "wires": [
-      [
-        "func_00_boot_init"
-      ]
-    ]
+    "wires": [["func_00_boot_init"]]
   },
   {
     "id": "func_00_boot_init",
     "type": "function",
     "z": "tab_00_boot",
-    "name": "Runtime vorbereiten",
-    "func": "const deviceStore = global.get(\"deviceStore\");\nconst timeHelpers = global.get(\"timeHelpers\");\nif (!deviceStore || typeof deviceStore.ensureRuntime !== \"function\") {\n    node.error(\"deviceStore.ensureRuntime missing\");\n    return null;\n}\nif (!timeHelpers || typeof timeHelpers.nowIso !== \"function\") {\n    node.error(\"timeHelpers.nowIso missing\");\n    return null;\n}\nconst now = timeHelpers.nowIso();\nconst existing = global.get(\"smarthome_runtime\");\nconst runtime = deviceStore.ensureRuntime(existing, now);\nglobal.set(\"smarthome_runtime\", runtime);\nmsg.payload = {\n    status: \"bootstrapped\",\n    initialized_at: runtime.initialized_at,\n    device_count: Object.keys(runtime.devices || {}).length,\n    master_count: Object.keys(runtime.masters || {}).length\n};\nreturn msg;",
+    "name": "Runtime & flowHelpers vorbereiten",
+    "func":
+"// ── 1. Pflichthelfer aus den Lib-Dateien laden ──────────────────────────────\nconst deviceStore  = global.get(\"deviceStore\");\nconst timeHelpers  = global.get(\"timeHelpers\");\n\nif (!deviceStore || typeof deviceStore.ensureRuntime !== \"function\") {\n    node.error(\"BOOT-FEHLER: deviceStore.ensureRuntime fehlt – /data/lib/device_store.js geladen?\");\n    return null;\n}\nif (!timeHelpers || typeof timeHelpers.nowIso !== \"function\") {\n    node.error(\"BOOT-FEHLER: timeHelpers.nowIso fehlt – /data/lib/time_helpers.js geladen?\");\n    return null;\n}\n\n// ── 2. smarthome_runtime initialisieren (idempotent) ────────────────────────\n// ensureRuntime gibt ein vorhandenes Runtime-Objekt zurück oder legt ein neues an.\n// So bleibt der State bei einem Teil-Redeploy erhalten.\nconst now      = timeHelpers.nowIso();\nconst existing = global.get(\"smarthome_runtime\");\nconst runtime  = deviceStore.ensureRuntime(existing, now);\nglobal.set(\"smarthome_runtime\", runtime);\n\n// ── 3. flowHelpers registrieren ─────────────────────────────────────────────\n// Gemeinsam genutzte Hilfsfunktionen, die in mehreren Flows benötigt werden.\n// Zentral hier registrieren statt überall inline duplizieren.\nglobal.set(\"flowHelpers\", {\n\n    /**\n     * isEmptyPayload(payload)\n     * Gibt true zurück, wenn der MQTT-Payload als leer gilt.\n     * Leere Payloads kommen beim Löschen von retained Topics (MQTT Retained Clear).\n     * Solche Nachrichten sollen nicht in den JSON-Parser oder die Handler gelangen.\n     */\n    isEmptyPayload(payload) {\n        if (payload === undefined || payload === null) return true;\n        if (Buffer.isBuffer(payload) && payload.length === 0) return true;\n        if (typeof payload === \"string\" && payload.trim() === \"\") return true;\n        return false;\n    },\n\n    /**\n     * readPayloadObject(rawPayload)\n     * Liest ein Payload sicher als JavaScript-Objekt.\n     * Unterstützt: fertiges Objekt, JSON-String, Buffer mit JSON-Inhalt.\n     * Gibt bei Fehler immer ein leeres Objekt {} zurück – nie null oder undefined.\n     * Wird in Command- und Dashboard-Endpunkten genutzt, um den HTTP-Body zu lesen.\n     */\n    readPayloadObject(rawPayload) {\n        // Schon ein Objekt – direkt zurückgeben (kein Buffer).\n        if (rawPayload && typeof rawPayload === \"object\" && !Buffer.isBuffer(rawPayload)) {\n            return rawPayload;\n        }\n        // Buffer zu UTF-8-String wandeln.\n        if (Buffer.isBuffer(rawPayload)) {\n            rawPayload = rawPayload.toString(\"utf8\");\n        }\n        // JSON-String parsen.\n        if (typeof rawPayload === \"string\") {\n            const trimmed = rawPayload.trim();\n            if (!trimmed) return {};\n            try {\n                const parsed = JSON.parse(trimmed);\n                return parsed && typeof parsed === \"object\" && !Array.isArray(parsed) ? parsed : {};\n            } catch (e) {\n                return {};\n            }\n        }\n        return {};\n    }\n});\n\n// ── 4. Bootstatus melden ────────────────────────────────────────────────────\nmsg.payload = {\n    status:        \"bootstrapped\",\n    initialized_at: runtime.initialized_at,\n    device_count:  Object.keys(runtime.devices || {}).length,\n    master_count:  Object.keys(runtime.masters || {}).length\n};\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 390,
+    "x": 420,
     "y": 140,
-    "wires": [
-      [
-        "debug_00_boot"
-      ]
-    ]
+    "wires": [["debug_00_boot"]]
   },
   {
     "id": "debug_00_boot",
@@ -68,12 +57,12 @@
     "active": true,
     "tosidebar": true,
     "console": false,
-    "tostatus": false,
+    "tostatus": true,
     "complete": "payload",
     "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 620,
+    "statusVal": "payload.status",
+    "statusType": "msg",
+    "x": 680,
     "y": 140,
     "wires": []
   }

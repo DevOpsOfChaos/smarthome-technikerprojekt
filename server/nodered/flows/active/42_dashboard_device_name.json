@@ -4,8 +4,8 @@
     "type": "comment",
     "z": "tab_40_command_minimal",
     "name": "Dashboard Anzeigenamen",
-    "info": "Kleiner Schreibpfad für editierbare Anzeigenamen im Dashboard. Der Name wird getrennt vom Geräte-Meta im Feld dashboard_display_name gespeichert, damit laufende Meta-Updates ihn nicht überschreiben. Leerer Name setzt auf Device-ID als Fallback zurück.",
-    "x": 180,
+    "info": "Schreibpfad für editierbare Anzeigenamen im Dashboard.\nOPTIMIERUNG 1: readPayloadObject() ist nicht mehr inline dupliziert,\n               sondern wird aus dem globalen flowHelpers geholt (registriert in 00_boot).\nOPTIMIERUNG 2: SQL wird als parametrisierte Prepared-Statement ausgeführt (msg.params),\n               kein manueller String-Bau mehr – sicherer und klarer.\nLeerer Name setzt den Anzeigenamen auf NULL zurück (→ Fallback auf device_id im Frontend).",
+    "x": 200,
     "y": 420,
     "wires": []
   },
@@ -34,7 +34,7 @@
     "property": "payload",
     "action": "",
     "pretty": false,
-    "x": 390,
+    "x": 400,
     "y": 500,
     "wires": [
       [
@@ -46,14 +46,14 @@
     "id": "func_42_device_name_update",
     "type": "function",
     "z": "tab_40_command_minimal",
-    "name": "Validate display name update",
-    "func": "function sqlStringLiteral(value) {\n    return \"'\" + String(value).replace(/'/g, \"''\") + \"'\";\n}\n\nfunction readPayloadObject(payload) {\n    if (payload && typeof payload === \"object\" && !Buffer.isBuffer(payload)) {\n        return payload;\n    }\n\n    if (Buffer.isBuffer(payload)) {\n        payload = payload.toString(\"utf8\");\n    }\n\n    if (typeof payload === \"string\") {\n        const trimmed = payload.trim();\n        if (!trimmed) {\n            return {};\n        }\n        try {\n            const parsed = JSON.parse(trimmed);\n            return parsed && typeof parsed === \"object\" ? parsed : {};\n        } catch (error) {\n            return {};\n        }\n    }\n\n    return {};\n}\n\nconst payload = readPayloadObject(msg.payload);\nconst deviceId = typeof payload.device_id === \"string\" ? payload.device_id.trim() : \"\";\nconst rawName = typeof payload.display_name === \"string\"\n    ? payload.display_name\n    : typeof payload.device_name === \"string\"\n        ? payload.device_name\n        : \"\";\nconst normalizedName = rawName.trim();\n\nif (!deviceId) {\n    msg.statusCode = 400;\n    msg.payload = {\n        error: \"device_id_required\",\n        message: \"device_id is required\"\n    };\n    return [null, msg];\n}\n\nif (normalizedName.length > 80) {\n    msg.statusCode = 400;\n    msg.payload = {\n        error: \"display_name_too_long\",\n        message: \"display_name must be 80 characters or fewer\"\n    };\n    return [null, msg];\n}\n\nconst updatedAt = new Date().toISOString();\nconst nameSql = normalizedName ? sqlStringLiteral(normalizedName) : \"NULL\";\nmsg.dashboardDisplayNameUpdate = {\n    device_id: deviceId,\n    display_name: normalizedName || null,\n    updated_at: updatedAt\n};\nmsg.topic = \"UPDATE devices SET dashboard_display_name = \" + nameSql + \", updated_at = \" + sqlStringLiteral(updatedAt) + \" WHERE device_id = \" + sqlStringLiteral(deviceId) + \" RETURNING device_id, dashboard_display_name, updated_at;\";\nreturn [msg, null];",
+    "name": "Anzeigename validieren & parametrisieren",
+    "func": "// Zweck: HTTP-Body validieren und parametrisiertes SQL für den SQLite-Node vorbereiten.\n//\n// OPTIMIERUNG gegenüber Vorgänger:\n//   1. readPayloadObject() stammt aus den globalen flowHelpers (kein Inline-Duplikat).\n//   2. SQL wird als Prepared Statement mit msg.params gebaut statt per String-Verkettung.\n//      Das ist sicherer (kein SQL-Injection-Risiko durch manuelles Escaping)\n//      und lesbarer (SQL-Template klar sichtbar, Werte separat).\n//\n// Eingabe:  msg.payload – JSON-Body mit device_id und display_name\n// Ausgaben:\n//   Output 1 – msg mit parametrisiertem SQL → weiter zum SQLite-Node\n//   Output 2 – HTTP-Fehlerantwort (400) bei Validierungsfehler\n\nconst flowHelpers = global.get(\"flowHelpers\");\nif (!flowHelpers) {\n    msg.statusCode = 500;\n    msg.payload    = { error: \"flow_helpers_unavailable\", message: \"Boot-Flow prüfen\" };\n    return [null, msg];\n}\n\n// Payload sicher als Objekt lesen (unterstützt JSON-String, Buffer, fertiges Objekt).\nconst payload = flowHelpers.readPayloadObject(msg.payload);\n\n// device_id ist Pflichtfeld.\nconst deviceId = typeof payload.device_id === \"string\" ? payload.device_id.trim() : \"\";\nif (!deviceId) {\n    msg.statusCode = 400;\n    msg.payload    = { error: \"device_id_required\", message: \"device_id ist ein Pflichtfeld\" };\n    return [null, msg];\n}\n\n// display_name akzeptiert beide Feldnamen aus Kompatibilitätsgründen.\nconst rawName = typeof payload.display_name === \"string\"\n    ? payload.display_name\n    : typeof payload.device_name === \"string\"\n        ? payload.device_name\n        : \"\";\nconst normalizedName = rawName.trim();\n\n// Länge begrenzen (DB-Feld ist VARCHAR(80)).\nif (normalizedName.length > 80) {\n    msg.statusCode = 400;\n    msg.payload    = { error: \"display_name_too_long\", message: \"display_name darf maximal 80 Zeichen haben\" };\n    return [null, msg];\n}\n\nconst updatedAt = new Date().toISOString();\n\n// Merker für den Response-Builder (device_id + gesetzter Name).\nmsg.dashboardDisplayNameUpdate = {\n    device_id:    deviceId,\n    display_name: normalizedName || null,\n    updated_at:   updatedAt\n};\n\n// ── Parametrisiertes Prepared Statement ─────────────────────────────────────\n// SQLite-Node.sql = SQL-Template mit Platzhaltern (?)\n// msg.params     = Werte-Array in der Reihenfolge der Platzhalter\n//\n// NULL bei leerem Namen: SQLite RETURNING gibt den gespeicherten Wert zurück,\n// sodass das Frontend immer den aktuellen Stand erhält.\nmsg.params = [\n    normalizedName || null,  // NULL setzt den Namen auf Standardwert zurück\n    updatedAt,\n    deviceId\n];\n\nreturn [msg, null];",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 640,
+    "x": 660,
     "y": 500,
     "wires": [
       [
@@ -69,10 +69,10 @@
     "type": "sqlite",
     "z": "tab_40_command_minimal",
     "mydb": "sqlitedb_30_phase1",
-    "sqlquery": "msg.topic",
-    "sql": "",
-    "name": "Write display name",
-    "x": 900,
+    "sqlquery": "prepared",
+    "sql": "UPDATE devices SET dashboard_display_name = ?, updated_at = ? WHERE device_id = ? RETURNING device_id, dashboard_display_name, updated_at;",
+    "name": "Write display name (prepared)",
+    "x": 940,
     "y": 480,
     "wires": [
       [
@@ -84,14 +84,14 @@
     "id": "func_42_device_name_response",
     "type": "function",
     "z": "tab_40_command_minimal",
-    "name": "Build display name response",
-    "func": "const update = msg.dashboardDisplayNameUpdate || {};\nconst rows = Array.isArray(msg.payload) ? msg.payload : [];\nconst row = rows.length > 0 ? rows[0] : null;\n\nif (!row) {\n    msg.statusCode = 404;\n    msg.payload = {\n        error: \"device_not_found\",\n        message: \"device not found\",\n        device_id: update.device_id || null\n    };\n    return msg;\n}\n\nmsg.statusCode = 200;\nmsg.payload = {\n    device_id: row.device_id || update.device_id || null,\n    display_name: row.dashboard_display_name || null,\n    updated_at: row.updated_at || update.updated_at || new Date().toISOString()\n};\nreturn msg;",
+    "name": "Anzeigename-Antwort bauen",
+    "func": "// Zweck: SQLite-Ergebnis in eine strukturierte HTTP-Antwort umwandeln.\n// Eingabe:  msg.payload          – Array mit RETURNING-Zeile(n) aus dem SQLite-Node\n//           msg.dashboardDisplayNameUpdate – Merker aus dem Validierungs-Node\n// Ausgabe:  msg.payload mit { device_id, display_name, updated_at } oder 404-Fehler\n\nconst update = msg.dashboardDisplayNameUpdate || {};\nconst rows   = Array.isArray(msg.payload) ? msg.payload : [];\nconst row    = rows.length > 0 ? rows[0] : null;\n\n// Wenn kein RETURNING-Ergebnis → Gerät existiert nicht in der DB.\nif (!row) {\n    msg.statusCode = 404;\n    msg.payload    = {\n        error:     \"device_not_found\",\n        message:   \"Gerät nicht in der Datenbank gefunden\",\n        device_id: update.device_id || null\n    };\n    return msg;\n}\n\nmsg.statusCode = 200;\nmsg.payload    = {\n    device_id:    row.device_id    || update.device_id    || null,\n    display_name: row.dashboard_display_name              || null,\n    updated_at:   row.updated_at   || update.updated_at   || new Date().toISOString()\n};\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 1160,
+    "x": 1200,
     "y": 480,
     "wires": [
       [
@@ -106,7 +106,7 @@
     "name": "HTTP response",
     "statusCode": "",
     "headers": {},
-    "x": 1170,
+    "x": 1190,
     "y": 540,
     "wires": []
   }
