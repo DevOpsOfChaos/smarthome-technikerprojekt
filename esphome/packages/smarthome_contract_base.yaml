@@ -40,12 +40,30 @@ substitutions:
   fw_version: "0"                         # Firmware-Version für Meta-Report
   caps: "0"                               # Faehigkeiten als Bitmaske (Bit 0=Relais, 1=Temp, 2=Feuchte, 3=Druck, 4=Gas, 6=Lux, 7=Fensterkontakt, 8-9=Regen)
   mac_address: ""                         # MAC-Adresse, falls sie explizit gesetzt wird
+  master_mac: ""                          # Gespeicherte Master-MAC fuer einheitliche Geraeteeinstellungen
   meta_schema_version: "1"                # Version des Meta-Daten-Schemas
   control_mode: none                      # Steuerungsmodus: none, relay_light, cover, …
   config_profile: none                    # Konfigurationsprofil
   reporting_mode: hybrid                  # Report-Modus: hybrid (Netzgeraete), sleep_event (Batterie)
   sensor_mask: XXXXXXXXXX                 # 10-stellige Sensormaske: T(emp)peratur, H(um)Feuchte, P(ressure)Druck, G(as), L(ux)Licht, W(indow)Fensterkontakt, R(ain)Regen
   input_mask: XXXXX                       # 5-stellige Eingangsmaske (Reserve)
+  setup_ap_password: smarthome            # lokales Setup-AP-Passwort, mindestens 8 Zeichen
+
+# =============================================================================
+# SETUP-PORTAL – Lokale AP-/Webserver-Schicht fuer Geraeteeinstellungen
+# =============================================================================
+esphome:
+  includes:
+    - ../packages/setup_portal.h
+
+web_server:
+  port: 80
+  version: 3
+  local: true
+  include_internal: true
+  ota: false
+
+captive_portal:
 
 # =============================================================================
 # OTA – Wireless-Update-Dienst fuer alle ESPHome-Geraete
@@ -78,6 +96,11 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '""'
+  - id: stored_master_mac                 # Persistente Master-MAC aus set_config
+    type: std::string
+    restore_value: yes
+    max_restore_data_length: 17
+    initial_value: '"${master_mac}"'
 
 # =============================================================================
 # SKRIPTE – Hilfsfunktionen für diesen Contract
@@ -142,3 +165,45 @@ script:
             root["availability"] = id(contract_online) ? "online" : "offline";
             root["online"] = id(contract_online);
             root["power_type"] = "${power_type}";
+
+  - id: enter_setup_portal
+    then:
+      - lambda: |-
+          SmartHomeSetupPortal::start("${node_name}-setup", "${setup_ap_password}");
+
+text:
+  - platform: template
+    id: setup_master_mac_text
+    name: "${device_name} Master MAC"
+    mode: text
+    min_length: 0
+    max_length: 17
+    optimistic: true
+    restore_value: true
+    initial_value: "${master_mac}"
+    internal: true
+    set_action:
+      - lambda: |-
+          auto is_hex = [](char c) {
+            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+          };
+          bool valid = x.empty() || x.length() == 17;
+          for (size_t i = 0; valid && i < x.length(); i++) {
+            if ((i + 1) % 3 == 0) valid = x[i] == ':';
+            else valid = is_hex(x[i]);
+          }
+          if (valid) {
+            id(stored_master_mac) = x;
+          } else {
+            auto call = id(setup_master_mac_text).make_call();
+            call.set_value(id(stored_master_mac));
+            call.perform();
+          }
+
+button:
+  - platform: template
+    id: setup_portal_button
+    name: "${device_name} Setup"
+    internal: true
+    on_press:
+      - script.execute: enter_setup_portal

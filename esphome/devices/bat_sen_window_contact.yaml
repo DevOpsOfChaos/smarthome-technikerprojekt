@@ -20,6 +20,7 @@ substitutions:
 
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
+  command_ack: !include ../packages/smarthome_command_ack.yaml
 
 esphome:
   name: ${node_name}
@@ -49,6 +50,9 @@ wifi:
   password: !secret wifi_password
   fast_connect: true
   power_save_mode: LIGHT
+  ap:
+    ssid: ${node_name}-setup
+    password: ${setup_ap_password}
 
 mqtt:
   broker: !secret mqtt_broker
@@ -66,6 +70,92 @@ mqtt:
     topic: smarthome/device/${device_id}/availability
     retain: true
     payload: '{"device_id":"${device_id}","availability":"offline","online":false,"power_type":"${power_type}"}'
+  on_json_message:
+    - topic: smarthome/device/${device_id}/command
+      then:
+        - lambda: |-
+            std::string request_id = "";
+            if (x["request_id"].is<const char*>()) {
+              request_id = x["request_id"].as<std::string>();
+            }
+            if (request_id.empty()) {
+              id(contract_fault) = true;
+              id(contract_last_status_code) = -20;
+              id(contract_last_status_text) = "missing_request_id";
+              return;
+            }
+
+            std::string command = "";
+            if (x["command"].is<const char*>()) {
+              command = x["command"].as<std::string>();
+            }
+
+            auto queue_ack = [&](const char *status, int status_code, const char *source) {
+              id(ack_request_id) = request_id;
+              id(ack_status) = status;
+              id(ack_status_code) = status_code;
+              id(ack_source) = source;
+              id(flush_command_ack).execute();
+            };
+
+            if (command == "get_state") {
+              id(clear_contract_fault).execute();
+              id(publish_bat_window_state).execute();
+              queue_ack("ok", 0, "node_ack");
+              return;
+            }
+
+            if (command == "set_config") {
+              if (!x["values"].is<JsonObjectConst>()) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "device_validation");
+                return;
+              }
+
+              JsonObjectConst values = x["values"].as<JsonObjectConst>();
+              bool changed = false;
+              bool invalid = false;
+              if (values["master_mac"].is<const char*>()) {
+                std::string master_mac = values["master_mac"].as<std::string>();
+                auto is_hex = [](char c) {
+                  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+                };
+                bool valid = master_mac.length() == 17;
+                for (size_t i = 0; valid && i < master_mac.length(); i++) {
+                  if ((i + 1) % 3 == 0) valid = master_mac[i] == ':';
+                  else valid = is_hex(master_mac[i]);
+                }
+                if (valid) {
+                  id(stored_master_mac) = master_mac;
+                  id(setup_master_mac_text).publish_state(master_mac);
+                  changed = true;
+                } else {
+                  invalid = true;
+                }
+              }
+
+              if (invalid || !changed) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "device_validation");
+                return;
+              }
+
+              id(clear_contract_fault).execute();
+              id(publish_contract_meta).execute();
+              id(publish_contract_availability).execute();
+              id(publish_bat_window_state).execute();
+              queue_ack("ok", 0, "node_ack");
+              return;
+            }
+
+            id(contract_fault) = true;
+            id(contract_last_status_code) = -2;
+            id(contract_last_status_text) = "unsupported";
+            queue_ack("unsupported", -2, "master_validation");
 
 deep_sleep:
   id: deep_sleep_1

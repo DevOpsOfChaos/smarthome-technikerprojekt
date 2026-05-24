@@ -312,6 +312,53 @@ mqtt:
               return;
             }
 
+            if (command == "set_config") {
+              if (!x["values"].is<JsonObjectConst>()) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "device_validation");
+                return;
+              }
+
+              JsonObjectConst values = x["values"].as<JsonObjectConst>();
+              bool changed = false;
+              bool invalid = false;
+              if (values["master_mac"].is<const char*>()) {
+                std::string master_mac = values["master_mac"].as<std::string>();
+                auto is_hex = [](char c) {
+                  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+                };
+                bool valid = master_mac.length() == 17;
+                for (size_t i = 0; valid && i < master_mac.length(); i++) {
+                  if ((i + 1) % 3 == 0) valid = master_mac[i] == ':';
+                  else valid = is_hex(master_mac[i]);
+                }
+                if (valid) {
+                  id(stored_master_mac) = master_mac;
+                  id(setup_master_mac_text).publish_state(master_mac);
+                  changed = true;
+                } else {
+                  invalid = true;
+                }
+              }
+
+              if (invalid || !changed) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -21;
+                id(contract_last_status_text) = "invalid_payload";
+                queue_ack("invalid_payload", -21, "device_validation");
+                return;
+              }
+
+              id(clear_contract_fault).execute();
+              id(publish_contract_meta).execute();
+              id(publish_contract_availability).execute();
+              id(publish_cover_contract_state).execute();
+              queue_ack("ok", 0, "device_command");
+              return;
+            }
+
             // "calibrate" – Kalibrierung starten oder fortsetzen
             // Phase 1 oder 3: Kalibrierung laeuft bereits → Fehler "calib_in_progress"
             // Phase 5: bereits kalibriert → Fehler "already_calibrated"

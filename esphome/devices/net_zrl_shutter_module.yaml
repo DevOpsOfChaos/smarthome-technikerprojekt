@@ -56,8 +56,8 @@ substitutions:
   relay_up_pin: GPIO10               # bestehende Firmware: NET_ZRL_RELAY_UP_PIN
   relay_down_pin: GPIO5              # bestehende Firmware: NET_ZRL_RELAY_DOWN_PIN
   default_cover_travel_ms: "100000"
-  button_up_pin: GPIO20
-  button_down_pin: GPIO4
+  button_up_pin: GPIO4
+  button_down_pin: GPIO20
   button_stop_pin: GPIO3
   led_up_pin: GPIO6
   led_down_pin: GPIO7
@@ -102,6 +102,9 @@ logger:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  ap:
+    ssid: ${node_name}-setup
+    password: ${setup_ap_password}
 
 # =============================================================================
 # MQTT – Verbindungsaufbau, Birth/Will, Connect/Disconnect
@@ -223,14 +226,30 @@ binary_sensor:
       - delayed_on: 35ms
     on_press:
       then:
+        - lambda: 'id(stop_button_pressed_at_ms) = millis();'
         - script.execute: cover_hw_stop
         - lambda: 'id(cover_contract_state) = "stopped";'
         - script.execute: publish_cover_contract_state
+    on_release:
+      then:
+        - if:
+            condition:
+              lambda: |-
+                const uint32_t pressed_at = id(stop_button_pressed_at_ms);
+                const uint32_t held_ms = pressed_at > 0 ? millis() - pressed_at : 0;
+                id(stop_button_pressed_at_ms) = 0;
+                return held_ms >= 5000UL;
+            then:
+              - script.execute: enter_setup_portal
 
 # =============================================================================
 # GLOBALE VARIABLEN – Teil-Positionierung (Partial Movement)
 # =============================================================================
 globals:
+  - id: stop_button_pressed_at_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
   - id: cover_partial_active          # true = eine Teil-Positionsfahrt ist aktiv
     type: bool
     restore_value: no
