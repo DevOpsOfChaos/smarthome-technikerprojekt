@@ -67,6 +67,25 @@ function Resolve-DevicePath {
     return (Resolve-Path $candidate).Path
 }
 
+function Get-RelativePathCompat {
+    param(
+        [string]$BasePath,
+        [string]$TargetPath
+    )
+
+    $baseFull = (Resolve-Path $BasePath).Path
+    $targetFull = (Resolve-Path $TargetPath).Path
+
+    if (!$baseFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $baseFull += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $baseUri = New-Object System.Uri($baseFull)
+    $targetUri = New-Object System.Uri($targetFull)
+    $relativeUri = $baseUri.MakeRelativeUri($targetUri)
+    return [System.Uri]::UnescapeDataString($relativeUri.ToString()).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+}
+
 $uv = Find-Uv -ExplicitPath $UvPath
 
 if (!(Test-Path $deviceRoot)) {
@@ -137,13 +156,20 @@ ota_password: dummy-ota-password
     $env:UV_CACHE_DIR = $uvCacheDir
 
     foreach ($devicePath in $devicePaths) {
-        $relative = [System.IO.Path]::GetRelativePath($esphomeRoot, $devicePath)
+        $relative = Get-RelativePathCompat -BasePath $esphomeRoot -TargetPath $devicePath
         $workDevicePath = Join-Path $workEsphomeRoot $relative
         $mode = if ($Compile) { "compile" } else { "config" }
         Write-Host "ESPHome $mode $relative"
 
         $logPath = Join-Path $workRoot ("last-" + ($relative -replace '[\\/:*?"<>|]', '_') + "-$mode.log")
-        & $uv tool run --from esphome esphome $mode $workDevicePath *> $logPath
+        $loopErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $uv tool run --from esphome esphome $mode $workDevicePath *> $logPath
+        }
+        finally {
+            $ErrorActionPreference = $loopErrorActionPreference
+        }
         if ($LASTEXITCODE -ne 0) {
             Get-Content $logPath | Select-Object -Last 120
             throw "ESPHome $mode ist fuer '$relative' fehlgeschlagen."

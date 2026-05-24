@@ -122,7 +122,8 @@ bool istRegenZustand(uint16_t raw, bool bisherRegen) {
 // Aufrufer: BatSenRuntime ruft diesen Hook einmal beim Boot auf.
 void device_init_io() {
     pinMode(BAT_SEN_RAIN_SIGNAL_PIN, INPUT);
-    // ADC-Pin konfigurieren. ESP32 Arduino 3.x setzt die Attenuation automatisch.
+    analogSetAttenuation(ADC_11db);
+    // ADC-Dämpfung explizit auf 11 dB gesetzt (Messbereich 0–3,3 V).
 
     rain_raw = leseRainRaw();
     regen_erkannt = istRegenZustand(rain_raw, false);

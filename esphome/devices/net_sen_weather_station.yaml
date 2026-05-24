@@ -31,6 +31,7 @@ substitutions:
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
   command_ack: !include ../packages/smarthome_command_ack.yaml
+  device_event: !include ../packages/smarthome_device_event.yaml
 
 esphome:
   name: ${node_name}
@@ -44,6 +45,7 @@ esphome:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_net_sen_state
+      - script.execute: publish_boot_event
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -93,7 +95,7 @@ mqtt:
       then:
         - lambda: |-
             std::string request_id = "";
-            if (x.containsKey("request_id") && !x["request_id"].isNull()) {
+            if (x["request_id"].is<const char*>()) {
               request_id = x["request_id"].as<std::string>();
             }
             if (request_id.empty()) {
@@ -104,7 +106,7 @@ mqtt:
             }
 
             std::string command = "";
-            if (x.containsKey("command") && !x["command"].isNull()) {
+            if (x["command"].is<const char*>()) {
               command = x["command"].as<std::string>();
             }
 
@@ -235,6 +237,7 @@ script:
             root["tvoc_ppb"] = nullptr;
             root["eco2_ppm"] = nullptr;
             root["motion"] = false;
+            root["rain_raw"] = id(rain_state) ? 1 : 0;
             root["fault"] = id(contract_fault);
 
 binary_sensor:
@@ -274,6 +277,12 @@ binary_sensor:
     on_state:
       then:
         - lambda: 'id(rain_state) = x;'
+        - lambda: |-
+            id(event_type) = 5;
+            id(event_trigger) = 3;
+            id(event_param1) = x ? 1 : 0;
+            id(event_param2) = x ? 1 : 0;
+        - script.execute: flush_device_event
         - script.execute: publish_net_sen_state
 
 sensor:

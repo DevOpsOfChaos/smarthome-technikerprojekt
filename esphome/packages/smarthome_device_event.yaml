@@ -1,0 +1,77 @@
+# =============================================================================
+# smarthome_device_event.yaml
+# =============================================================================
+# Projekt:    Smarthome Technikerprojekt – alternative MQTT-Linie
+# Zweck:      MQTT-basierte Alternativ-Firmware für Smarthome-Geraete
+# Lizenz:     Proprietär – nur für Projektzwecke
+# Pfad:       packages/smarthome_device_event.yaml
+#
+# Datei-Funktion:
+#   Standardisierter Event-Publish-Mechanismus fuer Geraete-Ereignisse.
+#   Publiziert Geraete-Events wie Button-Druck, Bewegungserkennung,
+#   Fenster-/Regenwechsel, Relais-Schaltungen und Cover-Bewegungen
+#   auf dem MQTT-Topic .../event als transient (nicht retained).
+# =============================================================================
+
+globals:
+  - id: event_type
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: event_trigger
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: event_param1
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: event_param2
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: device_event_seq
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+script:
+  - id: flush_device_event
+    then:
+      - lambda: |-
+          id(device_event_seq) = (id(device_event_seq) + 1) & 0xFF;
+      - mqtt.publish_json:
+          topic: smarthome/device/${device_id}/event
+          retain: false
+          payload: |-
+            root["device_id"] = "${device_id}";
+            int et = id(event_type);
+            switch (et) {
+              case 1:  root["event"] = "button_press"; break;
+              case 2:  root["event"] = "motion_detected"; break;
+              case 3:  root["event"] = "window_opened"; break;
+              case 4:  root["event"] = "window_closed"; break;
+              case 5:  root["event"] = "rain_detected"; break;
+              case 6:  root["event"] = "relay_changed"; break;
+              case 7:  root["event"] = "light_auto_on"; break;
+              case 8:  root["event"] = "light_auto_off"; break;
+              case 9:  root["event"] = "cover_up"; break;
+              case 10: root["event"] = "cover_down"; break;
+              case 11: root["event"] = "cover_stop"; break;
+              case 14: root["event"] = "node_boot"; break;
+              case 15: root["event"] = "sensor_fault"; break;
+              default: root["event"] = "unknown"; break;
+            }
+            root["event_type"] = id(event_type);
+            root["trigger"] = id(event_trigger);
+            root["param1"] = id(event_param1);
+            root["param2"] = id(event_param2);
+
+  - id: publish_boot_event
+    then:
+      - lambda: |-
+          id(event_type) = 14;
+          id(event_trigger) = 3;
+          id(event_param1) = 0;
+          id(event_param2) = 0;
+      - script.execute: flush_device_event

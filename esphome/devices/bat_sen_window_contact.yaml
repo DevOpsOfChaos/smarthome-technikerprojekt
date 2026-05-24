@@ -31,6 +31,7 @@ substitutions:
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
   command_ack: !include ../packages/smarthome_command_ack.yaml
+  device_event: !include ../packages/smarthome_device_event.yaml
 
 esphome:
   name: ${node_name}
@@ -44,6 +45,7 @@ esphome:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_bat_window_state
+      - script.execute: publish_boot_event
       - safe_mode.mark_successful
 
 esp32:
@@ -80,6 +82,18 @@ mqtt:
     topic: smarthome/device/${device_id}/availability
     retain: true
     payload: '{"device_id":"${device_id}","availability":"offline","online":false,"power_type":"${power_type}"}'
+  on_connect:
+    then:
+      - lambda: |-
+          id(contract_online) = true;
+      - script.execute: publish_contract_meta
+      - script.execute: publish_contract_availability
+      - script.execute: publish_bat_window_state
+  on_disconnect:
+    then:
+      - lambda: |-
+          id(contract_online) = false;
+      - script.execute: publish_contract_availability
   on_json_message:
     - topic: smarthome/device/${device_id}/command
       then:
@@ -256,6 +270,12 @@ binary_sensor:
       then:
         - lambda: 'id(window_open_state) = x;'
         - script.execute: publish_bat_window_state
+        - lambda: |-
+            id(event_type) = x ? 3 : 4;
+            id(event_trigger) = 3;
+            id(event_param1) = x ? 1 : 0;
+            id(event_param2) = 0;
+        - script.execute: flush_device_event
 
 sensor:
   - platform: adc

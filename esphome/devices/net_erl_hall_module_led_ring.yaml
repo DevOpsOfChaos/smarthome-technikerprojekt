@@ -42,6 +42,7 @@ substitutions:
 packages:
   contract_base: !include ../packages/smarthome_contract_base.yaml
   command_ack: !include ../packages/smarthome_command_ack.yaml
+  device_event: !include ../packages/smarthome_device_event.yaml
 
 esphome:
   name: ${node_name}
@@ -63,6 +64,7 @@ esphome:
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_net_erl_led_state
+      - script.execute: publish_boot_event
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -183,6 +185,8 @@ mqtt:
                   id(last_motion_ms) = now;
                 }
                 id(relay_1_output).turn_on();
+                id(event_type) = 6; id(event_trigger) = 2; id(event_param1) = 1; id(event_param2) = 0;
+                id(flush_device_event).execute();
               } else {
                 id(manual_follow_motion_active) = false;
                 id(manual_follow_motion_seen) = false;
@@ -195,6 +199,8 @@ mqtt:
                   id(last_motion_ms) = now;
                 }
                 id(relay_1_output).turn_off();
+                id(event_type) = 6; id(event_trigger) = 2; id(event_param1) = 0; id(event_param2) = 0;
+                id(flush_device_event).execute();
               }
               id(clear_contract_fault).execute();
               id(publish_net_erl_led_state).execute();
@@ -442,6 +448,16 @@ script:
             root["tvoc_ppb"] = id(env_tvoc_ppb);
             root["eco2_ppm"] = id(env_eco2_ppm);
             root["motion"] = id(motion_state);
+            int auto_flags_val = 0;
+            auto_flags_val |= 0x20;
+            if (id(env_has_lux)) auto_flags_val |= 0x40;
+            auto_flags_val |= 0x80;
+            if (id(relay_auto_owned)) auto_flags_val |= 0x02;
+            if (id(blocked_by_lux)) auto_flags_val |= 0x08;
+            if (id(pending_auto_on_decision)) auto_flags_val |= 0x01;
+            root["auto_flags"] = auto_flags_val;
+            root["report_interval_s"] = atoi("${report_interval_s}");
+            root["auto_on_lux_threshold"] = atoi("${auto_on_lux_threshold}");
             root["fault"] = sensor_fault;
 
   # LED-Ring-Anzeige:
@@ -519,6 +535,8 @@ script:
             id(relay_auto_owned) = true;
             id(blocked_by_lux) = false;
             id(relay_1_output).turn_on();
+            id(event_type) = 7; id(event_trigger) = 3; id(event_param1) = 1; id(event_param2) = id(env_lux);
+            id(flush_device_event).execute();
           } else {
             id(blocked_by_lux) = true;
             id(trigger_led_ring_lux_blocked).execute();
@@ -539,6 +557,8 @@ script:
           id(motion_state) = true;
           id(last_motion_ms) = now;
           id(start_led_ring_comfort_sequence).execute();
+          id(event_type) = 2; id(event_trigger) = 3; id(event_param1) = 1; id(event_param2) = 0;
+          id(flush_device_event).execute();
           id(blocked_by_lux) = false;
           if (id(manual_follow_motion_active)) {
             id(manual_follow_motion_seen) = true;
@@ -570,6 +590,8 @@ script:
               id(last_motion_ms) = now;
             }
             id(relay_1_output).turn_on();
+            id(event_type) = 6; id(event_trigger) = 1; id(event_param1) = 1; id(event_param2) = 0;
+            id(flush_device_event).execute();
           } else {
             id(manual_follow_motion_active) = false;
             id(manual_follow_motion_seen) = false;
@@ -582,6 +604,8 @@ script:
               id(last_motion_ms) = now;
             }
             id(relay_1_output).turn_off();
+            id(event_type) = 6; id(event_trigger) = 1; id(event_param1) = 0; id(event_param2) = 0;
+            id(flush_device_event).execute();
           }
           id(publish_net_erl_led_state).execute();
 
@@ -974,6 +998,8 @@ interval:
             if (id(relay_1_state) && id(relay_auto_owned)) {
               id(relay_auto_owned) = false;
               id(relay_1_output).turn_off();
+              id(event_type) = 8; id(event_trigger) = 4; id(event_param1) = 1; id(event_param2) = 0;
+              id(flush_device_event).execute();
             } else if (id(relay_1_state) && id(manual_follow_motion_active) && id(manual_follow_motion_seen)) {
               id(manual_follow_motion_active) = false;
               id(manual_follow_motion_seen) = false;
