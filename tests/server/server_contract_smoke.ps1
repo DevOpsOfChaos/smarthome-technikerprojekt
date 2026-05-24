@@ -321,7 +321,9 @@ function all(sql) {
 }).finally(() => db.close());
 '@
 
-    $output = & docker compose -f $ComposeFile exec -T nodered node -e $checkScript 2>&1
+    # Das mehrzeilige Node-Skript wird per stdin übergeben. `node -e` ist unter
+    # PowerShell mit längeren Skripten und Sonderzeichen unnötig brüchig.
+    $output = $checkScript | & docker compose -f $ComposeFile exec -T nodered node - 2>&1
     $exitCode = $LASTEXITCODE
     return @{
         ExitCode = $exitCode
