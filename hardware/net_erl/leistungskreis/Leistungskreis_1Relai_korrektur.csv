@@ -1,0 +1,14 @@
+"ID";"Bezeichner";"Footprint";"Stückzahl";"Bezeichnung";"Anbieter und Referenz";
+1;"J1";"JST_PH_B5B-PH-K_1x05_P2.00mm_Vertical";1;"Co_5xV";;;
+2;"F1";"Fuseholder_Clip-5x20mm_Bel_FC-203-22_Lateral_P17.80x5.00mm_D1.17mm_Horizontal";1;"Fuse";;;
+3;"Q1";"TO-220-3_Vertical";1;"FQP27P06";;;
+4;"J5";"TerminalBlock_Phoenix_MKDS-1,5-3_1x03_P5.00mm_Horizontal";1;"Co_x3";;;
+5;"C2";"C_0805_2012Metric_Pad1.18x1.45mm_HandSolder";1;"100nF";;;
+6;"J8";"TerminalBlock_Phoenix_MKDS-1,5-3_1x03_P5.00mm_Horizontal";1;"Co_x31";;;
+7;"K2";"RELAY_HF46F_005-HS1";1;"HF46F_005-HS1";;;
+8;"U2";"DIP-4_W7.62mm";1;"PC817";;;
+9;"D1";"D_DO-41_SOD81_P10.16mm_Horizontal";1;"1N4007";;;
+10;"C1";"CP_Elec_6.3x5.8";1;"100uF";;;
+11;"PS1";"Converter_ACDC_Hi-Link_HLK-5Mxx";1;"HLK-5M05";;;
+12;"R1";"R_0805_2012Metric_Pad1.20x1.40mm_HandSolder";1;"R330";;;
+13;"R2";"R_0805_2012Metric_Pad1.20x1.40mm_HandSolder";1;"R100K";;;

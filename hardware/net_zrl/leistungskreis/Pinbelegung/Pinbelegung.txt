@@ -1,0 +1,13 @@
+GPIO-0  = I²C (theoretisch verfügbar) (auch Analog)
+GPIO-1  = I²C (theoretisch verfügbar) (auch Analog)
+GPIO-2  = NC (auch Analog)
+GPIO-3  = NC (auch Analog)
+GPIO-4  = NC (auch Analog)
+GPIO-5  = Trigger_PIN2 (auch Analog)
+GPIO-6  = frei (nur digital)
+GPIO-7  = frei (nur digital)
+GPIO-8  = frei (nur digital)
+GPIO-9  = NC (nur digital)
+GPIO-10 = Trigger_PIN1 (digital)
+GPIO-20 = RX
+GPIO-21 = TX
