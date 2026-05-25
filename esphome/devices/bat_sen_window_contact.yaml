@@ -7,7 +7,7 @@ substitutions:
   device_class: bat_sen
   power_type: battery
   fw_version: "1"
-  caps: "1280" # Bitmaske: BATTERY(1024) | WINDOW(256)
+  caps: "640" # Bitmaske: BATTERY(512) | WINDOW(128)
   meta_schema_version: "1"
   control_mode: none
   config_profile: none
@@ -82,6 +82,8 @@ mqtt:
     topic: smarthome/device/${device_id}/availability
     retain: true
     payload: '{"device_id":"${device_id}","availability":"offline","online":false,"power_type":"${power_type}"}'
+  # on_connect feuert erst nach MQTT-Broker-Verbindung (nach on_boot).
+  # Bei Deep-Sleep-Geraeten ist das der erste garantierte Sendezeitpunkt.
   on_connect:
     then:
       - lambda: |-
@@ -196,6 +198,10 @@ globals:
     type: int
     restore_value: no
     initial_value: "0"
+  - id: hardware_fault          # Hardware-Sensorfehler (getrennt von contract_fault)
+    type: bool
+    restore_value: no
+    initial_value: "false"      # BAT-SEN: keine diagnostischen Sensoren, hardware_fault bleibt immer false.
 
 script:
   - id: publish_bat_window_state
@@ -207,10 +213,10 @@ script:
             root["device_id"] = "${device_id}";
             if (id(battery_has_value)) root["battery_pct"] = id(battery_pct_value); else root["battery_pct"] = nullptr;
             if (id(battery_has_value)) root["battery_mv"] = id(battery_mv_value); else root["battery_mv"] = nullptr;
-            root["window_open"] = id(window_open_state);
+            root["window_open"] = id(window_open_state) ? 1 : 0;  // Integer 0/1 (nicht bool), wie Firmware-Protokoll.
             root["rain_raw"] = nullptr;
             root["button_flags"] = 0;
-            root["fault"] = id(contract_fault);
+            root["fault"] = id(hardware_fault) || id(contract_fault);
 
 binary_sensor:
   - platform: gpio

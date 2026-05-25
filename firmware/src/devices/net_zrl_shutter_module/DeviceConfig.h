@@ -39,7 +39,7 @@
 #define NET_ZRL_FW_VARIANT          "net_zrl_shutter_module"
 
 // Geraete-Faehigkeiten, Steuermodus, Profil und Meldeverhalten.
-#define NET_ZRL_DEVICE_CAPS             (SH_CAP_COVER)
+#define NET_ZRL_DEVICE_CAPS             (SH_CAP_RELAY | SH_CAP_RELAY2 | SH_CAP_COVER | SH_CAP_MULTIBUTTON)
 #define NET_ZRL_DEVICE_CONTROL_MODE     SH_CONTROL_MODE_COVER
 #define NET_ZRL_DEVICE_CONFIG_PROFILE   SH_PROFILE_COVER_BASIC
 #define NET_ZRL_DEVICE_REPORTING_MODE   SH_REPORTING_HYBRID

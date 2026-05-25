@@ -18,7 +18,8 @@
 ===============================================================================
 */
 #pragma once
-#include <Arduino.h>
+#include <stdint.h>  // uint16_t, int32_t
+// analogRead() benoetigt Arduino.h, das vom aufrufenden Code bereits inkludiert wird.
 
 namespace SmartHome {
 

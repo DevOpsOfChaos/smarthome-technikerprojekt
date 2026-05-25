@@ -18,7 +18,13 @@
  Aenderungsverlauf:
  - 2026-05-18: Kommentarstil vereinheitlicht und Doxygen-Metakommentare entfernt.
 ===============================================================================
-*/
+ */
+// Hinweis: SharedNodeSettings und NodeBasisSettings (aus ShNodeProvisioning.h)
+// duplizieren teilweise dieselben Felder (magic, version, flags, master_mac).
+// Dies ist historisch gewachsen: ShStorage ist der aeltere NVS-Treiber,
+// NodeProvisioningController wurde spaeter als Abstraktion daruebergelegt.
+// Eine Zusammenfuehrung ist wuenschenswert, aber nicht trivial (unterschiedliche
+// Feldbreiten und Default-Werte).
 #pragma once
 
 #include <Arduino.h>

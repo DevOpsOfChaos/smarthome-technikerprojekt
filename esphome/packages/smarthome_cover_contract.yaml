@@ -89,10 +89,17 @@ globals:
     type: int
     restore_value: no
     initial_value: "0"
+  - id: hardware_fault
+    type: bool
+    restore_value: no
+    initial_value: "false"
+    # Keine diagnostischen Sensoren - hardware_fault immer false.
+    # Design-Limit: env_has_*-Flags sind Einweg-Latches (werden nur auf true gesetzt).
+    # Ein Sensorausfall NACH erfolgreichem Erstkontakt wird NICHT erkannt.
+    # ESPHome bietet kein on_failure fuer I2C-Sensoren in YAML.
+    # Vollstaendige Erkennung braeuchte last_*_ms + Timeout (180s).
+    # Aktuell: nur "Sensor nie erreicht" wird als Fault gemeldet.
 
-# =============================================================================
-# SKRIPTE – Cover-Logik
-# =============================================================================
 script:
   # sync_cover_position – Synchronisiert cover_contract_position mit der lokalen Cover-Position
   #   Wenn kalibriert: position = cover.position * 100 (Prozent)
@@ -103,6 +110,11 @@ script:
           // Prueft ob Cover kalibriert ist – dann lokale Position abrufen
           if (id(cover_contract_calibrated)) {
             id(cover_contract_position) = (int) lroundf(id(zrl_cover).position * 100.0f);
+            if (id(cover_contract_position) == 100) {
+              id(cover_contract_state) = "open";
+            } else if (id(cover_contract_position) == 0) {
+              id(cover_contract_state) = "closed";
+            }
           }
 
   # publish_cover_contract_state – Veroeffentlicht Cover-Status auf .../state (retain)
@@ -128,7 +140,7 @@ script:
               root["cover_position"] = nullptr;
             }
             root["cover_calibrated"] = id(cover_contract_calibrated);
-            root["fault"] = id(contract_fault);
+            root["fault"] = id(hardware_fault) || id(contract_fault);
 
   # start_cover_calibration – State-Machine: Fuehrt Kalibrierung Schritt für Schritt aus
   #   Phase 0 → Phase 1: Werte zurücksetzen, Hochfahrt starten

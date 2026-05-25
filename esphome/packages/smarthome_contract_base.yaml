@@ -38,7 +38,7 @@ substitutions:
   device_class: net_erl                    # Geraeteklasse: net_erl=Relais, net_sen=Sensor, net_zrl=Cover, bat_sen=Batterie
   power_type: mains                        # Stromversorgung: mains (Netz) oder battery (Batterie)
   fw_version: "0"                         # Firmware-Version für Meta-Report
-  caps: "0"                               # Faehigkeiten als Bitmaske (Bit 0=Relais, 1=Temp, 2=Feuchte, 3=Druck, 4=Gas, 6=Lux, 7=Fensterkontakt, 8-9=Regen)
+  caps: "0"                               # Faehigkeiten als Bitmaske: RELAY=1, RELAY2=2, TEMP=4, HUM=8, LUX=16, AQI=32, MOTION=64, WINDOW=128, RAIN=256, BATTERY=512, BUTTON=1024, MULTIBUTTON=2048, LED_RING=4096, COVER=8192, PRESSURE=32768
   mac_address: ""                         # MAC-Adresse, falls sie explizit gesetzt wird
   master_mac: ""                          # Gespeicherte Master-MAC fuer einheitliche Geraeteeinstellungen
   meta_schema_version: "1"                # Version des Meta-Daten-Schemas
@@ -48,8 +48,8 @@ substitutions:
   sensor_mask: XXXXXXXXXX                 # 10-stellige Sensormaske: T(emp)peratur, H(um)Feuchte, P(ressure)Druck, G(as), L(ux)Licht, W(indow)Fensterkontakt, R(ain)Regen
   input_mask: XXXXX                       # 5-stellige Eingangsmaske (Reserve)
   setup_ap_password: smarthome            # lokales Setup-AP-Passwort, mindestens 8 Zeichen
-  setup_status_field_name: status_send_interval_s
-  setup_sensor_field_name: sensor_send_interval_s
+  setup_status_field_name: "status_interval"     # Anzeigename fuer Status-Intervall im Setup-Portal
+  setup_sensor_field_name: "sensor_interval"     # Anzeigename fuer Sensor-Intervall im Setup-Portal
   setup_status_default: "60"
   setup_sensor_default: "60"
   setup_status_min: "5"
@@ -177,6 +177,8 @@ script:
           payload: |-
             root["device_id"] = "${device_id}";
             root["availability"] = id(contract_online) ? "online" : "offline";
+            // online als JSON-boolean (true/false). Firmware-Master emittiert "true"/"false" (String).
+            // Beide Formen sind gueltiges JSON; Server muss beide akzeptieren.
             root["online"] = id(contract_online);
             root["power_type"] = "${power_type}";
 

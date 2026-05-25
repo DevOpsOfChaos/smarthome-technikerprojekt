@@ -298,7 +298,7 @@ struct RuntimeState {
     bool masterBound;                     // HELLO_ACK vom Master empfangen
     bool stateReportOffen;                // STATE muss gesendet werden (dirty-Flag)
     bool movementTargetsIntermediatePosition; // Teil-Positionsfahrt
-    int16_t coverPosition;                // Geschaetzte Position (0-100, 255=unbekannt)
+    int16_t coverPosition;                // Geschaetzte Position (0-100, COVER_POSITION_UNBEKANNT=unbekannt)
     int16_t movementTargetPosition;       // Zielposition der aktuellen Fahrt
     uint32_t travelTimeUpMs;              // Kalibrierte Fahrzeit hoch
     uint32_t travelTimeDownMs;            // Kalibrierte Fahrzeit runter
@@ -513,7 +513,7 @@ void setzeCoverPositionUnbekannt() {
 uint8_t coverPositionFuerPayload() {
     return istCoverPositionBekannt(runtime.coverPosition)
                ? (uint8_t)begrenzePosition(runtime.coverPosition)
-               : 255U;
+               : (uint8_t)COVER_POSITION_UNBEKANNT;
 }
 
 uint8_t coverStateCodeAusRuntime() {
@@ -637,17 +637,12 @@ bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, si
 #endif
 
 bool sendePaketMitRetry(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
-    // Sequenznummer zuruecksetzen: Wiederholungen muessen dieselbe Seq-Nummer
-    // verwenden wie der erste Versuch (fuer Duplikat-Erkennung am Master).
-    // Da sendePaket() die Sequenz beim Aufruf erhoeht, gehen wir hier einen
-    // Schritt zurueck. Bei 0 → 255 (uint8_t Wrap).
-    if (runtime.naechsteSeq == 0) {
-        runtime.naechsteSeq = 255;
-    } else {
-        runtime.naechsteSeq--;
-    }
+    // Sequenznummer sichern, damit Wiederholungen dieselbe Seq verwenden.
+    const uint8_t savedSeq = runtime.naechsteSeq;
 
     for (int attempt = 0; attempt <= NET_ZRL_ESPNOW_RETRY_COUNT; attempt++) {
+        // Bei Wiederholungen dieselbe Sequenznummer wie beim ersten Versuch nutzen.
+        if (attempt > 0) runtime.naechsteSeq = savedSeq;
         if (sendePaket(zielMac, msgType, payload, payloadLen, label)) {
             return true;  // Erfolgreich gesendet
         }
@@ -2582,6 +2577,8 @@ void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
 
 void initialisiereFunk() {
     if (runtime.funkBereit || runtime.setupMode) return;
+    // Zaehler ueberlebt ESP.restart() nicht (RAM-Variable).
+    // Nach einem Stromausfall beginnt der Zaehler wieder bei 0.
     static uint8_t espNowInitFails = 0;
     constexpr uint8_t MAX_ESPNOW_INIT_FAILURES = 5;
 

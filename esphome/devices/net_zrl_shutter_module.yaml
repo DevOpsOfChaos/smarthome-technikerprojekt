@@ -37,7 +37,7 @@
 # =============================================================================
 # SUBSTITUTIONS – Geraete-Pins und Konfiguration
 # =============================================================================
-# caps="8195" → Bit 0 (Relais) + Bit 13 (Cover)
+# caps="10243" → RELAY(1) + RELAY2(2) + MULTIBUTTON(2048) + COVER(8192)
 # control_mode="cover", config_profile="cover_basic"
 substitutions:
   node_name: net-zrl-020
@@ -46,7 +46,7 @@ substitutions:
   device_class: net_zrl
   power_type: mains
   fw_version: "1"
-  caps: "8195" # Bitmaske: RELAY(1)|RELAY2(2)|COVER(8192)
+  caps: "10243" # Bitmaske: RELAY(1)|RELAY2(2)|MULTIBUTTON(2048)|COVER(8192)
   meta_schema_version: "1"
   control_mode: cover
   config_profile: cover_basic

@@ -22,7 +22,13 @@
 // Master-Schalter: true = Debug-Ausgaben aktiv
 constexpr bool DEBUG_AKTIV           = true;
 
-// Subsystem-Debugs (nur wirksam wenn DEBUG_AKTIV == true)
+// Subsystem-Debug-Schalter (derzeit alle ungenutzt).
+// Nur wirksam wenn DEBUG_AKTIV == true.
+// Bei Bedarf pro Subsystem aktivieren.
+
+// Reserviert, derzeit ungenutzt. Nur wirksam wenn DEBUG_AKTIV == true.
 constexpr bool DEBUG_SENSORIK        = true;   // Sensormesswerte und I2C-Diagnose
+// Reserviert, derzeit ungenutzt. Nur wirksam wenn DEBUG_AKTIV == true.
 constexpr bool DEBUG_KOMMUNIKATION   = true;   // ESP-NOW- und MQTT-Pakete
+// Reserviert, derzeit ungenutzt. Nur wirksam wenn DEBUG_AKTIV == true.
 constexpr bool DEBUG_AKTOREN         = true;   // Relais-Schaltvorgaenge

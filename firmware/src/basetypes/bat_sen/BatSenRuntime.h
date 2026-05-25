@@ -1163,6 +1163,7 @@ void loop() {
     }
 
     // HELLO senden wenn Master nicht bekannt und Retry-Intervall abgelaufen
+    // Erstaufruf (letztes_hello_ms == 0): Overflow-Mathe ergibt jetzt >= Interval → true.
     if (!nodeStatus.master_bekannt &&
         (jetzt - nodeStatus.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS) {
         sendeHello();

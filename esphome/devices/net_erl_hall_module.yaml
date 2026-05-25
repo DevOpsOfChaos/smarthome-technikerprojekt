@@ -7,7 +7,7 @@ substitutions:
   device_class: net_erl
   power_type: mains
   fw_version: "1"
-  caps: "93"  # Bitmaske: RELAY(1)|HUM(4)|PRESSURE(8)|GAS(16)|LUX(64)
+  caps: "93"  # Bitmaske: RELAY(1)|TEMP(4)|HUM(8)|LUX(16)|MOTION(64)
   meta_schema_version: "1"
   control_mode: relay_light
   config_profile: hall_light
@@ -247,6 +247,15 @@ globals:
     type: int
     restore_value: no
     initial_value: "0"
+  - id: hardware_fault
+    type: bool
+    restore_value: no
+    initial_value: "false"
+    # Design-Limit: env_has_*-Flags sind Einweg-Latches (werden nur auf true gesetzt).
+    # Ein Sensorausfall NACH erfolgreichem Erstkontakt wird NICHT erkannt.
+    # ESPHome bietet kein on_failure fuer I2C-Sensoren in YAML.
+    # Vollstaendige Erkennung braeuchte last_*_ms + Timeout (180s).
+    # Aktuell: nur "Sensor nie erreicht" wird als Fault gemeldet.
 
 script:
   - id: publish_net_erl_state
@@ -255,6 +264,7 @@ script:
           topic: smarthome/device/${device_id}/state
           retain: true
           payload: |-
+            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);
             root["device_id"] = "${device_id}";
             root["relay_1"] = id(relay_1_state);
             if (id(env_has_temp)) root["temp_01c"] = id(env_temp_01c); else root["temp_01c"] = nullptr;
@@ -270,7 +280,7 @@ script:
             root["report_interval_s"] = atoi("${setup_status_default}"); // Report-Intervall in Sekunden
             // Lux-Schwelle nicht anwendbar (kein Auto-Light)
             root["auto_on_lux_threshold"] = nullptr;
-            root["fault"] = id(contract_fault);
+            root["fault"] = id(hardware_fault) || id(contract_fault);
 
 switch:
   - platform: gpio
@@ -363,7 +373,10 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              id(env_hum_01pct) = (int) lroundf(x * 10.0f) + atoi("${hum_offset_01pct}");
+              int hum_01pct = (int) lroundf(x * 10.0f) + atoi("${hum_offset_01pct}");
+              if (hum_01pct < 0) hum_01pct = 0;
+              if (hum_01pct > 1000) hum_01pct = 1000;
+              id(env_hum_01pct) = hum_01pct;
               id(env_has_hum) = true;
           - script.execute: clear_contract_fault
           - script.execute: publish_net_erl_state

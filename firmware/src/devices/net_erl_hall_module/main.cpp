@@ -214,10 +214,10 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     letztes_env_sample_ms = nowMs;
 
     // Recovery: ausgefallene Sensoren erst nach dem Retry-Intervall neu initialisieren.
-    if (!bme280_ok && recoveryIsDue(letzter_bme_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
+    if (!bme280_ok && SmartHome::recoveryIsDue(letzter_bme_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
         letzter_bme_recovery_ms = nowMs; bme280_ok = initBme280();
     }
-    if (!veml7700_ok && recoveryIsDue(letzter_veml_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
+    if (!veml7700_ok && SmartHome::recoveryIsDue(letzter_veml_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
         letzter_veml_recovery_ms = nowMs; veml7700_ok = initVeml7700(nowMs);
     }
 
@@ -227,7 +227,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         float h = bme280.readHumidity();
         if (!isnan(t) && !isnan(h) && h >= 0 && h <= 100) {
             temp_01c = (int16_t)lroundf(t * 10.0f);
-            hum_01pct = clampHum01pct((long)lroundf(h * 10.0f));
+            hum_01pct = SmartHome::clampHum01pct((long)lroundf(h * 10.0f));
 
             // Exponentiell gleitender Mittelwert (EMA) zur Rauschunterdrueckung.
             // Erste Messung initialisiert den Filter ohne Glaettung.
@@ -237,14 +237,14 @@ void netErlDevicePollSensors(unsigned long nowMs) {
                 hum_ema  = EMA_ALPHA * (float)hum_01pct + (1.0f - EMA_ALPHA) * hum_ema;
             }
             temp_01c = (int16_t)(lroundf(temp_ema) + NET_ERL_TEMP_OFFSET_01C);
-            hum_01pct = clampHum01pct((long)(lroundf(hum_ema) + NET_ERL_HUM_OFFSET_01PCT));
+            hum_01pct = SmartHome::clampHum01pct((long)(lroundf(hum_ema) + NET_ERL_HUM_OFFSET_01PCT));
         } else { bme280_ok = false; logMsg("WARN", "BME280 unplausibel"); }
     }
 
     // VEML7700 lesen: Lux wird auf uint16_t begrenzt, damit der Protokoll-Payload passt.
     if (veml7700_ok) {
         float l = veml7700.readLux();
-        if (!isnan(l) && l >= 0) lux = clampToU16((long)lroundf(l));
+        if (!isnan(l) && l >= 0) lux = SmartHome::clampToU16((long)lroundf(l));
         else { veml7700_ok = false; logMsg("WARN", "VEML7700 read fail"); }
     }
 
@@ -272,8 +272,8 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         
         bool changed = false;
         if (temp_01c != last_temp) { last_temp = temp_01c; changed = true; }
-        if (absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
-        if (absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
+        if (SmartHome::absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
+        if (SmartHome::absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
         
         if (changed) runtime.state_report_offen = true;
     }

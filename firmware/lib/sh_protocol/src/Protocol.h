@@ -58,7 +58,6 @@
 #define SH_MSG_CMD             0x05U
 #define SH_MSG_CFG             0x06U
 #define SH_MSG_ACK             0x07U
-#define SH_MSG_TIME            0x08U
 #define SH_MSG_HEARTBEAT       0x09U
 
 // ============================================================
@@ -380,22 +379,6 @@ typedef struct __attribute__((packed)) {
 
 static_assert(sizeof(AckPayload) == 4,
     "AckPayload muss 4 Bytes groß sein");
-
-/*
- * Kurzbeschreibung: TIME-Payload: Zeit-Synchronisation vom Master (8 Bytes).
- *
- * Wird vom Master per SH_MSG_TIME an alle Nodes gesendet.
- * Ermoeglicht zeitsynchronisierte Aktionen und Zeitstempel in Events.
- */
-typedef struct __attribute__((packed)) {
-    uint32_t unix_time;     // Unix-Zeitstempel (Sekunden seit 01.01.1970)
-    int16_t  tz_offset_min; // Zeitzonen-Offset in Minuten (z.B. 60 fuer MEZ)
-    uint8_t  is_dst;        // Sommerzeit-Flag (0=Winterzeit, 1=Sommerzeit)
-    uint8_t  _pad;          // Padding
-} TimePayload;
-
-static_assert(sizeof(TimePayload) == 8,
-    "TimePayload muss 8 Bytes groß sein");
 
 /*
  * Kurzbeschreibung: Basis-STATE-Payload: Minimaler Zustand - einfaches Relais (20 Bytes).
@@ -813,6 +796,8 @@ static_assert(sizeof(EventReportPayload) == 22,
  * Hinweis: SH_TLV_STATE_*-Tags beschreiben Sensormesswerte (Temperatur, Lux, ...).
  *       SH_TLV_EVENT_*-Tags beschreiben Event-Zusatzdaten (Relay-Index, Trigger, ...).
  */
+// TlvEntry ist reserviert fuer zukuenftige TLV-basierte Protokollerweiterungen.
+// Derzeit ungenutzt, aber Teil des Protokollvertrags.
 typedef struct {
     uint8_t  type;     // TLV-Tag (SH_TLV_STATE_TEMP_01C, SH_TLV_EVENT_TYPE, ...)
     uint8_t  length;   // Laenge des value-Feldes in Bytes (max 4)

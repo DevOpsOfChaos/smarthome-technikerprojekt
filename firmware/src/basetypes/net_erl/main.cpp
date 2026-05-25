@@ -765,7 +765,7 @@ void setup() {
     // Serial initialisieren (nur wenn Debug aktiv)
     if (DEBUG_LOKAL_AKTIV) {
         Serial.begin(115200);
-        delay(150);
+        delay(150);  // 150 ms Wartezeit fuer Serial-Monitor-Flush (nur bei DEBUG_AKTIV).
     }
 
     // Alle Status-Flags null-initialisieren, dann Defaults setzen

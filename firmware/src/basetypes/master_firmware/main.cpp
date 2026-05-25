@@ -229,6 +229,7 @@ struct NodeRuntime {
     bool state_bekannt;                  // Mindestens ein STATE empfangen
     bool mac_bekannt;                    // MAC-Adresse bekannt
     bool fault;                          // Fehlerstatus der Node
+    uint8_t auto_flags;                  // Auto-Light-Status-Bitmaske
     bool relay_1;                        // Relais 1 Zustand
     bool relay_2;                        // Relais 2 Zustand
     bool cover_mode;                     // Cover-Modus aktiv
@@ -317,6 +318,11 @@ bool mqttBrokerNutzeDirekteIp = false;
 Preferences registryPrefs;
 MasterState masterStatus = {};
 NodeRuntime nodeStates[MAX_DYNAMIC_NODES] = {};
+
+// Log-Level-Konvention:
+// INFO  – Normalbetrieb, Verbindungsaufbau, State-Wechsel
+// WARN  – Transiente Fehler (Retry moeglich), unerwartete Payloads
+// ERROR – Kritische Fehler (ESP-NOW/MQTT-Init fehlgeschlagen, persistenter Funkverlust)
 
 // Aufgabe: Schreibt formatierte Debugmeldungen auf die serielle Schnittstelle.
 // Eingabewerte:
@@ -639,6 +645,9 @@ bool persistiereRegistrySnapshot(const char* grund) {
         logf("WARN", "Registry-Persistenz: NVS konnte nicht geoeffnet werden");
         return false;
     }
+    // Kein CRC: magic+version reichen als Integritaetspruefung.
+    // NVS-Schreibzugriffe sind atomar pro Key; ein teilweise geschriebener
+    // Blob wird bei inkonsistenter Laenge von ladeRegistrySnapshot() verworfen.
     const size_t written = registryPrefs.putBytes(REGISTRY_PREF_KEY, &snapshot, sizeof(snapshot));
     registryPrefs.end();
 
@@ -663,6 +672,8 @@ bool istPersistSlotGueltig(const PersistedNodeSlot& slot) {
     if (!istDeviceClassGueltig(slot.device_class)) return false;
     if (!istPowerTypeGueltig(slot.power_type)) return false;
     if (slot.mac_bekannt != 0U && !SmartHome::isValidMac(slot.mac)) return false;
+    // device_name muss mindestens ein Zeichen haben (wird vom HELLO immer gesetzt).
+    if (slot.device_name[0] == '\0') return false;
     return true;
 }
 
@@ -859,6 +870,7 @@ void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
     // So kann ein alter State-Wert nach Firmware-/Profilwechsel nicht weiterleben.
     if (!nodeHasCap(nodeIndex, SH_CAP_RELAY)) nodeStates[nodeIndex].relay_1 = false;
     if (!nodeHasCap(nodeIndex, SH_CAP_RELAY2)) nodeStates[nodeIndex].relay_2 = false;
+    // INT16_MIN = Sentinel "kein gueltiger Messwert" (Temperatur in Zehntelgrad).
     if (!nodeHasCap(nodeIndex, SH_CAP_TEMP)) nodeStates[nodeIndex].temp_01c = INT16_MIN;
     if (!nodeHasCap(nodeIndex, SH_CAP_HUM)) nodeStates[nodeIndex].hum_01pct = 0xFFFFU;
     if (!nodeHasCap(nodeIndex, SH_CAP_LUX)) nodeStates[nodeIndex].lux = 0xFFFFU;
@@ -883,6 +895,11 @@ void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
         nodeStates[nodeIndex].cover_state = SH_COVER_STATE_STOPPED;
         nodeStates[nodeIndex].cover_position = COVER_POSITION_UNBEKANNT;
         nodeStates[nodeIndex].cover_calibrated = false;
+    }
+
+    // auto_flags zuruecksetzen fuer Geraeteklassen ohne Auto-Light (nur NET_ERL).
+    if (nodeStates[nodeIndex].device_class != SH_CLASS_NET_ERL) {
+        nodeStates[nodeIndex].auto_flags = 0U;
     }
 }
 
@@ -1209,7 +1226,7 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             snprintf(
                 buffer,
                 bufferSize,
-                "{\"device_id\":\"%s\",\"relay_1\":%s,\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
+                "{\"device_id\":\"%s\",\"relay_1\":%s,\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"auto_flags\":%u,\"fault\":%s}",
                 nodeStates[nodeIndex].device_id,
                 boolStr(nodeStates[nodeIndex].relay_1),
                 tempText,
@@ -1221,6 +1238,7 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 tvocText,
                 eco2Text,
                 boolStr(nodeStates[nodeIndex].motion),
+                (unsigned)nodeStates[nodeIndex].auto_flags,
                 boolStr(nodeStates[nodeIndex].fault));
             return;
 
@@ -1682,6 +1700,20 @@ uint8_t inferDeviceClassFromState(const char* deviceId, uint16_t payloadLen) {
         || payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
         return SH_CLASS_NET_ZRL;
     }
+    if (payloadLen == sizeof(SmartHome::SensorStateReportPayload) ||
+        payloadLen == sizeof(SmartHome::SensorConfigStateReportPayload)) {
+        // Basis NET-SEN-Payloads (24/26 Bytes). Koennen nur von NET-SEN-Devices stammen,
+        // da BAT-SEN diese Laengen ebenfalls verwendet, aber andere ID-Praefixe hat.
+        if (strncmp(deviceId, "NET-SEN-", 8) == 0) return SH_CLASS_NET_SEN;
+        if (strncmp(deviceId, "BAT-SEN-", 8) == 0) return SH_CLASS_BAT_SEN;
+    }
+    if (payloadLen == sizeof(SmartHome::BatteryStateReportPayload) ||
+        payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
+        // BAT-SEN-Basis-Payloads (24/26 Bytes). NET-SEN nutzt diese Laengen ebenfalls,
+        // daher ID-basierte Unterscheidung.
+        if (strncmp(deviceId, "BAT-SEN-", 8) == 0) return SH_CLASS_BAT_SEN;
+        if (strncmp(deviceId, "NET-SEN-", 8) == 0) return SH_CLASS_NET_SEN;
+    }
     if (payloadLen == sizeof(SmartHome::ExtendedSensorStateReportPayload)
         || payloadLen == sizeof(SmartHome::ExtendedSensorConfigStateReportPayload)
         || payloadLen == sizeof(SmartHome::ExtendedSensorGasStateReportPayload)
@@ -1823,6 +1855,7 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
         setzeNetSenZusatzwerteUnbekannt(nodeIndex);
         nodeStates[nodeIndex].motion = (state.motion != 0U);
         nodeStates[nodeIndex].fault = (state.fault != 0U);
+        nodeStates[nodeIndex].auto_flags = state.auto_flags;
         return true;
     }
     // ExtendedRelayComfortConfigStateReportPayload und
@@ -1847,6 +1880,7 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
         nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
         nodeStates[nodeIndex].motion = (state.motion != 0U);
         nodeStates[nodeIndex].fault = (state.fault != 0U);
+        nodeStates[nodeIndex].auto_flags = state.auto_flags;
         return true;
     }
     if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload)) {
@@ -1868,6 +1902,7 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
             nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
             nodeStates[nodeIndex].motion = (state.motion != 0U);
             nodeStates[nodeIndex].fault = (state.fault != 0U);
+            nodeStates[nodeIndex].auto_flags = state.auto_flags;
         } else {
             // Standard-ERL ohne LED-Ring: Gas-State-Layout parsen.
             const SmartHome::ExtendedRelayComfortGasStateReportPayload& state =
@@ -1883,6 +1918,7 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
             nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
             nodeStates[nodeIndex].motion = (state.motion != 0U);
             nodeStates[nodeIndex].fault = (state.fault != 0U);
+            nodeStates[nodeIndex].auto_flags = state.auto_flags;
         }
         return true;
     }
@@ -1900,6 +1936,7 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
         nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
         nodeStates[nodeIndex].motion = (state.motion != 0U);
         nodeStates[nodeIndex].fault = (state.fault != 0U);
+        nodeStates[nodeIndex].auto_flags = state.auto_flags;
         return true;
     }
     logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
@@ -3055,7 +3092,7 @@ void initialisiereEspNow() {
 
     if (esp_now_init() != ESP_OK) {
         masterStatus.espnow_bereit = false;
-        logf("WARN", "ESP-NOW Initialisierung fehlgeschlagen");
+        logf("ERROR", "ESP-NOW Init fehlgeschlagen");
         return;
     }
 

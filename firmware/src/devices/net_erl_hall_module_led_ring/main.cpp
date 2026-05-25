@@ -89,8 +89,6 @@
 // =============================================================================
 #include "../../basetypes/net_erl/NetErlRuntime.h"
 
-using SmartHome::absDiffU32;
-
 // =============================================================================
 // DEVICE-SPEZIFISCHE OBJEKTE
 // =============================================================================
@@ -387,7 +385,7 @@ namespace {
     // Ausgabewert: true bedeutet, Gaswerte duerfen als gueltig gemeldet werden.
     // NET_ERL_BME680_GAS_WARMUP_MIN_READS = 5: erst nach 5 Messungen sind Gaswerte stabil.
     bool gasWarmupOk(unsigned long j) {
-        return gasWarmupComplete(runtime.boot_ms, j, NET_ERL_BME680_GAS_WARMUP_MS, bme680_gueltige_messungen, NET_ERL_BME680_GAS_WARMUP_MIN_READS);
+        return SmartHome::gasWarmupComplete(runtime.boot_ms, j, NET_ERL_BME680_GAS_WARMUP_MS, bme680_gueltige_messungen, NET_ERL_BME680_GAS_WARMUP_MIN_READS);
     }
 
     bool ensWarmupOk(unsigned long j) {
@@ -497,14 +495,14 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     letztes_env_sample_ms = nowMs;
 
     // Recovery: ausgefallene Sensoren erst nach dem Retry-Intervall neu initialisieren.
-    if (!bme_ok && recoveryIsDue(letzter_bme_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
+    if (!bme_ok && SmartHome::recoveryIsDue(letzter_bme_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
         letzter_bme_recovery_ms = nowMs; bme_ok = initBme();
     }
-    if (!lux_ok && recoveryIsDue(letzter_lux_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
+    if (!lux_ok && SmartHome::recoveryIsDue(letzter_lux_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
         letzter_lux_recovery_ms = nowMs; lux_ok = veml.begin();
         if (lux_ok) konfVeml();
     }
-    if (!ens_ok && recoveryIsDue(letzter_ens_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
+    if (!ens_ok && SmartHome::recoveryIsDue(letzter_ens_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
         letzter_ens_recovery_ms = nowMs; ens_ok = initEns();
         if (ens_ok && !setEnsStandardMode()) logMsg("WARN", "ENS160 mode fail");
     }
@@ -517,7 +515,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
             uint32_t g = bme680.gas_resistance;
             if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
                 temp_01c = (int16_t)(lroundf(t * 10.0f) + NET_ERL_TEMP_OFFSET_01C);
-                hum_01pct = clampHum01pct((long)(lroundf(h * 10.0f) + NET_ERL_HUM_OFFSET_01PCT));
+                hum_01pct = SmartHome::clampHum01pct((long)(lroundf(h * 10.0f) + NET_ERL_HUM_OFFSET_01PCT));
                 pressure_pa = (uint32_t)lroundf(p);
                 if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++; // Maximal 255 Zaehler (uint8_t).
                 gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
@@ -537,7 +535,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     // VEML7700 lesen: Lux wird auf uint16_t begrenzt, damit der Protokoll-Payload passt.
     if (lux_ok) {
         float l = veml.readLux();
-        if (!isnan(l) && l >= 0) lux = clampToU16((long)lroundf(l));
+        if (!isnan(l) && l >= 0) lux = SmartHome::clampToU16((long)lroundf(l));
         else { lux_ok = false; lux = 0xFFFFU; logMsg("WARN", "VEML7700 read fail"); }
     }
 
@@ -592,9 +590,9 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         
         bool changed = false;
         if (temp_01c != last_temp) { last_temp = temp_01c; changed = true; }
-        if (absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
-        if (absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
-        if (absDiffU32(pressure_pa, last_press) >= 10UL) { last_press = pressure_pa; changed = true; }
+        if (SmartHome::absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
+        if (SmartHome::absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
+        if (SmartHome::absDiffU32(pressure_pa, last_press) >= 10UL) { last_press = pressure_pa; changed = true; }
         if (last_aqi != aqi) { last_aqi = aqi; changed = true; }
         
         if (changed) runtime.state_report_offen = true;

@@ -58,8 +58,13 @@ script:
               case 9:  root["event"] = "cover_up"; break;
               case 10: root["event"] = "cover_down"; break;
               case 11: root["event"] = "cover_stop"; break;
+              case 12: root["event"] = "cover_calib_start"; break;
+              case 13: root["event"] = "cover_calib_done"; break;
               case 14: root["event"] = "node_boot"; break;
               case 15: root["event"] = "sensor_fault"; break;
+              case 16: root["event"] = "comm_fault"; break;
+              case 17: root["event"] = "button_release"; break;
+              case 18: root["event"] = "button_long_press"; break;
               default: root["event"] = "unknown"; break;
             }
             root["event_type"] = id(event_type);

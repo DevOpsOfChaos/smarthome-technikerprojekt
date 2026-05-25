@@ -43,12 +43,12 @@
 // KONSTANTEN – Buffer, Intervalle, Timeouts
 // =============================================================================
 
-#define MQTT_BUF_SIZE           1024U          // MQTT-Empfangspuffer (Bytes)
-#define RECONNECT_DELAY_MS      3000UL         // MQTT-Reconnect-Intervall (ms)
-#define WIFI_RETRY_INTERVAL_MS  5000UL         // WLAN-Reconnect-Intervall (ms)
-#define COMMAND_TIMEOUT_MS      7000UL         // ACK-Timeout fuer Kommandos (ms)
-#define NODE_OFFLINE_TIMEOUT_MS 30000UL        // Offline-Timeout der Node (ms)
-#define REQUEST_ID_LEN          96U            // Maximale request_id-Laenge
+static constexpr uint16_t MQTT_BUF_SIZE           = 1024U;   // MQTT-Empfangspuffer (Bytes)
+static constexpr uint32_t RECONNECT_DELAY_MS      = 3000UL;  // MQTT-Reconnect-Intervall (ms)
+static constexpr uint32_t WIFI_RETRY_INTERVAL_MS  = 5000UL;  // WLAN-Reconnect-Intervall (ms)
+static constexpr uint32_t COMMAND_TIMEOUT_MS      = 7000UL;  // ACK-Timeout fuer Kommandos (ms)
+static constexpr uint32_t NODE_OFFLINE_TIMEOUT_MS = 30000UL; // Offline-Timeout der Node (ms)
+static constexpr uint16_t REQUEST_ID_LEN          = 96U;     // Maximale request_id-Laenge
 
 // MQTT-Topics (statische Strings)
 static const char TOPIC_MASTER_STATUS[] =
@@ -313,7 +313,7 @@ static void publishMasterStatus(bool online) {
 static void publishNodeMeta() {
     if (!g_node.registered_node || !g_node.meta_known) return;
 
-    char topic[96];
+    char topic[96];  // 96 Bytes = 80+ Reserve: "smarthome/device/<16-char-ID>/<12-char-suffix>" + Null
     char mac_text[18];
     buildNodeTopic(g_node.device_id, "meta", topic, sizeof(topic));
     macToText(g_node.mac_known ? g_node.mac : nullptr, mac_text, sizeof(mac_text));
@@ -920,6 +920,12 @@ static bool tryGetLong(const JsonDocument& doc, const char* key, long* value) {
  * @param device_id   Geraete-ID (aus MQTT-Topic extrahiert)
  * @param payload_str JSON-Payload als null-terminierter String
  * @param len         Laenge des Payloads
+ *
+ * @todo Diese Funktion (~100 Zeilen, 6 Kommandos + Validierung) sollte in
+ *       kleinere, pro-Kommando Handler aufgeteilt werden (z.B. handleGetState,
+ *       handleCoverOpen, handleCoverClose, handleCoverStop, handleSetPosition).
+ *       Gemeinsame Preamble (request_id, device_id-Pruefung, busy-Pruefung,
+ *       espnow-ready-Pruefung) als eigene Hilfsfunktion auslagern.
  */
 static void handleCommand(const char* device_id, const char* payload_str,
                           unsigned int len) {
@@ -1065,22 +1071,22 @@ static void wifiConnect() {
     WiFi.setSleep(false);
     WiFi.begin(CONF_WIFI_SSID, CONF_WIFI_PASS);
     g_last_wifi_attempt_ms = millis();
-    Serial.print("[wifi] connecting");
+    Serial.print("[wifi] connecting");  // TODO: use logf()
 
     uint8_t attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 40U) {
         delay(500);
-        Serial.print(".");
+        Serial.print(".");  // TODO: use logf()
         attempts++;
     }
-    Serial.println();
+    Serial.println();  // TODO: use logf()
 
     g_wifi_ok = (WiFi.status() == WL_CONNECTED);
     if (g_wifi_ok) {
-        Serial.print("[wifi] IP=");
-        Serial.println(WiFi.localIP());
+        Serial.print("[wifi] IP=");  // TODO: use logf()
+        Serial.println(WiFi.localIP());  // TODO: use logf()
     } else {
-        Serial.println("[wifi] connection failed - will retry in loop");
+        Serial.println("[wifi] connection failed - will retry in loop");  // TODO: use logf()
     }
 }
 
@@ -1189,7 +1195,7 @@ static void checkNodeOffline() {
 void setup() {
     Serial.begin(115200);
     delay(500);
-    Serial.println("[master_compat] boot");
+    Serial.println("[master_compat] boot");  // TODO: use logf()
 
     // Node-Defaults initialisieren
     copyText(g_node.sensor_mask, sizeof(g_node.sensor_mask), "XXXXXXXXXX");

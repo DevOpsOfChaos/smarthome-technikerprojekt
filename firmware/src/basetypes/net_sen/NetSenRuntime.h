@@ -586,7 +586,7 @@ bool sendeState() {
 
     const uint16_t reportIntervalS = (uint16_t)(nodeStatus.state_interval_ms / 1000UL);
 
-    auto fillCommonSensorFields = [this](auto& payload) {
+    auto fillCommonSensorFields = [](auto& payload) {
         copyText(payload.node_id, sizeof(payload.node_id), DEVICE_ID);
         payload.temp_01c = nodeStatus.sensor.temp_01c;
         payload.hum_01pct = nodeStatus.sensor.hum_01pct;
@@ -980,6 +980,8 @@ void loop() {
     }
 
     // HELLO senden wenn Master nicht bekannt und Retry-Intervall abgelaufen
+    // letztes_hello_ms == 0UL ist redundant mit (jetzt - 0 >= interval),
+    // bleibt als explizite Dokumentation des Erstaufruf-Verhaltens.
     if (!nodeStatus.master_bekannt &&
         (nodeStatus.letztes_hello_ms == 0UL ||
          (jetzt - nodeStatus.letztes_hello_ms) >= HELLO_RETRY_INTERVAL_MS)) {

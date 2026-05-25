@@ -177,8 +177,8 @@
 // Rolladenfähigkeit vorhanden (Fahrzeit, Kalibrierung, Verriegelung).
 #define SH_CAP_COVER        0x2000U
 
-// Setup-Portal aktiv (nur für Diagnosezwecke im HELLO mitgeteilt).
-#define SH_CAP_SETUP_PORTAL 0x4000U
+// Gassensor vorhanden (BME680 gas resistance).
+#define SH_CAP_GAS          0x4000U
 
 // Luftdrucksensor vorhanden.
 #define SH_CAP_PRESSURE     0x8000U
