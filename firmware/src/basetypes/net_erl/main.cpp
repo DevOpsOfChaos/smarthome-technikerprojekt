@@ -585,6 +585,7 @@ void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 //   Validiert Master-Identitaet und Kommando-Typ.
 //   Unterstuetzt:
 //     SH_CMD_STATE_REQUEST – Loest STATE-Sendung aus
+//     SH_CMD_HELLO_REQUEST – Sendet HELLO erneut
 //     SH_CMD_SET_RELAY – Schaltet das Relais ein/aus (param1=index, param2=zustand)
 //   Parameter: senderMac(const uint8_t[6]) – MAC des Senders
 //              header(const SmartHome::MsgHeader&) – Nachrichtenkopf
@@ -600,6 +601,12 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
     // STATE_REQUEST – kein Payload, nur dirty-Flag setzen
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
         nodeStatus.state_report_offen = true;
+        return;
+    }
+
+    // HELLO_REQUEST – Master fordert Metadaten erneut an
+    if (payload.cmd_type == SH_CMD_HELLO_REQUEST) {
+        sendeHello();
         return;
     }
 
