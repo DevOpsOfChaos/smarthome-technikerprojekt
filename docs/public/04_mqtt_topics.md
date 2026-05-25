@@ -357,11 +357,14 @@ werden nur über den Firmware-Master-Pfad (ESP-NOW) unterstützt.
 ```json
 {
   "device_id": "NET-ERL-010",
-  "online": true
+  "availability": "online",
+  "online": true,
+  "power_type": "mains"
 }
 ```
 - `online: true` → Gerät ist per MQTT erreichbar
 - `online: false` → Gerät per Last-Will als offline gemeldet
+- `power_type` ist `mains` oder `battery`, sobald `HELLO`-Meta vorliegt; bei provisorischen Master-Einträgen ohne `HELLO` ist der Wert `unknown`.
 
 ---
 

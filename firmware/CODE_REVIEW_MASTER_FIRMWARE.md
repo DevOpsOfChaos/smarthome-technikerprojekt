@@ -15,8 +15,8 @@ Die zentralen Review-Punkte wurden im Master-Code umgesetzt:
 - Provisorische Registry-Einträge gelten nicht mehr als vollständige Meta-Daten.
 - HELLO_REQUEST wird für Nodes ohne echte HELLO-Meta erneut angefordert und per Intervall gedrosselt.
 - Provisorische Einträge werden nach TTL gelöscht, wenn kein HELLO folgt.
-- Payload-Inferenz nutzt zuerst die `device_id`-Präfixe und vermeidet mehrdeutige Längen als harte Wahrheit.
-- Mehrdeutige NET-ERL-State-Payloads warten ohne Capabilities auf HELLO statt falsch interpretiert zu werden.
+- Payload-Inferenz aus `device_id`-Präfixen oder STATE-Längen ist entfernt.
+- STATE wird erst nach echtem oder wiederhergestelltem HELLO geparst; vorher fordert der Master per `HELLO_REQUEST` Meta-Daten an.
 
 ---
 
@@ -241,13 +241,12 @@ const char* nodeId = reinterpret_cast<const char*>(payload);  // First 11 bytes 
 int nodeIndex = findeNodeIndex(nodeId);
 
 if (nodeIndex < 0) {
-    // ✓ SENDE HELLO_REQUEST
-    sendeHelloRequestAnMac(senderMac);
-    
     // ✓ VERSUCHE PROVISORISCHE REGISTRIERUNG
-    uint8_t guessedClass = inferDeviceClassFromStateLen(payloadLen);
-    registriereProvisorischMitId(..., deviceId, guessedClass);
+    registriereProvisorischMitId(senderMac, deviceId);
 }
+
+fordereHelloBeiBedarf(nodeIndex, senderMac, "STATE_REPORT");
+if (!nodeStates[nodeIndex].meta_bekannt) return;  // Kein Parsen ohne HELLO-Meta.
 ```
 
 **Payload-Parsing:**
@@ -286,32 +285,24 @@ switch (nodeStates[nodeIndex].device_class) {
 
 ---
 
-### 5. `inferDeviceClassFromStateLen()` - Payload-basierte Geräteklassen-Inferenz
+### 5. Klassenableitung vor HELLO - entfernt
 
-**Zweck:** Errät Device-Klasse anhand der STATE-Payload-Größe.
+**Alter Zweck:** Die frühere Logik hat versucht, Device-Klassen aus STATE-Payload-Längen oder ID-Präfixen abzuleiten.
 
-**Ablauf:**
+**Aktueller Stand:** Diese Ableitung ist entfernt. Der Master behandelt `device_id` nur als Identität. `device_class`, `power_type`, `caps`, `control_mode`, `config_profile` und `reporting_mode` kommen aus `HELLO`.
+
+**Ablauf bei STATE/HEARTBEAT vor HELLO:**
 ```cpp
-// Line 1305-1330
-if (payloadLen == sizeof(SmartHome::StateReportPayload) || 
-    payloadLen == sizeof(SmartHome::StateConfigReportPayload) || 
-    // ... 6 weitere NET_ERL Varianten
-) {
-    return SH_CLASS_NET_ERL;
-}
-// Gleich für NET_ZRL, NET_SEN, BAT_SEN
-return 0U;  // Unbekannt
+// Node provisorisch merken, HELLO_REQUEST senden, nicht parsen.
+registriereProvisorischMitId(senderMac, nodeId);
+fordereHelloBeiBedarf(nodeIndex, senderMac, "STATE_REPORT");
+return;
 ```
 
-**Qualität:** ✅ GUT
-- ✓ Verwendet explizite `if` statt `switch` (kompiliert auf einigen Plattformen besser)
-- ✓ Vergleicht direkt mit sizeof()
-- ✓ Fallback auf 0U bei unbekannter Größe
-
-**Kritik:** ⚠️
-- Payload-Größen sind anfällig bei Protokoll-Änderungen
-- Keine Dokumentation WARUM diese Größen unterschiedlich sind
-- Könnte in Zukunft problematisch sein, wenn zwei Klassen gleiche Payload-Größe haben
+**Qualität:** ✅ BESSER
+- ✓ Keine harte Kopplung an konkrete Gerätenamen
+- ✓ Keine fragile Klassenschätzung über Byte-Längen
+- ✓ Neue Geräte brauchen keine Master-Sonderfälle, solange sie korrekt `HELLO` beantworten
 
 ---
 
@@ -498,27 +489,22 @@ if (!sendeRelayCommand(...)) {
 
 **Problem:**
 ```cpp
-uint8_t inferDeviceClassFromStateLen(uint16_t payloadLen) {
-    if (payloadLen == sizeof(SmartHome::StateReportPayload)) 
-        return SH_CLASS_NET_ERL;  // ← Annahme
-    // ... mehr if-checks
-}
+// Entfernt: Der Master rät keine Klasse mehr aus payloadLen oder device_id.
+// Ohne HELLO-Meta wird STATE nicht geparst.
 ```
 
 **Szenario:**
 1. Zwei Device-Klassen haben versehentlich gleiche Payload-Größe
 2. Payload kommt an
-3. `inferDeviceClassFromStateLen()` rät falsch
-4. State-Parsing schlägt fehl oder nutzt falsche Felder
+3. Der Master fordert HELLO an und parst den STATE nicht
+4. Erst nach HELLO wird die passende Parserklasse genutzt
 
 **Lösung:**
-- Device-ID Präfix verwenden: "NET-ERL-*", "NET-SEN-*", etc.
-- Oder: Device-Klasse am Anfang des Payloads mitschicken
-- Oder: MAC-Tabelle für bekannte Device-Klassen-MACs
+- HELLO als einzige Quelle fuer Klasse und Capabilities verwenden
+- STATE ohne HELLO-Meta nicht parsen
+- Nodes muessen auf `HELLO_REQUEST` mit einem echten `HELLO` reagieren
 
-**Empfehlung:** 🟡 MITTLERE PRIORITÄT
-- Derzeit funktioniert es, aber fragil
-- Sollte bei Protokoll-Evolution adressiert werden
+**Empfehlung:** ✅ ERLEDIGT
 
 ---
 
@@ -601,7 +587,7 @@ int handleUnknownNodeDiscovery(
 
 ### 🟠 **WICHTIG** (nächste Iteration)
 1. **Kommentierung verbessern:** Payload-Parsing in verarbeiteStateReport()
-2. **Payload-Inference stabilisieren:** Device-Klasse robuster erkennen
+2. **HELLO-Pfad real testen:** STATE/HEARTBEAT vor HELLO muss HELLO_REQUEST ausloesen
 3. **Registry-TTL:** Provisorische Registrierungen nach Zeit löschen
 
 ### 🟡 **SOLLTE** (mittelfristig)
@@ -612,7 +598,7 @@ int handleUnknownNodeDiscovery(
 ### 🟢 **KÖNNTE** (longterm)
 1. Logging-Level konfigurierbar machen
 2. JSON-Buffer dynamisch allokieren
-3. Device-Klasse im Payload hardcodieren statt zu erraten
+3. Optional explizite Parser-Tests fuer alle State-Payload-Varianten
 
 ---
 

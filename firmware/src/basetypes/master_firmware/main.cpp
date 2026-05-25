@@ -458,6 +458,11 @@ const char* powerTypeText(uint8_t powerType) {
     return powerType == SH_POWER_BATTERY ? "battery" : "mains";
 }
 
+const char* nodePowerTypeText(size_t nodeIndex) {
+    if (!nodeStates[nodeIndex].meta_bekannt) return "unknown";
+    return powerTypeText(nodeStates[nodeIndex].power_type);
+}
+
 // Aufgabe: Wandelt den Control-Mode in den MQTT-/Meta-Text um.
 // Eingabewert: controlMode ist ein SH_CONTROL_MODE_*-Wert.
 // Ausgabewert: Text wie "relay", "relay_light", "cover" oder "none".
@@ -797,47 +802,6 @@ int findeFreienNodeIndex() {
     return -1;
 }
 
-// Aufgabe: Leitet aus der sichtbaren device_id-Praefixstruktur eine Device-Klasse ab.
-// Eingabewert: deviceId ist z.B. NET-ERL-001, NET-SEN-001 oder BAT-SEN-001.
-// Ausgabewert: erkannte SH_CLASS_*-Klasse oder SH_CLASS_UNKNOWN.
-//
-// Hintergrund:
-// Diese Erkennung ist absichtlich vor der Payload-Laengen-Inferenz geschaltet,
-// weil mehrere STATE-Payloads dieselbe Byte-Laenge haben. Die ID ist fachlich
-// stabiler als sizeof(), solange das Projekt die bestehenden Namensraeume nutzt.
-uint8_t inferDeviceClassFromDeviceId(const char* deviceId) {
-    if (!deviceId) return SH_CLASS_UNKNOWN;
-    if (strncmp(deviceId, "NET-ERL-", 8) == 0) return SH_CLASS_NET_ERL;
-    if (strncmp(deviceId, "NET-ZRL-", 8) == 0) return SH_CLASS_NET_ZRL;
-    if (strncmp(deviceId, "NET-SEN-", 8) == 0) return SH_CLASS_NET_SEN;
-    if (strncmp(deviceId, "BAT-SEN-", 8) == 0) return SH_CLASS_BAT_SEN;
-    return SH_CLASS_UNKNOWN;
-}
-
-// Aufgabe: Liefert den plausiblen Power-Typ fuer eine nur abgeleitete Klasse.
-// Eingabewert: deviceClass ist eine bekannte oder unbekannte SH_CLASS_*-Klasse.
-// Ausgabewert: BAT_SEN wird als battery behandelt, alle anderen als mains.
-uint8_t inferredPowerTypeForClass(uint8_t deviceClass) {
-    return deviceClass == SH_CLASS_BAT_SEN ? SH_POWER_BATTERY : SH_POWER_MAINS;
-}
-
-// Aufgabe: Entscheidet, ob ein STATE ohne HELLO-Meta absichtlich nicht geparst wird.
-// Eingabewerte: deviceClass und payloadLen des empfangenen STATE.
-// Ausgabewert: true bedeutet, zuerst muss ein HELLO mit Capabilities eintreffen.
-//
-// Hintergrund:
-// ExtendedRelayComfortConfigStateReportPayload und ExtendedRelayComfortGasStateReportPayload
-// haben beide dieselbe Byte-Laenge (41 Bytes). Ohne SH_CAP_LED_RING aus dem HELLO-Payload
-// kann der Master nicht sicher entscheiden, ob ein 41-Byte-Frame ein Config-State
-// (Standard-ERL) oder ein Gas-State (ERL + Gas-Sensor) enthaelt. Falsch parsen waere
-// schlimmer als kurz auf HELLO zu warten.
-// Andere ambige Laengen (ExtendedRelayComfortGasConfig, etc.) sind sicher erkennbar
-// und benoetigen diesen Guard nicht.
-bool statePayloadNeedsHelloMeta(uint8_t deviceClass, uint16_t payloadLen) {
-    return deviceClass == SH_CLASS_NET_ERL &&
-           payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload);
-}
-
 // Aufgabe: Baut die 16-Bit-Capability-Maske aus dem HELLO-Payload.
 // Eingabewert: payload ist der empfangene HELLO-Payload.
 // Ausgabewert: Capability-Bitmaske aus caps_hi und caps_lo.
@@ -1151,7 +1115,7 @@ void baueNodeAvailabilityJson(size_t nodeIndex, char* buffer, size_t bufferSize)
         nodeStates[nodeIndex].device_id,
         availability,
         nodeStates[nodeIndex].online ? "true" : "false",
-        powerTypeText(nodeStates[nodeIndex].power_type));
+        nodePowerTypeText(nodeIndex));
 }
 
 // Aufgabe: Schreibt eine signed Zahl oder JSON-null in einen Textpuffer.
@@ -1634,18 +1598,18 @@ int registriereOderFindeNode(const uint8_t* senderMac, const SmartHome::HelloPay
 }
 
 // Aufgabe: Versucht, eine Node provisorisch anhand ihrer device_id zu registrieren.
-// Diese Registrierung ist "leichtgewichtig": Sie setzt Mindestfelder, damit
-// STATE/HEARTBEAT akzeptiert und per MQTT veroeffentlicht werden koennen.
-// Wenn inferredClass==0/UNKNOWN bleibt die Klasse bewusst unbekannt, bis HELLO kommt.
+// Diese Registrierung ist "leichtgewichtig": Sie merkt nur Identitaet, MAC und
+// Kontaktzeit, damit ein gezielter HELLO_REQUEST moeglich ist. Klasse, Caps und
+// Versorgungstyp bleiben bis zum echten HELLO unbekannt.
 // Liefert Node-Index oder -1 bei Fehler, STATUS_CODE_REGISTRY_FULL wenn voll.
-int registriereProvisorischMitId(const uint8_t* senderMac, const char* deviceId, uint8_t inferredClass, uint8_t powerType = SH_POWER_MAINS) {
+int registriereProvisorischMitId(const uint8_t* senderMac, const char* deviceId) {
     if (!SmartHome::isValidDeviceId(deviceId)) {
         logf("WARN", "Provisorische Registration abgelehnt: ungueltige device_id=%s", deviceId ? deviceId : "?");
         return -1;
     }
 
     const char* macTxt = macToText(senderMac);
-    logf("INFO", "Provisorische Registration: device_id=%s mac=%s inferredClass=%u powerType=%u", deviceId ? deviceId : "?", macTxt, (unsigned)inferredClass, (unsigned)powerType);
+    logf("INFO", "Provisorische Registration: device_id=%s mac=%s, warte auf HELLO", deviceId ? deviceId : "?", macTxt);
 
     const int idIndex = findeNodeIndex(deviceId);
     const int macIndex = findeNodeIndexPerMac(senderMac);
@@ -1666,62 +1630,14 @@ int registriereProvisorischMitId(const uint8_t* senderMac, const char* deviceId,
     initialisiereNodeSlot(nodeStates[freeIndex]);
     nodeStates[freeIndex].belegt = true;
     nodeStates[freeIndex].provisorisch = true;
-    nodeStates[freeIndex].device_class = istDeviceClassGueltig(inferredClass) ? inferredClass : SH_CLASS_UNKNOWN;
-    nodeStates[freeIndex].power_type = powerType;
+    nodeStates[freeIndex].device_class = SH_CLASS_UNKNOWN;
+    nodeStates[freeIndex].power_type = SH_POWER_MAINS;
     copyText(nodeStates[freeIndex].device_id, sizeof(nodeStates[freeIndex].device_id), deviceId);
     nodeStates[freeIndex].meta_bekannt = false;
-    logf("INFO", "Node provisorisch registriert: %s (via state/heartbeat, class=%u)", deviceId, (unsigned)nodeStates[freeIndex].device_class);
+    logf("INFO", "Node provisorisch registriert: %s (via state/heartbeat, HELLO ausstehend)", deviceId);
     if (senderMac != nullptr) aktualisiereNodeKontakt((size_t)freeIndex, senderMac);
     publishNodeAvailability((size_t)freeIndex);
     return freeIndex;
-}
-
-// Hilfsfunktion: Liefert eine Klassenvermutung, ohne mehrdeutige Payload-Laengen
-// als Wahrheit zu behandeln. Die device_id-Praefixe sind stabiler als sizeof().
-//
-// BAT-SEN wird im payloadLen-Fallback bewusst ausgelassen:
-// BatteryStateReportPayload- und BatteryStatePlusReportPayload-Laengen
-// ueberschneiden sich mit NET-SEN-Varianten. Ohne device_id-Praefix ist eine
-// sichere Klassenzuweisung nicht moeglich; der Aufrufer muss auf HELLO warten.
-uint8_t inferDeviceClassFromState(const char* deviceId, uint16_t payloadLen) {
-    const uint8_t idClass = inferDeviceClassFromDeviceId(deviceId);
-    if (istDeviceClassGueltig(idClass)) return idClass;
-
-    if (payloadLen == sizeof(SmartHome::StateReportPayload)
-        || payloadLen == sizeof(SmartHome::StateConfigReportPayload)
-        || payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload)
-        || payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ExtendedRelayComfortStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasConfigStateReportPayload)) {
-        return SH_CLASS_NET_ERL;
-    }
-    if (payloadLen == sizeof(SmartHome::ZrlStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
-        return SH_CLASS_NET_ZRL;
-    }
-    if (payloadLen == sizeof(SmartHome::SensorStateReportPayload) ||
-        payloadLen == sizeof(SmartHome::SensorConfigStateReportPayload)) {
-        // Basis NET-SEN-Payloads (24/26 Bytes). Koennen nur von NET-SEN-Devices stammen,
-        // da BAT-SEN diese Laengen ebenfalls verwendet, aber andere ID-Praefixe hat.
-        if (strncmp(deviceId, "NET-SEN-", 8) == 0) return SH_CLASS_NET_SEN;
-        if (strncmp(deviceId, "BAT-SEN-", 8) == 0) return SH_CLASS_BAT_SEN;
-    }
-    if (payloadLen == sizeof(SmartHome::BatteryStateReportPayload) ||
-        payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
-        // BAT-SEN-Basis-Payloads (24/26 Bytes). NET-SEN nutzt diese Laengen ebenfalls,
-        // daher ID-basierte Unterscheidung.
-        if (strncmp(deviceId, "BAT-SEN-", 8) == 0) return SH_CLASS_BAT_SEN;
-        if (strncmp(deviceId, "NET-SEN-", 8) == 0) return SH_CLASS_NET_SEN;
-    }
-    if (payloadLen == sizeof(SmartHome::ExtendedSensorStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ExtendedSensorConfigStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ExtendedSensorGasStateReportPayload)
-        || payloadLen == sizeof(SmartHome::ExtendedSensorGasConfigStateReportPayload)) {
-        return SH_CLASS_NET_SEN;
-    }
-    return SH_CLASS_UNKNOWN;
 }
 
 // Aufgabe: Verarbeitet ein HELLO einer Node und veroeffentlicht deren Meta-Daten.
@@ -1800,12 +1716,7 @@ bool fordereHelloBeiBedarf(size_t nodeIndex, const uint8_t* senderMac, const cha
 void verarbeiteHeartbeat(const uint8_t* senderMac, const SmartHome::HeartbeatPayload& payload) {
     int nodeIndex = findeNodeIndex(payload.node_id);
     if (nodeIndex < 0) {
-        const uint8_t inferredClass = inferDeviceClassFromDeviceId(payload.node_id);
-        const int r = registriereProvisorischMitId(
-            senderMac,
-            payload.node_id,
-            inferredClass,
-            inferredPowerTypeForClass(inferredClass));
+        const int r = registriereProvisorischMitId(senderMac, payload.node_id);
         if (r < 0) {
             logf("WARN", "HEARTBEAT ignoriert: unbekannte node_id=%s (registrieren failed code=%d)", payload.node_id, r);
             return;
@@ -1861,8 +1772,7 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
     }
     // ExtendedRelayComfortConfigStateReportPayload und
     // ExtendedRelayComfortGasStateReportPayload sind beide 41 Bytes.
-    // statePayloadNeedsHelloMeta() haelt Frames dieser Laenge zurueck,
-    // bis SH_CAP_LED_RING aus dem HELLO bekannt ist.
+    // verarbeiteStateReport() ruft Parser erst nach bekannter HELLO-Meta auf.
     // Nach HELLO gilt:
     //   SH_CAP_LED_RING gesetzt: Config-State-Layout (kein Gas-Sensor)
     //   SH_CAP_LED_RING nicht:   Gas-State-Layout
@@ -2066,14 +1976,13 @@ static bool parseBatSenState(size_t nodeIndex, const uint8_t* payload, uint16_t 
 // Eingabewerte:
 // - senderMac ist die MAC-Adresse des Senders.
 // - payload zeigt auf den Roh-Payload; die device_id steht am Payload-Anfang.
-// - payloadLen ist die Payload-Laenge und bestimmt das konkrete STATE-Format.
+// - payloadLen ist die Payload-Laenge des STATE-Frames.
 // Ausgabewert: keiner; nodeStates[], Availability und State-MQTT werden aktualisiert.
 //
-// Payload-Erkennung:
-// 1. NET-ERL: Basis-, Comfort-, Extended- und Gas-Varianten mit/ohne Konfigwerte.
-// 2. NET-ZRL: Cover-State mit/ohne Konfigwerte.
-// 3. NET-SEN: Sensor-, Extended- und Gas-Varianten mit/ohne Konfigwerte.
-// 4. BAT-SEN: Batterie-State mit/ohne Konfigwerte.
+// Grundregel:
+// STATE wird erst nach einem echten oder aus NVS wiederhergestellten HELLO
+// geparst. Der Master leitet keine Geraeteklasse aus device_id-Praefixen oder
+// Payload-Laengen ab.
 void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uint16_t payloadLen) {
     if (!payload || payloadLen < SH_DEVICE_ID_LEN) {
         logf("WARN", "STATE_REPORT verworfen: payload ungueltig");
@@ -2096,42 +2005,22 @@ void verarbeiteStateReport(const uint8_t* senderMac, const uint8_t* payload, uin
         // Unbekannte Nodes werden leichtgewichtig aufgenommen, damit der Master
         // Kontakt/Availability verfolgen und gleichzeitig ein echtes HELLO
         // nachfordern kann. Die Metadaten bleiben bis dahin unvollstaendig.
-        const uint8_t inferredClass = inferDeviceClassFromState(nodeId, payloadLen);
-        const int r = registriereProvisorischMitId(
-            senderMac,
-            nodeId,
-            inferredClass,
-            inferredPowerTypeForClass(inferredClass));
+        const int r = registriereProvisorischMitId(senderMac, nodeId);
         if (r < 0) {
             logf("WARN", "STATE_REPORT ignoriert: unbekannte node_id=%s (registrieren failed code=%d)", nodeId, r);
             return;
         }
         nodeIndex = r;
-    } else if (!nodeStates[nodeIndex].meta_bekannt && nodeStates[nodeIndex].device_class == SH_CLASS_UNKNOWN) {
-        // Ein vorher nur per HEARTBEAT angelegter Slot hat eventuell noch keine
-        // Klasse. Der erste STATE kann sie nachliefern, bevorzugt ueber die ID.
-        const uint8_t inferredClass = inferDeviceClassFromState(nodeId, payloadLen);
-        if (istDeviceClassGueltig(inferredClass)) {
-            nodeStates[nodeIndex].device_class = inferredClass;
-            nodeStates[nodeIndex].power_type = inferredPowerTypeForClass(inferredClass);
-        }
     }
 
     fordereHelloBeiBedarf((size_t)nodeIndex, senderMac, "STATE_REPORT");
     aktualisiereNodeKontakt((size_t)nodeIndex, senderMac);
 
-    // Ohne Klasse kann der Master die Bytefolge nicht korrekt interpretieren.
-    // In diesem Zustand zaehlt nur: Node lebt, HELLO ist angefordert.
-    if (nodeStates[nodeIndex].device_class == SH_CLASS_UNKNOWN) {
-        logf("WARN", "STATE_REPORT von %s wartet auf HELLO: Device-Klasse unbekannt", nodeId);
-        publishNodeAvailability((size_t)nodeIndex);
-        return;
-    }
-    // Einige NET-ERL-Varianten teilen dieselbe Payload-Laenge. Ohne HELLO-Caps
-    // wuerde der Master hier Sensorfelder falsch deuten; daher wird gewartet.
-    if (!nodeStates[nodeIndex].meta_bekannt &&
-        statePayloadNeedsHelloMeta(nodeStates[nodeIndex].device_class, payloadLen)) {
-        logf("WARN", "STATE_REPORT von %s wartet auf HELLO: Payload-Laenge ohne Caps mehrdeutig", nodeId);
+    // Ohne HELLO-Meta kennt der Master weder Klasse noch Capabilities. Jede
+    // Ableitung aus ID oder Byte-Laenge waere ein Sonderfall und kann falsch
+    // parsen. Der Node muss auf HELLO_REQUEST mit einem echten HELLO reagieren.
+    if (!nodeStates[nodeIndex].meta_bekannt) {
+        logf("WARN", "STATE_REPORT von %s wartet auf HELLO: Meta fehlt", nodeId);
         publishNodeAvailability((size_t)nodeIndex);
         return;
     }

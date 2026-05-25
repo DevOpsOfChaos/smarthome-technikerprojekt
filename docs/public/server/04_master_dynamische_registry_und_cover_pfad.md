@@ -57,6 +57,19 @@ Stattdessen gilt:
 
 ist die Grundlage fuer die Aufnahme in die Registry.
 
+### HELLO als einzige Meta-Quelle
+
+Der Master leitet `device_class`, `power_type`, `caps`, `control_mode`, `config_profile` und `reporting_mode` nicht aus der `device_id`, aus ID-Praefixen oder aus Payload-Laengen ab.
+
+Wenn zuerst nur ein `HEARTBEAT` oder `STATE` einer unbekannten Node ankommt, gilt:
+- der Master legt hoechstens einen provisorischen Slot mit `device_id`, MAC und Kontaktzeit an
+- der Master sendet `HELLO_REQUEST` an diese MAC
+- `STATE` wird nicht geparst, solange kein echtes oder wiederhergestelltes `HELLO` vorliegt
+- `availability.power_type` bleibt bis dahin `unknown`
+- antwortet die Node nicht mit `HELLO`, bleibt sie unvollstaendig und wird spaeter per TTL geloescht
+
+Damit bleibt die `device_id` reine Identitaet. Die fachliche Einordnung kommt aus dem Protokoll-Handshake.
+
 ### Pro Registry-Eintrag
 
 Der Master haelt mindestens:

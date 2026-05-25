@@ -38,6 +38,8 @@ In der eigenen Firmware-Linie übernimmt der Master die Brückenfunktion:
 - empfängt Server-Kommandos über MQTT
 - reicht relevante Bedien- oder Konfigurationssignale an Geräte weiter
 
+Der Master erkennt Gerätetypen nicht über feste Gerätenamen, ID-Präfixe oder Payload-Längen. `HELLO` ist die verbindliche Quelle für Klasse, Fähigkeiten und Profile. Wenn ein Gerät zuerst nur `HEARTBEAT` oder `STATE` sendet, fordert der Master per `HELLO_REQUEST` die Metadaten an und wartet mit dem Parsen, bis diese vorliegen.
+
 Dadurch bleibt die Serverseite entkoppelt von der direkten Funkkommunikation.
 
 ## Server

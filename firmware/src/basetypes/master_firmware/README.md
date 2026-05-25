@@ -23,3 +23,5 @@ Sichtbare MQTT-Linie:
 Hinweis:
 - Zugangsdaten gehoeren nicht in diese Firmware-Dateien, sondern in die lokale `Secrets.h`.
 - Der Master speichert keine feste Node-Liste; Nodes melden sich dynamisch per HELLO.
+- `HELLO` ist die einzige Quelle fuer `device_class`, `power_type`, `caps` und Profile.
+- Wenn zuerst nur `HEARTBEAT` oder `STATE` einer unbekannten Node eintrifft, legt der Master nur einen provisorischen Slot fuer `device_id` und MAC an, sendet `HELLO_REQUEST` und wartet. Er leitet keine Geraeteklasse aus ID-Praefixen oder Payload-Laengen ab; Availability meldet den Versorgungstyp bis zum HELLO als `unknown`.
