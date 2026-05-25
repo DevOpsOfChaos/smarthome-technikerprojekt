@@ -6,12 +6,12 @@
 
 | Datei | Beschreibung |
 |-------|-------------|
-| `mod_Steuerkreis_ESP32.kicad_pro` | KiCAD 9.0 Projektdatei |
-| `mod_Steuerkreis_ESP32.kicad_sch` | Schaltplan (flat schematic) |
-| `mod_Steuerkreis_ESP32.kicad_pcb` | PCB-Layout (2-Lagen, 1.6mm) |
+| `steuerkreis.kicad_pro` | KiCAD 9.0 Projektdatei |
+| `steuerkreis.kicad_sch` | Schaltplan (flat schematic) |
+| `steuerkreis.kicad_pcb` | PCB-Layout (2-Lagen, 1.6mm) |
 | `mod_Steuerkreis_ESP32.kicad_prl` | PCB-Regeln |
-| `mod_Steuerkreis_ESP32.csv` | Bauteilliste |
-| `mod_Steuerkreis_ESP32.step` | 3D-Modell (STEP-Export) |
+| `steuerkreis.csv` | Bauteilliste |
+| `steuerkreis.step` | 3D-Modell (STEP-Export) |
 | `Pinbelegung/Pinbelegung.txt` | GPIO-Belegung |
 | `production/` | Fertigungsdaten (BOM, Position, Netlist) |
 

@@ -451,7 +451,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "Leistungskreis_1Relai_Steuerung.kicad_pro",
+    "filename": "leistungskreis.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -490,7 +490,7 @@
       "plot": "",
       "pos_files": "",
       "specctra_dsn": "",
-      "step": "Leistungskreis_1Relai_Steuerung.step",
+      "step": "leistungskreis.step",
       "svg": "",
       "vrml": ""
     },

@@ -52,20 +52,7 @@
         }
       },
       "diff_pair_dimensions": [],
-      "drc_exclusions": [
-        [
-          "lib_footprint_mismatch|109600000|72000000|6b2573f8-f62b-4be2-aa67-f66f9b6d5d64|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
-          "unconnected_items|100300000|74800000|F.Cu|4|cca3777d-fbd9-4b36-84e7-98180d6d797f|69623804-be4a-48bc-bb75-30a2f4abae10",
-          ""
-        ],
-        [
-          "unconnected_items|124800000|47200000|F.Cu|4|7cd4e7b4-a433-40b1-8b6f-ab98c581cd7b|cca3777d-fbd9-4b36-84e7-98180d6d797f",
-          ""
-        ]
-      ],
+      "drc_exclusions": [],
       "meta": {
         "version": 2
       },
@@ -113,9 +100,9 @@
         "skew_out_of_range": "error",
         "solder_mask_bridge": "error",
         "starved_thermal": "error",
-        "text_height": "ignore",
+        "text_height": "warning",
         "text_on_edge_cuts": "error",
-        "text_thickness": "ignore",
+        "text_thickness": "warning",
         "through_hole_pad_without_hole": "error",
         "too_many_vias": "error",
         "track_angle": "error",
@@ -464,7 +451,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "mod_Steuerkreis_ESP32.kicad_pro",
+    "filename": "net_sen.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -493,17 +480,26 @@
     },
     "net_colors": null,
     "netclass_assignments": null,
-    "netclass_patterns": []
+    "netclass_patterns": [
+      {
+        "netclass": "Default",
+        "pattern": "3V3"
+      },
+      {
+        "netclass": "Default",
+        "pattern": "GND"
+      }
+    ]
   },
   "pcbnew": {
     "last_paths": {
       "gencad": "",
       "idf": "",
-      "netlist": "",
+      "netlist": "./",
       "plot": "",
       "pos_files": "",
       "specctra_dsn": "",
-      "step": "mod_Steuerkreis_ESP32.step",
+      "step": "",
       "svg": "",
       "vrml": ""
     },
@@ -573,14 +569,98 @@
           "label": "Datasheet",
           "name": "Datasheet",
           "show": true
+        },
+        {
+          "group_by": false,
+          "label": "CREATOR",
+          "name": "CREATOR",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Check_prices",
+          "name": "Check_prices",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Description_1",
+          "name": "Description_1",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "MANUFACTURER",
+          "name": "MANUFACTURER",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "MF",
+          "name": "MF",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "MP",
+          "name": "MP",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Package",
+          "name": "Package",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Price",
+          "name": "Price",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "STANDARD",
+          "name": "STANDARD",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "SnapEDA_Link",
+          "name": "SnapEDA_Link",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "VERIFIER",
+          "name": "VERIFIER",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Availability",
+          "name": "Availability",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Beschreibung",
+          "name": "Description",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "#",
+          "name": "${ITEM_NUMBER}",
+          "show": false
         }
       ],
       "filter_string": "",
       "group_symbols": true,
       "include_excluded_from_bom": true,
-      "name": "Default Editing",
+      "name": "",
       "sort_asc": true,
-      "sort_field": "Referenz"
+      "sort_field": "Reference"
     },
     "connection_grid_size": 50.0,
     "drawing": {
@@ -624,8 +704,16 @@
   },
   "sheets": [
     [
-      "2ff27e98-1399-4213-b1cd-a5a6732bbe24",
+      "10108191-213d-452b-b5d4-aff556accf72",
       "Root"
+    ],
+    [
+      "25d7b4fa-577d-4dec-b1c0-3ffdf80ff8a0",
+      "Leistungskreis"
+    ],
+    [
+      "ff54d03a-2679-429b-8b06-60e279c7ae61",
+      "Steuerstromkreis"
     ]
   ],
   "text_variables": {}

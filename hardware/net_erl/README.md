@@ -20,7 +20,7 @@ NET-ERL ist der Basetype für **netzbetriebene 1-Relais-Knoten**. Einsatz: Lampe
 
 → KiCAD: `Leistungskreis_1Relai_korrektur.{kicad_pro,sch,pcb}` im Ordner [leistungskreis/](leistungskreis/)
 
-→ SVG-Schaltplan: [schematics/Leistungskreis_1Relai_korrektur.svg](schematics/Leistungskreis_1Relai_korrektur.svg)
+→ SVG-Schaltplan: [schematics/leistungskreis.svg](schematics/leistungskreis.svg)
 
 ### Steuerkreis
 
@@ -30,7 +30,7 @@ Der Steuerkreis ist **identisch** mit dem von net_zrl:
 
 → KiCAD: [../shared/modularer_steuerkreis/](../shared/modularer_steuerkreis/)
 
-→ SVG: [../shared/schematics/mod_Steuerkreis_ESP32.svg](../shared/schematics/mod_Steuerkreis_ESP32.svg)
+→ SVG: [../shared/schematics/steuerkreis.svg](../shared/schematics/steuerkreis.svg)
 
 ## Pinbelegung (Basetype)
 

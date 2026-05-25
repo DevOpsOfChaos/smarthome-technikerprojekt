@@ -8,11 +8,11 @@ Der Leistungskreis ist die **230V-führende** Platine des NET-ERL-Systems. Sie e
 
 ## KiCAD-Projekt
 
-- **Projekt:** `Leistungskreis_1Relai_korrektur.kicad_pro`
-- **Schematic:** `Leistungskreis_1Relai_korrektur.kicad_sch`
-- **PCB:** `Leistungskreis_1Relai_korrektur.kicad_pcb`
+- **Projekt:** `leistungskreis.kicad_pro`
+- **Schematic:** `leistungskreis.kicad_sch`
+- **PCB:** `leistungskreis.kicad_pcb`
 - **Lagen:** 2 (F.Cu + B.Cu), 1.6 mm
-- **3D-Export:** `Leistungskreis_1Relai_Steuerung.step`
+- **3D-Export:** `leistungskreis.step`
 
 ## Stückliste (BOM)
 

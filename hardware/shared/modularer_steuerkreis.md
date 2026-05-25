@@ -51,7 +51,7 @@ Das 5-polige JST-PH-Kabel (J1) führt:
 
 ## SVG-Schaltplan
 
-👉 **[schematics/mod_Steuerkreis_ESP32.svg](schematics/mod_Steuerkreis_ESP32.svg)**
+👉 **[schematics/steuerkreis.svg](schematics/steuerkreis.svg)**
 
 ## Kompatibilität
 

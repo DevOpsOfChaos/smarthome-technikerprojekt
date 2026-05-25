@@ -12,20 +12,20 @@ BAT-SEN ist der Basetype für **batteriebetriebene Sensor-Knoten** mit Deep-Slee
 
 | Datei | Beschreibung |
 |-------|-------------|
-| `Sensor_all_ESP32.kicad_pro` | Projektdatei |
-| `Sensor_all_ESP32.kicad_sch` | Root-Schaltplan (hierarchisch) |
+| `bat_sen.kicad_pro` | Projektdatei |
+| `bat_sen.kicad_sch` | Root-Schaltplan (hierarchisch) |
 | `Leistungskreis.kicad_sch` | Sub-Sheet: Power-Gating, Batterie |
 | `Steuerstromkreis.kicad_sch` | Sub-Sheet: ESP32 + I²C |
-| `Sensor_all_ESP32.kicad_pcb` | PCB-Layout (2-Lagen) |
+| `bat_sen.kicad_pcb` | PCB-Layout (2-Lagen) |
 | `Pinbelegung/Pinbelegung.txt` | GPIO-Belegung |
 | `Code/SamplecodeBasis.txt` | ESP-NOW Deep-Sleep Beispiel |
 | `production/` | BOM, Position, Netlist |
 
 ### SVG-Schaltpläne
 
-- [schematics/Sensor_all_ESP32.svg](schematics/Sensor_all_ESP32.svg) — Root
-- [schematics/Sensor_all_ESP32-Leistungskreis.svg](schematics/Sensor_all_ESP32-Leistungskreis.svg) — Power-Gating
-- [schematics/Sensor_all_ESP32-Steuerstromkreis.svg](schematics/Sensor_all_ESP32-Steuerstromkreis.svg) — ESP32
+- [schematics/bat_sen.svg](schematics/bat_sen.svg) — Root
+- [schematics/bat_sen-Leistungskreis.svg](schematics/bat_sen-Leistungskreis.svg) — Power-Gating
+- [schematics/bat_sen-Steuerstromkreis.svg](schematics/bat_sen-Steuerstromkreis.svg) — ESP32
 
 ## Stromspar-Design
 

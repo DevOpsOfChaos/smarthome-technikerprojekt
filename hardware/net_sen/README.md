@@ -12,19 +12,19 @@ NET-SEN ist der Basetype für **dauerhaft netzbetriebene Sensor-Knoten**. Kein S
 
 | Datei | Beschreibung |
 |-------|-------------|
-| `Sensor_all_Netz_ESP32.kicad_pro` | Projektdatei |
-| `Sensor_all_Netz_ESP32.kicad_sch` | Root-Schaltplan (hierarchisch) |
+| `net_sen.kicad_pro` | Projektdatei |
+| `net_sen.kicad_sch` | Root-Schaltplan (hierarchisch) |
 | `Leistungskreis.kicad_sch` | Sub-Sheet: 230V-Netzteil |
 | `Steuerstromkreis.kicad_sch` | Sub-Sheet: ESP32 + I²C |
-| `Sensor_all_Netz_ESP32.kicad_pcb` | PCB-Layout (2-Lagen) |
+| `net_sen.kicad_pcb` | PCB-Layout (2-Lagen) |
 | `Bilder/` | Layout-Ansichten (7 PNGs) |
 | `production/` | BOM, Position, Netlist |
 
 ### SVG-Schaltpläne
 
-- [schematics/Sensor_all_Netz_ESP32.svg](schematics/Sensor_all_Netz_ESP32.svg) — Root
-- [schematics/Sensor_all_Netz_ESP32-Leistungskreis.svg](schematics/Sensor_all_Netz_ESP32-Leistungskreis.svg) — Netzteil
-- [schematics/Sensor_all_Netz_ESP32-Steuerstromkreis.svg](schematics/Sensor_all_Netz_ESP32-Steuerstromkreis.svg) — ESP32
+- [schematics/net_sen.svg](schematics/net_sen.svg) — Root
+- [schematics/net_sen-Leistungskreis.svg](schematics/net_sen-Leistungskreis.svg) — Netzteil
+- [schematics/net_sen-Steuerstromkreis.svg](schematics/net_sen-Steuerstromkreis.svg) — ESP32
 
 ## Platinen-Design
 

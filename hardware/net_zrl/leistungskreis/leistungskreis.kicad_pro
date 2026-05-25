@@ -52,7 +52,12 @@
         }
       },
       "diff_pair_dimensions": [],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        [
+          "lib_footprint_mismatch|165100000|92850000|9a275002-71f3-4f49-9408-1fbde67523ab|00000000-0000-0000-0000-000000000000",
+          ""
+        ]
+      ],
       "meta": {
         "version": 2
       },
@@ -431,7 +436,7 @@
       "pin_not_connected": "error",
       "pin_not_driven": "error",
       "pin_to_pin": "warning",
-      "power_pin_not_driven": "ignore",
+      "power_pin_not_driven": "error",
       "same_local_global_label": "warning",
       "similar_label_and_power": "warning",
       "similar_labels": "warning",
@@ -451,7 +456,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "Sensor_all_Netz_ESP32.kicad_pro",
+    "filename": "leistungskreis.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -480,22 +485,13 @@
     },
     "net_colors": null,
     "netclass_assignments": null,
-    "netclass_patterns": [
-      {
-        "netclass": "Default",
-        "pattern": "3V3"
-      },
-      {
-        "netclass": "Default",
-        "pattern": "GND"
-      }
-    ]
+    "netclass_patterns": []
   },
   "pcbnew": {
     "last_paths": {
       "gencad": "",
       "idf": "",
-      "netlist": "./",
+      "netlist": "",
       "plot": "",
       "pos_files": "",
       "specctra_dsn": "",
@@ -572,12 +568,6 @@
         },
         {
           "group_by": false,
-          "label": "CREATOR",
-          "name": "CREATOR",
-          "show": false
-        },
-        {
-          "group_by": false,
           "label": "Check_prices",
           "name": "Check_prices",
           "show": false
@@ -596,6 +586,12 @@
         },
         {
           "group_by": false,
+          "label": "MAXIMUM_PACKAGE_HEIGHT",
+          "name": "MAXIMUM_PACKAGE_HEIGHT",
+          "show": false
+        },
+        {
+          "group_by": false,
           "label": "MF",
           "name": "MF",
           "show": false
@@ -604,6 +600,12 @@
           "group_by": false,
           "label": "MP",
           "name": "MP",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "PARTREV",
+          "name": "PARTREV",
           "show": false
         },
         {
@@ -620,20 +622,32 @@
         },
         {
           "group_by": false,
+          "label": "SNAPEDA_PN",
+          "name": "SNAPEDA_PN",
+          "show": false
+        },
+        {
+          "group_by": false,
           "label": "STANDARD",
           "name": "STANDARD",
           "show": false
         },
         {
           "group_by": false,
-          "label": "SnapEDA_Link",
-          "name": "SnapEDA_Link",
+          "label": "Sim.Device",
+          "name": "Sim.Device",
           "show": false
         },
         {
           "group_by": false,
-          "label": "VERIFIER",
-          "name": "VERIFIER",
+          "label": "Sim.Pins",
+          "name": "Sim.Pins",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "SnapEDA_Link",
+          "name": "SnapEDA_Link",
           "show": false
         },
         {
@@ -704,16 +718,8 @@
   },
   "sheets": [
     [
-      "10108191-213d-452b-b5d4-aff556accf72",
+      "eaf5dd72-ea9c-4fb8-81ac-d3f64ee9eee3",
       "Root"
-    ],
-    [
-      "25d7b4fa-577d-4dec-b1c0-3ffdf80ff8a0",
-      "Leistungskreis"
-    ],
-    [
-      "ff54d03a-2679-429b-8b06-60e279c7ae61",
-      "Steuerstromkreis"
     ]
   ],
   "text_variables": {}

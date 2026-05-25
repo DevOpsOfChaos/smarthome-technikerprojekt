@@ -19,7 +19,7 @@ NET-ZRL ist der Basetype für **netzbetriebene 2-Relais-Knoten** mit Rolladen-/C
 
 → KiCAD: `Leistungskreis_korrektur.{kicad_pro,sch,pcb}` im Ordner [leistungskreis/](leistungskreis/)
 
-→ SVG-Schaltplan: [schematics/Leistungskreis_korrektur.svg](schematics/Leistungskreis_korrektur.svg)
+→ SVG-Schaltplan: [schematics/leistungskreis.svg](schematics/leistungskreis.svg)
 
 → **Wichtig:** N-Kanal MOSFETs (IRLZ34N), 2× Optokoppler, Serien-Sicherheitsschaltung
 
@@ -29,7 +29,7 @@ NET-ZRL ist der Basetype für **netzbetriebene 2-Relais-Knoten** mit Rolladen-/C
 
 → KiCAD: [../shared/modularer_steuerkreis/](../shared/modularer_steuerkreis/)
 
-→ SVG: [../shared/schematics/mod_Steuerkreis_ESP32.svg](../shared/schematics/mod_Steuerkreis_ESP32.svg)
+→ SVG: [../shared/schematics/steuerkreis.svg](../shared/schematics/steuerkreis.svg)
 
 ## Pinbelegung (Basetype)
 
