@@ -2,6 +2,19 @@
 
 > Datenblätter und technische Details der projektweit verwendeten Bauteile
 
+## Zugehörige KiCAD-Quellen
+
+| Komponente | KiCAD-Dateien |
+|-----------|---------------|
+| ESP32-C3 THT-Adapter | [esp32-c3-supermini/](esp32-c3-supermini/) |
+| Modularer Steuerkreis | [modularer_steuerkreis/](modularer_steuerkreis/) |
+| 1-Relais Leistungskreis | [../net_erl/leistungskreis/](../net_erl/leistungskreis/) |
+| 2-Relais Leistungskreis | [../net_zrl/leistungskreis/](../net_zrl/leistungskreis/) |
+| Sensor Netzbetrieb | [../net_sen/kicad/](../net_sen/kicad/) |
+| Sensor Batteriebetrieb | [../bat_sen/kicad/](../bat_sen/kicad/) |
+
+---
+
 ## Mikrocontroller & Adapter
 
 ### ESP32-C3 SuperMini Plus V2.0

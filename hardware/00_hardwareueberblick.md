@@ -75,17 +75,64 @@ Die beiden Platinen werden über ein 5-poliges JST-PH-Kabel verbunden (5V, GND, 
 
 ```
 hardware/
-├── 00_hardwareueberblick.md          ← diese Datei
-├── shared/                           ← Gemeinsame Designs
-│   ├── esp32-c3-supermini.md
-│   ├── modularer_steuerkreis.md
-│   └── komponenten.md
-├── master/                           ← Master-Bridge
-├── net_erl/                          ← 1-Relais-Knoten
-├── net_zrl/                          ← 2-Relais-Knoten (Rolladen)
-├── net_sen/                          ← Netz-Sensoren
-└── bat_sen/                          ← Batterie-Sensoren
+├── 00_hardwareueberblick.md              ← diese Datei
+│
+├── shared/                               ← Gemeinsame Designs
+│   ├── esp32-c3-supermini.md             ← ESP32-C3 Plattform-Referenz
+│   ├── modularer_steuerkreis.md          ← Steuerkreis-Doku (BOM, Pins)
+│   ├── komponenten.md                    ← Bauteil-Katalog
+│   ├── esp32-c3-supermini/               ← KiCAD: THT-Adapter
+│   ├── modularer_steuerkreis/            ← 🔑 KiCAD: Steuerkreis (für ALLE Relais)
+│   └── schematics/                       ← SVG-Schaltpläne
+│
+├── master/                               ← Master-Bridge
+│   └── README.md
+│
+├── net_erl/                              ← Basetype: 1-Relais
+│   ├── README.md                         ← Übersicht + Pinbelegung
+│   ├── leistungskreis_1relais.md         ← Leistungskreis-Doku
+│   ├── leistungskreis/                   ← KiCAD: Leistungskreis
+│   ├── simulation/                       ← LTSpice
+│   ├── schematics/                       ← SVG-Schaltpläne
+│   └── devices/                          ← Konkrete Geräte
+│       ├── NET-ERL-001_hall_module/
+│       └── NET-ERL-002_hall_module_led_ring/
+│
+├── net_zrl/                              ← Basetype: 2-Relais/Rolladen
+│   ├── README.md
+│   ├── leistungskreis_2relais.md
+│   ├── leistungskreis/                   ← KiCAD: Leistungskreis (2-Relais)
+│   ├── schematics/
+│   └── devices/
+│       └── NET-ZRL-002_shutter_module/
+│
+├── net_sen/                              ← Basetype: Netz-Sensor
+│   ├── README.md
+│   ├── kicad/                            ← KiCAD: Sensor_Netzbetrieb
+│   ├── schematics/
+│   └── devices/
+│       └── NET-SEN-002_weather_station/
+│
+└── bat_sen/                              ← Basetype: Batterie-Sensor
+    ├── README.md
+    ├── kicad/                            ← KiCAD: Sensor_Batteriebetrieb
+    ├── schematics/
+    └── devices/
+        ├── bat_sen_01_window_contact/
+        └── bat_sen_02_rain_sensor/
 ```
+
+> **Legende:** `← KiCAD:` = originale KiCAD-Projektdateien (`.kicad_pro`, `.kicad_sch`, `.kicad_pcb`, BOM, STEP)
+
+## KiCAD-Quellen (Direktlinks)
+
+| Basetype | Steuerkreis | Leistungskreis/Board |
+|----------|------------|---------------------|
+| **net_erl** | [shared/modularer_steuerkreis/](shared/modularer_steuerkreis/) | [net_erl/leistungskreis/](net_erl/leistungskreis/) |
+| **net_zrl** | [shared/modularer_steuerkreis/](shared/modularer_steuerkreis/) ← derselbe | [net_zrl/leistungskreis/](net_zrl/leistungskreis/) |
+| **net_sen** | — (einteilig) | [net_sen/kicad/](net_sen/kicad/) |
+| **bat_sen** | — (einteilig) | [bat_sen/kicad/](bat_sen/kicad/) |
+| **master** | — (kein eigenes PCB) | — |
 
 ## Verwendete Komponenten (Übersicht)
 

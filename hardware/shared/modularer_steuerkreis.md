@@ -2,17 +2,15 @@
 
 > Gemeinsame Steuerplatine für **alle** Relais-Knoten (`net_erl` und `net_zrl`)
 
+## KiCAD-Quellen
+
+Die vollständigen KiCAD-Projektdateien liegen unter:
+
+👉 **[shared/modularer_steuerkreis/](modularer_steuerkreis/)** — `.kicad_pro`, `.kicad_sch`, `.kicad_pcb`, BOM, STEP, Fertigungsdaten
+
 ## Übersicht
 
 Der modulare Steuerkreis ist die **identische** Trägerplatine für den ESP32-C3 in allen Relais-basierten Geräten. Er wird über ein 5-poliges JST-PH-Kabel mit dem jeweiligen Leistungskreis verbunden.
-
-## KiCAD-Projekt
-
-- **Projektdatei:** `mod_Steuerkreis_ESP32.kicad_pro`
-- **Schematic:** `mod_Steuerkreis_ESP32.kicad_sch`
-- **PCB:** `mod_Steuerkreis_ESP32.kicad_pcb`
-- **Lagen:** 2 (F.Cu + B.Cu), 1.6 mm
-- **3D-Export:** `mod_Steuerkreis_ESP32.step`
 
 ## Stückliste (BOM)
 
@@ -40,7 +38,7 @@ Das 5-polige JST-PH-Kabel (J1) führt:
 | 4 | GPIO5 (Trigger_PIN2) | Relais-2 Optokoppler (nur net_zrl) |
 | 5 | 3V3 | Optionale 3.3V-Referenz |
 
-## Pinbelegung (Steuerkreis GPIO-Breakouts)
+## Pinbelegung (GPIO-Breakouts)
 
 | Pin | J3 (Co_GPIOx1) | J7 (Co_GPIOx3) | J6 (Conn_Vx1) |
 |-----|---------------|---------------|---------------|
@@ -51,21 +49,22 @@ Das 5-polige JST-PH-Kabel (J1) führt:
 | 5 | GPIO4 | — | GPIO9 |
 | 6 | — | — | GPIO10 |
 
-> **I²C-Pullups:** JP1 und JP2 als Lötbrücken. Geschlossen = 4K7 Pullups aktiv (Standard für I²C-Betrieb). Geöffnet = keine Pullups.
+## SVG-Schaltplan
 
-## Designmerkmale
-
-- **Galvanische Trennung:** Der Steuerkreis hat KEINE direkte Verbindung zum 230V-Netz. Die Isolation erfolgt über die Optokoppler (PC817) im Leistungskreis.
-- **Testpunkte:** TP1–TP5 ermöglichen Debugging ohne die Platine zu modifizieren
-- **M3-Montage:** Zwei Befestigungslöcher für Gehäuseeinbau
-- **Pinheader:** Alle nicht belegten GPIOs sind auf Stiftleisten herausgeführt für optionale Sensor-Erweiterungen
+👉 **[schematics/mod_Steuerkreis_ESP32.svg](schematics/mod_Steuerkreis_ESP32.svg)**
 
 ## Kompatibilität
 
 | Eigenschaft | net_erl | net_zrl |
 |-------------|---------|---------|
 | Steuerkreis-Platine | ✅ Identisch | ✅ Identisch |
-| JST-PH Kabel (5-polig) | ✅ | ✅ |
+| KiCAD-Quellen | [shared/modularer_steuerkreis/](modularer_steuerkreis/) | ← dieselben |
 | Versorgung (5V vom Leistungskreis) | ✅ HLK-5M05 | ✅ HLK-5M05 |
 | Trigger_PIN1 (GPIO10) | ✅ Relais 1 | ✅ Relais 1 (Hoch) |
 | Trigger_PIN2 (GPIO5) | NC | ✅ Relais 2 (Runter) |
+
+## Designmerkmale
+
+- **Galvanische Trennung:** Der Steuerkreis hat KEINE direkte Verbindung zum 230V-Netz. Die Isolation erfolgt über die Optokoppler (PC817) im Leistungskreis.
+- **Testpunkte:** TP1–TP5 ermöglichen Debugging ohne die Platine zu modifizieren
+- **M3-Montage:** Zwei Befestigungslöcher für Gehäuseeinbau
