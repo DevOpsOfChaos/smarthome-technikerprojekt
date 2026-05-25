@@ -36,6 +36,9 @@ packages:
 esphome:
   name: ${node_name}
   friendly_name: ${device_name}
+  includes:
+    - ../packages/setup_portal.h
+    - ../packages/smarthome_command_dispatch.h
   on_boot:
     priority: -10
     then:

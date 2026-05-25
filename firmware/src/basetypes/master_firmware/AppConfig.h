@@ -152,6 +152,8 @@
 // =============================================================================
 // ABGELEITETE KONSTANTEN - Aus #defines als constexpr
 // =============================================================================
+// Sicher im aktuellen Arduino/PlatformIO-Single-TU-Build. Bei spaeterer
+// Multi-TU-Struktur auf inline constexpr (C++17) oder extern-Definitionen umstellen.
 
 constexpr char DEVICE_ID[]    = MASTER_PROFILE_DEVICE_ID;
 constexpr char DEVICE_NAME[]  = MASTER_PROFILE_DEVICE_NAME;

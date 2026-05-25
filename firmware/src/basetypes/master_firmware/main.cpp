@@ -186,6 +186,17 @@ constexpr int STATUS_CODE_NO_ROUTE       = -8;      // MAC unbekannt, Retry nich
 constexpr int STATUS_CODE_META_REQUIRED  = -9;      // HELLO-Meta fehlt fuer sichere Validierung
 constexpr int STATUS_CODE_INVALID_PAYLOAD = -21;    // MQTT-Payload ungueltig
 
+struct CoverCommandMap {
+    const char* text;
+    uint8_t action;
+};
+
+constexpr CoverCommandMap COVER_COMMANDS[] = {
+    {"open", SH_COVER_CMD_OPEN},
+    {"close", SH_COVER_CMD_CLOSE},
+    {"stop", SH_COVER_CMD_STOP},
+};
+
 // Registry-Persistenz im ESP32-NVS. Gespeichert werden nur stabile Meta-Daten
 // aus HELLO, niemals Laufzeitwerte wie online, Pending-CMDs oder Sensorzustaende.
 constexpr char REGISTRY_PREF_NAMESPACE[] = "master_reg";
@@ -634,7 +645,7 @@ void fuellePersistSlotAusNode(const NodeRuntime& node, PersistedNodeSlot& slot) 
 // Aufgabe: Schreibt die bekannte Node-Meta-Registry in den Flash.
 // Eingabewert: grund beschreibt den Ausloeser fuer Logmeldungen.
 // Ausgabewert: true bedeutet, das NVS-Blob wurde erfolgreich geschrieben.
-bool persistiereRegistrySnapshot(const char* grund) {
+[[nodiscard]] bool persistiereRegistrySnapshot(const char* grund) {
     PersistedRegistry snapshot = {};
     snapshot.magic = REGISTRY_PERSIST_MAGIC;
     snapshot.version = REGISTRY_PERSIST_VERSION;
@@ -718,7 +729,7 @@ void stelleNodeAusPersistSlotWiederHer(const PersistedNodeSlot& slot, NodeRuntim
 // Aufgabe: Laedt gespeicherte Node-Meta aus dem Flash in die Runtime-Registry.
 // Eingabewerte: keine.
 // Ausgabewert: true bedeutet, ein gueltiges Registry-Blob wurde gelesen.
-bool ladeRegistrySnapshot() {
+[[nodiscard]] bool ladeRegistrySnapshot() {
     if (!registryPrefs.begin(REGISTRY_PREF_NAMESPACE, true)) {
         logf("WARN", "Registry-Persistenz: NVS konnte nicht gelesen werden");
         return false;
@@ -892,7 +903,7 @@ const char* availabilityStateText(size_t nodeIndex) {
 // Aufgabe: Stellt sicher, dass ein ESP-NOW-Peer fuer die Ziel-MAC existiert.
 // Eingabewert: mac zeigt auf die Ziel-MAC-Adresse.
 // Ausgabewert: true bedeutet, der Peer ist vorhanden oder wurde erfolgreich angelegt.
-bool stellePeerSicher(const uint8_t* mac) {
+[[nodiscard]] bool stellePeerSicher(const uint8_t* mac) {
     if (!mac || !SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
 
@@ -927,7 +938,7 @@ bool stellePeerSicher(const uint8_t* mac) {
 // - label wird fuer Logs verwendet.
 // - flags, sequenzVorgegeben, seqOverride und outSeq steuern ACK/Retry-Verhalten.
 // Ausgabewert: true bedeutet, esp_now_send wurde erfolgreich gestartet.
-bool sendePaketMitOptionen(
+[[nodiscard]] bool sendePaketMitOptionen(
     const uint8_t* zielMac,
     uint8_t msgType,
     const void* payload,
@@ -994,7 +1005,7 @@ bool sendePaketMitOptionen(
 // Aufgabe: Sendet ein einfaches ESP-NOW-Paket ohne spezielle Flags.
 // Eingabewerte: Ziel-MAC, Nachrichtentyp, Payload, Payload-Laenge und Log-Label.
 // Ausgabewert: true bedeutet, das Paket wurde an ESP-NOW uebergeben.
-bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
+[[nodiscard]] bool sendePaket(const uint8_t* zielMac, uint8_t msgType, const void* payload, size_t payloadLen, const char* label) {
     return sendePaketMitOptionen(zielMac, msgType, payload, payloadLen, label, 0U, false, 0U, nullptr);
 }
 
@@ -1504,7 +1515,7 @@ void aktualisiereNodeKontakt(size_t nodeIndex, const uint8_t* mac) {
         const bool neueMac = !nodeStates[nodeIndex].mac_bekannt || memcmp(nodeStates[nodeIndex].mac, mac, 6) != 0;
         memcpy(nodeStates[nodeIndex].mac, mac, 6);
         nodeStates[nodeIndex].mac_bekannt = true;
-        stellePeerSicher(nodeStates[nodeIndex].mac);
+        (void)stellePeerSicher(nodeStates[nodeIndex].mac);
         if (neueMac) {
             char text[18] = {0};
             macText(mac, text, sizeof(text));
@@ -1550,7 +1561,7 @@ void sendeHelloAck(const uint8_t* zielMac, uint8_t ackStatus) {
     SmartHome::HelloAckPayload payload = {};
     payload.channel = (uint8_t)(masterStatus.wlan_verbunden ? WiFi.channel() : WLAN_KANAL);
     payload.ack_status = ackStatus;
-    sendePaket(zielMac, SH_MSG_HELLO_ACK, &payload, sizeof(payload), "HELLO_ACK");
+    (void)sendePaket(zielMac, SH_MSG_HELLO_ACK, &payload, sizeof(payload), "HELLO_ACK");
 }
 
 // Aufgabe: Registriert eine neue Node oder findet eine bestehende anhand der HELLO-Daten.
@@ -1685,7 +1696,7 @@ void verarbeiteHello(const uint8_t* senderMac, const SmartHome::HelloPayload& pa
     copyText(nodeStates[nodeIndex].input_mask, sizeof(nodeStates[nodeIndex].input_mask), payload.input_mask);
     sanitisiereNodeStateNachCapabilities((size_t)nodeIndex);
     aktualisiereNodeKontakt((size_t)nodeIndex, senderMac);
-    persistiereRegistrySnapshot("HELLO");
+    (void)persistiereRegistrySnapshot("HELLO");
 
     publishNodeMeta((size_t)nodeIndex);
     publishNodeAvailability((size_t)nodeIndex);
@@ -2367,13 +2378,13 @@ bool sendeConfigCommand(size_t nodeIndex, uint8_t paramId, uint16_t value, const
 // Eingabewerte: keine.
 // Ausgabewert: keiner.
 void loggeMqttConnectFehler() {
+    char brokerText[64] = {0};
     if (mqttBrokerNutzeDirekteIp) {
-        char brokerIpText[16] = "0.0.0.0";
-        mqttBrokerIp.toString().toCharArray(brokerIpText, sizeof(brokerIpText));
-        logf("WARN", "MQTT connect fehlgeschlagen (state=%d, broker=%s:%d, typ=%s)", mqttClient.state(), brokerIpText, MQTT_PORT, mqttBrokerTypText());
-        return;
+        mqttBrokerIp.toString().toCharArray(brokerText, sizeof(brokerText));
+    } else {
+        copyText(brokerText, sizeof(brokerText), MQTT_HOST);
     }
-    logf("WARN", "MQTT connect fehlgeschlagen (state=%d, broker=%s:%d, typ=%s)", mqttClient.state(), MQTT_HOST, MQTT_PORT, mqttBrokerTypText());
+    logf("WARN", "MQTT connect fehlgeschlagen (state=%d, broker=%s:%d, typ=%s)", mqttClient.state(), brokerText, MQTT_PORT, mqttBrokerTypText());
 }
 
 // =============================================================================
@@ -2743,20 +2754,13 @@ static void handleMqttCoverCommand(size_t nodeIndex, const char* cmd, const char
         return;
     }
 
-    if (strcmp(cmd, "open") == 0) {
-        if (!sendeCoverCommand(nodeIndex, SH_COVER_CMD_OPEN, 0U, requestId, commandChannel))
-            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-        return;
-    }
-    if (strcmp(cmd, "close") == 0) {
-        if (!sendeCoverCommand(nodeIndex, SH_COVER_CMD_CLOSE, 0U, requestId, commandChannel))
-            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-        return;
-    }
-    if (strcmp(cmd, "stop") == 0) {
-        if (!sendeCoverCommand(nodeIndex, SH_COVER_CMD_STOP, 0U, requestId, commandChannel))
-            publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
-        return;
+    for (const CoverCommandMap& entry : COVER_COMMANDS) {
+        if (strcmp(cmd, entry.text) == 0) {
+            if (!sendeCoverCommand(nodeIndex, entry.action, 0U, requestId, commandChannel)) {
+                publishNodeAck(nodeIndex, requestId, commandChannel, "send_failed", -4, SH_MSG_CMD, 0U, "master_send");
+            }
+            return;
+        }
     }
 
     // set_position
@@ -3237,11 +3241,12 @@ void setup() {
     // geladen. Dadurch kennt der Master nach Neustart wieder Klassen und Caps.
     masterStatus = {};
     initialisiereNodeStates();
-    ladeRegistrySnapshot();
+    (void)ladeRegistrySnapshot();
     gibStartmeldungAus();
     initialisiereHardware();
     initialisiereWlan();
-    delay(500);
+    // Kurze Wartezeit, damit der WLAN-Stack nach WiFi.begin() den ersten Status liefern kann.
+    delay(WLAN_INIT_SETTLE_MS);
     pruefeWlanVerbindung();
     initialisiereEspNow();
     initialisiereMqtt();
@@ -3261,6 +3266,7 @@ void loop() {
     // Die loop bleibt bewusst klein: Verbindungsmanagement, ausstehende
     // Funkauftraege und Registry-Lebenszeichen werden in getrennten Helfern
     // abgearbeitet. So bleibt jeder Fehlerpfad isoliert pruefbar.
+    const unsigned long loopStartMs = millis();
     esp_task_wdt_reset();
     pruefeWlanVerbindung();
     pruefeMqttVerbindung();
@@ -3268,5 +3274,8 @@ void loop() {
     pruefePendingCfgTimeouts();
     pruefeOfflineTimeout();
     pruefeProvisorischeNodeTtl();
-    delay(LOOP_INTERVAL_MS);
+    const unsigned long elapsedMs = millis() - loopStartMs;
+    if (elapsedMs < LOOP_INTERVAL_MS) {
+        delay(LOOP_INTERVAL_MS - elapsedMs);
+    }
 }

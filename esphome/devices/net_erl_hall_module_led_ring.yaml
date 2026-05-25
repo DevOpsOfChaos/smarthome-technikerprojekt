@@ -27,7 +27,7 @@ substitutions:
   relay_pin: GPIO10
   button_pin: GPIO6
   presence_pin: GPIO7
-  led_ring_pin: GPIO8
+  led_ring_pin: GPIO4
   led_ring_count: "17" # 17 NeoPixel-LEDs im Ring
   led_ring_default_brightness_pct: "18" # 18 % Helligkeit (Standard, 1-60 %)
   led_ring_air_quality_phase_s: "15" # 15 s Anzeigedauer AQI-Phase
@@ -49,6 +49,9 @@ packages:
 esphome:
   name: ${node_name}
   friendly_name: ${device_name}
+  includes:
+    - ../packages/setup_portal.h
+    - ../packages/smarthome_command_dispatch.h
   on_boot:
     priority: -10
     then:

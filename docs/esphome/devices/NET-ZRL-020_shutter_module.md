@@ -20,8 +20,8 @@
 | Taster AUF | GPIO20 | Lokale Auf-Steuerung (`button_up_pin`) |
 | Taster AB | GPIO4 | Lokale Ab-Steuerung + Setup-Hold (`button_down_pin`) |
 | Taster STOP | GPIO3 | Stop (`button_stop_pin`) |
-| LED Auf | GPIO6 | Statusanzeige Auf-Relais (`led_up_pin`) |
-| LED Ab | GPIO7 | Statusanzeige Ab-Relais (`led_down_pin`) |
+| LED Auf | GPIO7 | Statusanzeige Auf-Relais (`led_up_pin`) |
+| LED Ab | GPIO6 | Statusanzeige Ab-Relais (`led_down_pin`) |
 
 ## 3. Konfiguration (YAML-Substitutions)
 
@@ -51,15 +51,14 @@ default_cover_travel_ms: "100000"         # 100 s Standard-Fahrzeit
 button_up_pin: GPIO20
 button_down_pin: GPIO4
 button_stop_pin: GPIO3
-led_up_pin: GPIO6
-led_down_pin: GPIO7
+led_up_pin: GPIO7
+led_down_pin: GPIO6
 ```
 
 ## 4. Cover-Steuerung
 
 ### 4.1 Plattform
-- **Typ**: `time_based` (zeitbasierte Positionssteuerung)
-- **Device-Class**: `shutter`
+- **Typ**: eigene Relais-/Fahrzeitsteuerung, analog zur Original-Firmware
 - **Restore-Mode**: `ALWAYS_OFF` (beide Relais starten immer aus)
 
 ### 4.2 Modi
@@ -68,16 +67,16 @@ led_down_pin: GPIO7
 - **Setup**: AB-Taster 5 s halten
 
 ### 4.3 Kalibrierung
-- **Starten**: `calibrate`-Kommando
-- **Phasen**: Idle(0) → MovingUp(1) → WaitForDown(2) → MeasuringDown(3) → WaitForSave(4) → Complete(5)
-- **Ergebnis**: `cover_calibrated = true`, Fahrzeiten gespeichert (`travel_up_ms`, `travel_down_ms`)
+- **Starten**: STOP-Taster 5 s halten oder `calibrate`-Kommando
+- **Phasen**: Idle(0) -> MovingToTop(1) -> WaitForDownStart(2) -> MeasuringDown(3) -> WaitForUpStart(4) -> MeasuringUp(5)
+- **Ergebnis**: `cover_calibrated = true`, Fahrzeiten gespeichert (`travel_time_up_ms`, `travel_time_down_ms`), Position = 100
 - **Löschen**: `clear_calibration`-Kommando
-- **Ungelernt**: Positionen 0 und 100 mit `default_cover_travel_ms` (100.000 ms)
+- **Ungelernt**: keine gespeicherten Fahrzeiten (`0`), `cover_position = null`; Endlagenfahrten nutzen `default_estimated_travel_time_ms` (100.000 ms)
 
 ### 4.4 Teil-Positionierung (`set_position`)
 - Nur nach Kalibrierung möglich
 - Berechnet Fahrzeit: `partial_ms = (travel_ms * |target - current|) / 100`
-- Minimum 500 ms Fahrzeit (Ruckler vermeiden)
+- Endlagen 0 und 100 sind auch unkalibriert als volle Auf-/Ab-Fahrt erlaubt
 
 ### 4.5 cover_state
 | Wert | Bedeutung |

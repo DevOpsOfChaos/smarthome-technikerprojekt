@@ -40,7 +40,7 @@ Das NET-ERL-002 Hall Module LED Ring ist die leistungsfähigste NET-ERL-Variante
 | I2C SCL | 1 | I2C | BME680 + VEML7700 + ENS160 Taktleitung |
 | Button | 6 | INPUT, active-LOW | Lokaler Taster (Short-Press: Relais toggeln, Long-Press: Setup-Modus) |
 | LD2410 OUT | 7 | INPUT | RADAR-Präsenz-Ausgang (HIGH = Präsenz) |
-| NeoPixel LED-Ring | 8 | OUTPUT (WS2812) | 17 LEDs, GRB, 800 kHz |
+| NeoPixel LED-Ring | 4 | OUTPUT (WS2812) | 17 LEDs, GRB, 800 kHz |
 | LD2410 UART RX | 20 | UART RX | (reserviert, nicht aktiv genutzt) |
 | LD2410 UART TX | 21 | UART TX | (reserviert, nicht aktiv genutzt) |
 | Setup/Status-LED | -1 | — | Nicht bestückt |

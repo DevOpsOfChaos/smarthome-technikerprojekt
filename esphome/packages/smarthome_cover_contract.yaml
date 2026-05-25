@@ -36,23 +36,23 @@
 substitutions:
   default_cover_travel_ms: "30000"
 
-# Kalibrierungs-State-Machine (cover_calib_phase):
-#   0 = Idle – nicht in Kalibrierung
-#   1 = Faehrt hoch (misst Zeit bis STOP-Kommando)
-#   2 = Oben angekommen – wartet auf erneutes calibrate-Kommando
-#   3 = Faehrt runter (misst Zeit bis STOP-Kommando)
-#   4 = Unten angekommen – wartet auf erneutes calibrate-Kommando zum Speichern
-#   5 = Kalibrierung abgeschlossen und gespeichert
+# Kalibrierungs-State-Machine (cover_calib_phase), analog Firmware:
+#   0 = Idle
+#   1 = MovingToTop      – faehrt mit Defaultzeit zur oberen Ausgangslage
+#   2 = WaitForDownStart – wartet auf Down
+#   3 = MeasuringDown    – misst Runterfahrt bis Stop
+#   4 = WaitForUpStart   – wartet auf Up
+#   5 = MeasuringUp      – misst Hochfahrt bis Stop
 # =============================================================================
 globals:
   - id: cover_contract_state           # Aktueller Cover-Status: "opening", "closing", "stopped"
     type: std::string
     restore_value: no
     initial_value: '"stopped"'
-  - id: cover_contract_position        # Aktuelle Position in Prozent (0=geschlossen, 100=offen)
-    type: int                          # Wird nur bei cover_contract_calibrated=true aktualisiert
+  - id: cover_contract_position        # Aktuelle Position in Prozent (0=geschlossen, 100=offen, 255=unbekannt)
+    type: int                          # Wird nur bei bekannter Position als MQTT-Wert publiziert
     restore_value: no
-    initial_value: "0"
+    initial_value: "255"
   - id: cover_contract_target_position # Zielposition bei Teil-Ansteuerung (set_position)
     type: int
     restore_value: no
@@ -61,14 +61,14 @@ globals:
     type: bool
     restore_value: yes
     initial_value: "false"
-  - id: cover_contract_travel_up_ms    # Gemessene Fahrzeit hoch in ms (Default: 30000 = 30s)
+  - id: cover_contract_travel_up_ms    # Gemessene Fahrzeit hoch in ms (0=nicht kalibriert)
     type: int                          # Wird im RTC-Speicher gehalten
     restore_value: yes
-    initial_value: ${default_cover_travel_ms}
-  - id: cover_contract_travel_down_ms  # Gemessene Fahrzeit runter in ms (Default: 30000 = 30s)
+    initial_value: "0"
+  - id: cover_contract_travel_down_ms  # Gemessene Fahrzeit runter in ms (0=nicht kalibriert)
     type: int                          # Wird im RTC-Speicher gehalten
     restore_value: yes
-    initial_value: ${default_cover_travel_ms}
+    initial_value: "0"
   - id: cover_calib_phase              # Aktuelle Phase der Kalibrierungs-State-Machine (0-5)
     type: int
     restore_value: no
@@ -101,20 +101,14 @@ globals:
     # Aktuell: nur "Sensor nie erreicht" wird als Fault gemeldet.
 
 script:
-  # sync_cover_position – Synchronisiert cover_contract_position mit der lokalen Cover-Position
-  #   Wenn kalibriert: position = cover.position * 100 (Prozent)
+  # sync_cover_position – Leitet open/closed aus bekannter 0/100-Position ab
   #   Parameter: keine  |  Rückgabe: keine
   - id: sync_cover_position
     then:
       - lambda: |-
-          // Prueft ob Cover kalibriert ist – dann lokale Position abrufen
-          if (id(cover_contract_calibrated)) {
-            id(cover_contract_position) = (int) lroundf(id(zrl_cover).position * 100.0f);
-            if (id(cover_contract_position) == 100) {
-              id(cover_contract_state) = "open";
-            } else if (id(cover_contract_position) == 0) {
-              id(cover_contract_state) = "closed";
-            }
+          if (id(cover_contract_calibrated) && id(cover_contract_position) >= 0 && id(cover_contract_position) <= 100 && id(cover_contract_state) == "stopped") {
+            if (id(cover_contract_position) == 100) id(cover_contract_state) = "open";
+            else if (id(cover_contract_position) == 0) id(cover_contract_state) = "closed";
           }
 
   # publish_cover_contract_state – Veroeffentlicht Cover-Status auf .../state (retain)
@@ -134,7 +128,7 @@ script:
             root["relay_2"] = id(cover_relay_down).state;
             root["cover_mode"] = true;
             root["cover_state"] = id(cover_contract_state).c_str();
-            if (id(cover_contract_calibrated)) {
+            if (id(cover_contract_calibrated) && id(cover_contract_position) >= 0 && id(cover_contract_position) <= 100) {
               root["cover_position"] = id(cover_contract_position);
             } else {
               root["cover_position"] = nullptr;
@@ -142,12 +136,10 @@ script:
             root["cover_calibrated"] = id(cover_contract_calibrated);
             root["fault"] = id(hardware_fault) || id(contract_fault);
 
-  # start_cover_calibration – State-Machine: Fuehrt Kalibrierung Schritt für Schritt aus
-  #   Phase 0 → Phase 1: Werte zurücksetzen, Hochfahrt starten
-  #   Phase 2 (up gemessen) → wartet auf erneutes calibrate
-  #   Phase 2 (up gemessen & erneut calibrate) → Phase 3: Runterfahrt starten
-  #   Phase 4 → finish_cover_calibration: Zeiten speichern
-  #   Phase 5 → Hinweis: bereits kalibriert
+  # start_cover_calibration – Startet/steuert die Firmware-analoge Kalibrierung
+  #   Phase 0 → Phase 1: zur oberen Ausgangslage fahren (Defaultzeit)
+  #   Phase 2 → Phase 3: Down-Messfahrt starten
+  #   Phase 4 → Phase 5: Up-Messfahrt starten
   #   Parameter: keine  |  Rückgabe: keine
   - id: start_cover_calibration
     then:
@@ -161,82 +153,63 @@ script:
                 id(cover_calib_up_measured) = false;
                 id(cover_calib_temp_up_ms) = 0;
                 id(cover_calib_temp_down_ms) = 0;
-                id(cover_contract_calibrated) = false;
                 id(contract_fault) = false;
                 id(cover_calib_start_ms) = millis();
-                ESP_LOGI("calib", "Cover calibration started - moving up");
+                ESP_LOGI("calib", "Cover calibration started - moving to top");
             - script.execute: cover_hw_open
-      # Prueft ob Cover oben ist, aber noch keine Hochfahrt gemessen wurde (Phase 2, kein up-Measurement)
       - if:
           condition:
-            lambda: 'return id(cover_calib_phase) == 2 && !id(cover_calib_up_measured);'
-          then:
-            - lambda: |-
-                ESP_LOGI("calib", "Cover calibration phase 2 - send calibrate again after reaching top");
-      # Prueft ob Hochfahrt gemessen wurde (Phase 2, up_measured=true) → startet Runterfahrt
-      - if:
-          condition:
-            lambda: 'return id(cover_calib_phase) == 2 && id(cover_calib_up_measured);'
+            lambda: 'return id(cover_calib_phase) == 2;'
           then:
             - lambda: |-
                 id(cover_calib_phase) = 3;
                 id(cover_calib_start_ms) = millis();
-                ESP_LOGI("calib", "Cover calibration - moving down");
+                ESP_LOGI("calib", "Cover calibration - measuring down");
             - script.execute: cover_hw_close
-      # Prueft ob Runterfahrt gemessen wurde (Phase 4) → speichert Kalibrierung
       - if:
           condition:
             lambda: 'return id(cover_calib_phase) == 4;'
           then:
-            - script.execute: finish_cover_calibration
-      # Prueft ob Kalibrierung bereits abgeschlossen ist (Phase 5) → Hinweis ausgeben
-      - if:
-          condition:
-            lambda: 'return id(cover_calib_phase) == 5;'
-          then:
             - lambda: |-
-                ESP_LOGI("calib", "Cover already calibrated. Use clear_calibration first to recalibrate.");
+                id(cover_calib_phase) = 5;
+                id(cover_calib_start_ms) = millis();
+                ESP_LOGI("calib", "Cover calibration - measuring up");
+            - script.execute: cover_hw_open
 
   # handle_calib_stop – Wird bei STOP während Kalibrierung aufgerufen
-  #   Phase 1: berechnet elapsed=millis()-startMillis → prueft 2000-180000ms → speichert up-Zeit → Phase 2
-  #   Phase 3: berechnet elapsed → prueft 2000-180000ms → speichert down-Zeit → Phase 4
+  #   Phase 3: misst down-Zeit → Phase 4
+  #   Phase 5: misst up-Zeit → finish_cover_calibration
   #   Ungueltige Zeiten (<2000 oder >180000ms): zurueck zu Phase 0 (Fehler)
   #   Parameter: keine  |  Rückgabe: keine
   - id: handle_calib_stop
     then:
       - lambda: |-
-          // Prueft ob wir in Phase 1 sind (Hochfahrt-Messung)
-          if (id(cover_calib_phase) == 1) {
+          if (id(cover_calib_phase) == 3) {
             unsigned long elapsed = millis() - (unsigned long)id(cover_calib_start_ms);
-            // Prueft ob Fahrzeit im gueltigen Bereich liegt (2s-180s)
-            if (elapsed >= 2000 && elapsed <= 180000) {
-              id(cover_calib_temp_up_ms) = (int)elapsed;
-              id(cover_calib_up_measured) = true;
-              id(cover_calib_phase) = 2;
-              ESP_LOGI("calib", "Up travel measured: %d ms. Send calibrate to continue.", (int)elapsed);
-            } else {
-              // Ungueltige Fahrzeit: Kalibrierung abbrechen (Phase 0)
-              ESP_LOGW("calib", "Invalid up travel time: %d ms (need 2000-180000)", (int)elapsed);
-              id(cover_calib_phase) = 0;
-            }
-          // Prueft ob wir in Phase 3 sind (Runterfahrt-Messung)
-          } else if (id(cover_calib_phase) == 3) {
-            unsigned long elapsed = millis() - (unsigned long)id(cover_calib_start_ms);
-            // Prueft ob Fahrzeit im gueltigen Bereich liegt (2s-180s)
             if (elapsed >= 2000 && elapsed <= 180000) {
               id(cover_calib_temp_down_ms) = (int)elapsed;
               id(cover_calib_phase) = 4;
-              ESP_LOGI("calib", "Down travel measured: %d ms. Send calibrate to save.", (int)elapsed);
+              ESP_LOGI("calib", "Down travel measured: %d ms. Start up measurement.", (int)elapsed);
             } else {
-              // Ungueltige Fahrzeit: Kalibrierung abbrechen (Phase 0)
               ESP_LOGW("calib", "Invalid down travel time: %d ms (need 2000-180000)", (int)elapsed);
+              id(cover_calib_phase) = 0;
+            }
+          } else if (id(cover_calib_phase) == 5) {
+            unsigned long elapsed = millis() - (unsigned long)id(cover_calib_start_ms);
+            if (elapsed >= 2000 && elapsed <= 180000) {
+              id(cover_calib_temp_up_ms) = (int)elapsed;
+              id(cover_calib_up_measured) = true;
+              ESP_LOGI("calib", "Up travel measured: %d ms. Saving calibration.", (int)elapsed);
+              id(finish_cover_calibration).execute();
+            } else {
+              ESP_LOGW("calib", "Invalid up travel time: %d ms (need 2000-180000)", (int)elapsed);
               id(cover_calib_phase) = 0;
             }
           }
 
   # finish_cover_calibration – Speichert gemessene Fahrzeiten dauerhaft
   #   Setzt travel_up_ms/travel_down_ms auf gemessene Werte
-  #   Setzt calibrated=true, phase=5, position=100 (ganz offen)
+  #   Setzt calibrated=true, phase=0, position=100 (ganz offen)
   #   Parameter: keine  |  Rückgabe: keine
   - id: finish_cover_calibration
     then:
@@ -247,7 +220,7 @@ script:
             id(cover_contract_travel_down_ms) = id(cover_calib_temp_down_ms);
             id(cover_contract_calibrated) = true;
             id(cover_contract_position) = 100;
-            id(cover_calib_phase) = 5;
+            id(cover_calib_phase) = 0;
             ESP_LOGI("calib", "Calibration saved: up=%d ms, down=%d ms",
               id(cover_contract_travel_up_ms),
               id(cover_contract_travel_down_ms));
@@ -258,15 +231,16 @@ script:
             id(cover_calib_phase) = 0;
           }
 
-  # clear_cover_calibration – Setzt Kalibrierung auf Default-Werte zurueck
-  #   calibrated=false, travel-Zeiten=30000ms Default, phase=0
+  # clear_cover_calibration – Setzt Kalibrierung auf unkalibriert zurueck
+  #   calibrated=false, travel-Zeiten=0, position=unbekannt, phase=0
   #   Parameter: keine  |  Rückgabe: keine
   - id: clear_cover_calibration
     then:
       - lambda: |-
           id(cover_contract_calibrated) = false;
-          id(cover_contract_travel_up_ms) = atoi("${default_cover_travel_ms}");
-          id(cover_contract_travel_down_ms) = atoi("${default_cover_travel_ms}");
+          id(cover_contract_travel_up_ms) = 0;
+          id(cover_contract_travel_down_ms) = 0;
+          id(cover_contract_position) = 255;
           id(cover_calib_phase) = 0;
           id(cover_calib_up_measured) = false;
           id(cover_calib_temp_up_ms) = 0;
@@ -356,24 +330,12 @@ mqtt:
               return;
             }
 
-            // "calibrate" – Kalibrierung starten oder fortsetzen
-            // Phase 1 oder 3: Kalibrierung laeuft bereits → Fehler "calib_in_progress"
-            // Phase 5: bereits kalibriert → Fehler "already_calibrated"
             if (command == "calibrate") {
-              // Prueft ob Kalibrierung bereits laeuft (Phase 1=hoch, Phase 3=runter)
-              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3 || id(cover_calib_phase) == 5) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -6;
                 id(contract_last_status_text) = "calib_in_progress";
                 queue_ack("calib_in_progress", -6, "device_validation");
-                return;
-              }
-              // Prueft ob Kalibrierung bereits abgeschlossen ist (Phase 5)
-              if (id(cover_calib_phase) == 5) {
-                id(contract_fault) = true;
-                id(contract_last_status_code) = -6;
-                id(contract_last_status_text) = "already_calibrated";
-                queue_ack("already_calibrated", -6, "device_validation");
                 return;
               }
               id(clear_contract_fault).execute();
@@ -393,11 +355,18 @@ mqtt:
             // "open" – Prüft ob Kalibrierung laeuft, startet Aufwaertsfahrt
             if (command == "open") {
               // Prueft ob Kalibrierung aktiv ist – dann open sperren
-              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+              if (id(cover_calib_phase) != 0) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -6;
                 id(contract_last_status_text) = "calib_in_progress";
                 queue_ack("calib_in_progress", -6, "device_validation");
+                return;
+              }
+              if (id(cover_runtime_direction) != 0) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -2;
+                id(contract_last_status_text) = "busy";
+                queue_ack("busy", -2, "device_busy");
                 return;
               }
               id(cover_hw_open).execute();
@@ -411,11 +380,18 @@ mqtt:
             // "close" – Prüft ob Kalibrierung laeuft, startet Abwaertsfahrt
             if (command == "close") {
               // Prueft ob Kalibrierung aktiv ist – dann close sperren
-              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+              if (id(cover_calib_phase) != 0) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -6;
                 id(contract_last_status_text) = "calib_in_progress";
                 queue_ack("calib_in_progress", -6, "device_validation");
+                return;
+              }
+              if (id(cover_runtime_direction) != 0) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -2;
+                id(contract_last_status_text) = "busy";
+                queue_ack("busy", -2, "device_busy");
                 return;
               }
               id(cover_hw_close).execute();
@@ -429,11 +405,22 @@ mqtt:
             // "stop" – Cover anhalten, ggf. Kalibrier-Messung abschliessen
             if (command == "stop") {
               // Prueft ob Kalibrierung aktiv ist – dann Stop mit Kalibrier-Auswertung
-              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+              if (id(cover_calib_phase) == 3 || id(cover_calib_phase) == 5) {
                 id(cover_hw_stop).execute();
                 id(handle_calib_stop).execute();
                 id(cover_contract_state) = "stopped";
                 id(clear_contract_fault).execute();
+                id(publish_cover_contract_state).execute();
+                queue_ack("ok", 0, "device_command");
+                return;
+              }
+              if (id(cover_calib_phase) != 0) {
+                id(cover_hw_stop).execute();
+                id(cover_calib_phase) = 0;
+                id(cover_calib_temp_up_ms) = 0;
+                id(cover_calib_temp_down_ms) = 0;
+                id(clear_contract_fault).execute();
+                id(cover_contract_state) = "stopped";
                 id(publish_cover_contract_state).execute();
                 queue_ack("ok", 0, "device_command");
                 return;
@@ -453,11 +440,18 @@ mqtt:
             // target=0 → close, target=100 → open, sonst Teilzeit-Berechnung
             if (command == "set_position") {
               // Prueft ob Kalibrierung aktiv ist – dann set_position sperren
-              if (id(cover_calib_phase) == 1 || id(cover_calib_phase) == 3) {
+              if (id(cover_calib_phase) != 0) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -6;
                 id(contract_last_status_text) = "calib_in_progress";
                 queue_ack("calib_in_progress", -6, "device_validation");
+                return;
+              }
+              if (id(cover_runtime_direction) != 0) {
+                id(contract_fault) = true;
+                id(contract_last_status_code) = -2;
+                id(contract_last_status_text) = "busy";
+                queue_ack("busy", -2, "device_busy");
                 return;
               }
 

@@ -35,7 +35,7 @@ Dieses Protokoll dokumentiert die technischen Anpassungen am Server-, ESPHome- u
   - ESPHome: `devices/net_zrl_shutter_module.yaml`
   - eigene Firmware: `net_zrl_shutter_module` und der `net_zrl`-Fallback
 - `GPIO0` und `GPIO1` bleiben fuer I2C reserviert.
-- `GPIO8` bleibt beim LED-Ring-Modul als LED-Datenpin bestehen und sollte bei Hardwaretests weiter beobachtet werden.
+- `GPIO8` wurde beim LED-Ring-Modul als Datenpin verworfen, weil es ein ESP32-C3-Strapping-Pin ist. Der LED-Ring liegt stattdessen auf `GPIO4`.
 
 ## Geprueft
 

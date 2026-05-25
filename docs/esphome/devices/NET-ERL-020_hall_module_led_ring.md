@@ -19,7 +19,7 @@
 | ENS160 | I2C | SDA=GPIO0, SCL=GPIO1 | 0x52 |
 | PIR (Präsenz) | GPIO | GPIO7 | — |
 | Relais | GPIO | GPIO10 | — |
-| NeoPixel LED-Ring | GPIO | GPIO8 | 17 LEDs (WS2812, GRB) |
+| NeoPixel LED-Ring | GPIO | GPIO4 | 17 LEDs (WS2812, GRB) |
 | Lokaler Taster | GPIO | GPIO6 | — |
 
 ## 3. Konfiguration (YAML-Substitutions)
@@ -46,7 +46,7 @@ auto_off_delay_s: "15"
 relay_pin: GPIO10
 button_pin: GPIO6
 presence_pin: GPIO7
-led_ring_pin: GPIO8
+led_ring_pin: GPIO4
 led_ring_count: "17"
 led_ring_default_brightness_pct: "18"
 led_ring_air_quality_phase_s: "15"
@@ -90,7 +90,7 @@ hum_offset_01pct: "0"
 
 ## 5. LED-Ring
 
-- **17 NeoPixel** (WS2812, GRB) an GPIO8
+- **17 NeoPixel** (WS2812, GRB) an GPIO4
 - **Helligkeit**: 18 % Standard (konfigurierbar 1–60 %)
 - **Phasen (45 s Zyklus)**: AQI (15 s) → Temperatur (15 s) → Feuchte (15 s)
 - **Nur die AQI-Phase ist Teil der Technikerarbeit**; Temperatur- und Feuchtephasen sind optionale ESPHome-Komfortfunktionen

@@ -17,7 +17,7 @@
  - I2C SCL: GPIO1.
  - Button: GPIO6, active-LOW, 5000 Millisekunden Haltezeit fuer Setup.
  - LD2410 OUT: GPIO7, HIGH bedeutet Praesenz.
- - NeoPixel: GPIO8, 17 LEDs, GRB, 800 kHz.
+ - NeoPixel: GPIO4, 17 LEDs, GRB, 800 kHz.
  - Relais: GPIO10, active-HIGH.
  - LD2410 UART: GPIO20 RX, GPIO21 TX.
  - Status-/Setup-LED: -1, nicht bestueckt.
@@ -34,7 +34,7 @@
 #define PIN_SENSOR_SCL 1
 #define PIN_BUTTON_1 6
 #define PIN_LD2410_OUT 7
-#define PIN_LED_RING 8
+#define PIN_LED_RING 4
 #define PIN_RELAY_1 10
 #define PIN_LD2410_UART_RX 20
 #define PIN_LD2410_UART_TX 21

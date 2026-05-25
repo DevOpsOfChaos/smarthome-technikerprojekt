@@ -28,7 +28,7 @@ Dieses Verzeichnis enthält die vollständige technische Dokumentation aller 6 E
 | Sensoren | BME280, VEML7700, PIR | BME680, VEML7700, ENS160, LD2410 | — | BME280, VEML7700, Rain | Reed (GPIO) | ADC Rain |
 | Aktoren | 1 Relais | 1 Relais + NeoPixel | 2 Relais (Cover) | — | — | — |
 | Taster | — | 1 (GPIO6, akt-low) | 3 (GPIO20/4/3) | — | — | — |
-| Status-LEDs | — | — | 2 (GPIO6/7, akt-high) | — | — | — |
+| Status-LEDs | — | — | 2 (Auf=GPIO7, Ab=GPIO6, akt-high) | — | — | — |
 | ESP-NOW Payload | 31B (Config) | 45B (Gas+Config) | 25B (Config) | 24–36B (ext) | 24B | 24B |
 | Wake | n/a | n/a | n/a | n/a | GPIO+Timer | Timer (900s) |
 | Setup-Portal | Ja | Ja | Ja | Ja | Ja | Ja |

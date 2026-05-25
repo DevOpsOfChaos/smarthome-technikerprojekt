@@ -135,11 +135,11 @@ const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #endif
 
 #ifndef NET_ZRL_LED_UP_PIN
-#define NET_ZRL_LED_UP_PIN 6
+#define NET_ZRL_LED_UP_PIN 7
 #endif
 
 #ifndef NET_ZRL_LED_DOWN_PIN
-#define NET_ZRL_LED_DOWN_PIN 7
+#define NET_ZRL_LED_DOWN_PIN 6
 #endif
 
 #ifndef NET_ZRL_LED_ACTIVE_HIGH

@@ -59,8 +59,8 @@
 #define NET_ZRL_BUTTON_STOP_PIN     3
 
 // LED-Pins.
-#define NET_ZRL_LED_UP_PIN          6
-#define NET_ZRL_LED_DOWN_PIN        7
+#define NET_ZRL_LED_UP_PIN          7
+#define NET_ZRL_LED_DOWN_PIN        6
 #define NET_ZRL_LED_ACTIVE_HIGH     1
 
 // Pegel-Logik.

@@ -18,6 +18,11 @@ Thumbs.db
 *.tmp
 *.log
 
+# KiCad runtime artifacts
+**/#auto_saved_files#
+**/_autosave-*.kicad_sch
+**/*.kicad_sch.lck
+
 # Python / caches
 __pycache__/
 *.pyc

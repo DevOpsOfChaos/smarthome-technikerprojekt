@@ -66,8 +66,8 @@ substitutions:
   button_up_pin: GPIO20
   button_down_pin: GPIO4
   button_stop_pin: GPIO3
-  led_up_pin: GPIO6
-  led_down_pin: GPIO7
+  led_up_pin: GPIO7
+  led_down_pin: GPIO6
 
 # =============================================================================
 # PACKAGES – Eingebundene Contract-Bausteine
@@ -84,6 +84,9 @@ packages:
 esphome:
   name: ${node_name}
   friendly_name: ${device_name}
+  includes:
+    - ../packages/setup_portal.h
+    - ../packages/smarthome_command_dispatch.h
   comment: Vertragskompatibles MQTT-Cover mit Kalibrierung und Positionssteuerung
   on_boot:
     priority: -10
@@ -91,9 +94,13 @@ esphome:
       - lambda: |-
           id(contract_online) = true;
           id(cover_contract_state) = "stopped";
+          id(cover_contract_calibrated) =
+            id(cover_contract_travel_up_ms) >= 1000 &&
+            id(cover_contract_travel_down_ms) >= 1000;
           if (!id(cover_contract_calibrated)) {
-            id(cover_contract_travel_up_ms) = atoi("${default_cover_travel_ms}");
-            id(cover_contract_travel_down_ms) = atoi("${default_cover_travel_ms}");
+            id(cover_contract_travel_up_ms) = 0;
+            id(cover_contract_travel_down_ms) = 0;
+            id(cover_contract_position) = 255;
           }
       - script.execute: apply_setup_sensor_interval
       - script.execute: publish_contract_meta
@@ -203,15 +210,25 @@ binary_sensor:
       - delayed_off: 35ms # 35 ms Entprellzeit
     on_press:
       then:
-        - script.execute: cover_hw_open
-        - lambda: 'id(cover_contract_state) = "opening";'
-        - script.execute: publish_cover_contract_state
-        - lambda: |-
-            id(event_type) = 9;
-            id(event_trigger) = 1;
-            id(event_param1) = id(cover_contract_position);
-            id(event_param2) = 100;
-        - script.execute: flush_device_event
+        - if:
+            condition:
+              lambda: 'return id(cover_calib_phase) == 4;'
+            then:
+              - script.execute: start_cover_calibration
+              - script.execute: publish_cover_contract_state
+            else:
+              - if:
+                  condition:
+                    lambda: 'return id(cover_runtime_direction) == 0 && id(cover_calib_phase) == 0 && !id(setup_portal_active);'
+                  then:
+                    - script.execute: cover_hw_open
+                    - script.execute: publish_cover_contract_state
+                    - lambda: |-
+                        id(event_type) = 9;
+                        id(event_trigger) = 1;
+                        id(event_param1) = id(cover_contract_position);
+                        id(event_param2) = 100;
+                    - script.execute: flush_device_event
   - platform: gpio
     id: cover_button_down
     name: "Cover Button Down"
@@ -227,16 +244,25 @@ binary_sensor:
       - delayed_off: 35ms # 35 ms Entprellzeit
     on_press:
       then:
-        - lambda: |-
-            id(down_button_pressed_at_ms) = millis();
-            id(down_setup_hold_consumed) = false;
-        - delay: 5s # 5 s Haltezeit Setup-Portal
         - if:
             condition:
-              binary_sensor.is_on: cover_button_down
+              lambda: 'return id(cover_calib_phase) == 2;'
             then:
               - lambda: 'id(down_setup_hold_consumed) = true;'
-              - script.execute: enter_setup_portal
+              - script.execute: start_cover_calibration
+              - script.execute: publish_cover_contract_state
+            else:
+              - lambda: |-
+                  id(down_button_pressed_at_ms) = millis();
+                  id(down_setup_hold_consumed) = false;
+              - delay: 5s # 5 s Haltezeit Setup-Portal
+              - if:
+                  condition:
+                    lambda: 'return id(cover_calib_phase) == 0 && id(cover_runtime_direction) == 0 && !id(setup_portal_active) && id(cover_button_down).state;'
+                  then:
+                    - lambda: 'id(down_setup_hold_consumed) = true;'
+                    - script.execute: configure_zrl_setup_portal
+                    - script.execute: enter_setup_portal
     on_release:
       then:
         - if:
@@ -247,10 +273,9 @@ binary_sensor:
                 const bool setup_consumed = id(down_setup_hold_consumed);
                 id(down_button_pressed_at_ms) = 0;
                 id(down_setup_hold_consumed) = false;
-                return !setup_consumed && held_ms < 5000UL; // 5000 ms = 5 s Setup-Hold-Schwelle
+                return !setup_consumed && held_ms < 5000UL && id(cover_calib_phase) == 0 && id(cover_runtime_direction) == 0 && !id(setup_portal_active); // 5000 ms = 5 s Setup-Hold-Schwelle
             then:
               - script.execute: cover_hw_close
-              - lambda: 'id(cover_contract_state) = "closing";'
               - script.execute: publish_cover_contract_state
               - lambda: |-
                   id(event_type) = 10;
@@ -273,16 +298,52 @@ binary_sensor:
       - delayed_off: 35ms # 35 ms Entprellzeit
     on_press:
       then:
-        - lambda: 'id(stop_button_pressed_at_ms) = millis();'
-        - script.execute: cover_hw_stop
-        - lambda: 'id(cover_contract_state) = "stopped";'
-        - script.execute: publish_cover_contract_state
         - lambda: |-
-            id(event_type) = 11;
-            id(event_trigger) = 1;
-            id(event_param1) = id(cover_contract_position);
-            id(event_param2) = 0;
-        - script.execute: flush_device_event
+            id(stop_button_pressed_at_ms) = millis();
+            id(stop_button_hold_consumed) = false;
+        - if:
+            condition:
+              lambda: 'return id(cover_runtime_direction) != 0;'
+            then:
+              - script.execute: cover_hw_stop
+              - if:
+                  condition:
+                    lambda: 'return id(cover_calib_phase) == 3 || id(cover_calib_phase) == 5;'
+                  then:
+                    - script.execute: handle_calib_stop
+              - lambda: 'id(stop_button_hold_consumed) = true;'
+              - script.execute: publish_cover_contract_state
+              - lambda: |-
+                  id(event_type) = 11;
+                  id(event_trigger) = 1;
+                  id(event_param1) = id(cover_contract_position);
+                  id(event_param2) = 0;
+              - script.execute: flush_device_event
+            else:
+              - if:
+                  condition:
+                    lambda: 'return id(cover_calib_phase) != 0;'
+                  then:
+                    - lambda: |-
+                        id(cover_calib_phase) = 0;
+                        id(cover_calib_temp_up_ms) = 0;
+                        id(cover_calib_temp_down_ms) = 0;
+                        id(cover_contract_state) = "stopped";
+                        id(stop_button_hold_consumed) = true;
+                    - script.execute: publish_cover_contract_state
+        - delay: 5s # 5 s Haltezeit Kalibrierung
+        - if:
+            condition:
+              lambda: 'return id(cover_button_stop).state && !id(stop_button_hold_consumed) && id(cover_runtime_direction) == 0 && id(cover_calib_phase) == 0 && !id(setup_portal_active);'
+            then:
+              - lambda: 'id(stop_button_hold_consumed) = true;'
+              - script.execute: start_cover_calibration
+              - script.execute: publish_cover_contract_state
+    on_release:
+      then:
+        - lambda: |-
+            id(stop_button_pressed_at_ms) = 0;
+            id(stop_button_hold_consumed) = false;
 
 # =============================================================================
 # GLOBALE VARIABLEN – Teil-Positionierung (Partial Movement)
@@ -292,6 +353,10 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: "0"
+  - id: stop_button_hold_consumed
+    type: bool
+    restore_value: no
+    initial_value: "false"
   - id: down_button_pressed_at_ms
     type: uint32_t
     restore_value: no
@@ -300,52 +365,40 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
-  - id: cover_partial_active          # true = eine Teil-Positionsfahrt ist aktiv
+  - id: cover_runtime_direction       # 0=stopped, 1=up, -1=down
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: cover_movement_started_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: cover_movement_auto_stop_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: cover_movement_start_position
+    type: int
+    restore_value: no
+    initial_value: "255"
+  - id: cover_movement_target_position
+    type: int
+    restore_value: no
+    initial_value: "255"
+  - id: cover_movement_targets_end
     type: bool
     restore_value: no
     initial_value: "false"
-  - id: cover_partial_duration_ms     # Berechnete Fahrzeit für die aktuelle Teil-Position (ms)
-    type: int
+  - id: cover_movement_targets_intermediate
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: cover_last_relay_change_ms
+    type: uint32_t
     restore_value: no
     initial_value: "0"
 
 number:
-  - platform: template
-    id: setup_cover_travel_up_ms
-    name: "${device_name} travel_time_up_ms"
-    min_value: 1000 # 1000 ms = 1 s minimale Fahrzeit
-    max_value: 180000 # 180000 ms = 180 s = 3 min maximale Fahrzeit
-    step: 1
-    mode: box
-    optimistic: true
-    restore_value: true
-    initial_value: ${default_cover_travel_ms}
-    internal: true
-    on_value:
-      then:
-        - lambda: |-
-            id(cover_contract_travel_up_ms) = (int)x;
-            id(cover_contract_calibrated) =
-              id(cover_contract_travel_up_ms) >= 1000 &&
-              id(cover_contract_travel_down_ms) >= 1000;
-  - platform: template
-    id: setup_cover_travel_down_ms
-    name: "${device_name} travel_time_down_ms"
-    min_value: 1000 # 1000 ms = 1 s minimale Fahrzeit
-    max_value: 180000 # 180000 ms = 180 s = 3 min maximale Fahrzeit
-    step: 1
-    mode: box
-    optimistic: true
-    restore_value: true
-    initial_value: ${default_cover_travel_ms}
-    internal: true
-    on_value:
-      then:
-        - lambda: |-
-            id(cover_contract_travel_down_ms) = (int)x;
-            id(cover_contract_calibrated) =
-              id(cover_contract_travel_up_ms) >= 1000 &&
-              id(cover_contract_travel_down_ms) >= 1000;
   - platform: template
     id: setup_cover_default_travel_ms
     name: "${device_name} default_estimated_travel_time_ms"
@@ -357,13 +410,6 @@ number:
     restore_value: true
     initial_value: ${default_cover_travel_ms}
     internal: true
-    on_value:
-      then:
-        - lambda: |-
-            if (!id(cover_contract_calibrated)) {
-              id(cover_contract_travel_up_ms) = (int)x;
-              id(cover_contract_travel_down_ms) = (int)x;
-            }
 
 select:
   - platform: template
@@ -378,96 +424,7 @@ select:
     internal: true
 
 # =============================================================================
-# COVER – Zeitbasierte Cover-Plattform
-# =============================================================================
-# platform: time_based – lokale Fahrzeitsteuerung
-# device_class: shutter – Wird als Rollladen klassifiziert
-# open_action:   Schaltet down-Relais AUS, up-Relais EIN
-# close_action:  Schaltet up-Relais AUS, down-Relais EIN
-# stop_action:   Schaltet beide Relais AUS
-#
-# open_duration / close_duration:
-#   Wenn eine Teil-Positionsfahrt aktiv ist      → partial_duration_ms
-#   Wenn Kalibrier-Phase 1 (Hochfahrt-Messung)   → 180000ms (maximale Messzeit)
-#   Wenn Kalibrier-Phase 3 (Runterfahrt-Messung) → 180000ms
-#   Sonst                                          → gespeicherte travel_up_ms / travel_down_ms
-#
-# on_opened / on_closed:
-#   Bei Teilfahrt:   Position = Zielposition, partial_active=false
-#   Bei Vollfahrt:   Position = 100 (offen) oder 0 (geschlossen)
-#   State = "stopped", Status publishen
-# =============================================================================
-cover:
-  - platform: time_based
-    id: zrl_cover
-    name: "${device_name}"
-    device_class: shutter
-    open_action:
-      - if:
-          condition:
-            lambda: 'return id(setup_relay_up_mapping).current_option() == "relay_b";'
-          then:
-            - switch.turn_off: cover_relay_up
-            - switch.turn_on: cover_relay_down
-          else:
-            - switch.turn_off: cover_relay_down
-            - switch.turn_on: cover_relay_up
-    close_action:
-      - if:
-          condition:
-            lambda: 'return id(setup_relay_up_mapping).current_option() == "relay_b";'
-          then:
-            - switch.turn_off: cover_relay_down
-            - switch.turn_on: cover_relay_up
-          else:
-            - switch.turn_off: cover_relay_up
-            - switch.turn_on: cover_relay_down
-    stop_action:
-      - switch.turn_off: cover_relay_up
-      - switch.turn_off: cover_relay_down
-    open_duration: ${default_cover_travel_ms}ms
-    close_duration: ${default_cover_travel_ms}ms
-    on_opened:
-      then:
-        - lambda: |-
-            // Prueft ob eine Teilfahrt beendet wurde → Zielposition uebernehmen
-            if (id(cover_partial_active)) {
-              id(cover_partial_active) = false;
-              // Prueft ob kalibriert → berechnete Zielposition setzen
-              if (id(cover_contract_calibrated)) {
-                id(cover_contract_position) = id(cover_contract_target_position);
-              }
-            } else {
-              // Vollfahrt hoch beendet → Position 100% (ganz offen)
-              // Nicht setzen wenn Kalibrier-Phase 1 (Hochfahrt-Messung laeuft)
-              if (id(cover_contract_calibrated) && id(cover_calib_phase) != 1) {
-                id(cover_contract_position) = 100;
-              }
-            }
-            id(cover_contract_state) = "stopped";
-        - script.execute: publish_cover_contract_state
-    on_closed:
-      then:
-        - lambda: |-
-            // Prueft ob eine Teilfahrt beendet wurde → Zielposition uebernehmen
-            if (id(cover_partial_active)) {
-              id(cover_partial_active) = false;
-              // Prueft ob kalibriert → berechnete Zielposition setzen
-              if (id(cover_contract_calibrated)) {
-                id(cover_contract_position) = id(cover_contract_target_position);
-              }
-            } else {
-              // Vollfahrt runter beendet → Position 0% (ganz geschlossen)
-              // Nicht setzen wenn Kalibrier-Phase 3 (Runterfahrt-Messung laeuft)
-              if (id(cover_contract_calibrated) && id(cover_calib_phase) != 3) {
-                id(cover_contract_position) = 0;
-              }
-            }
-            id(cover_contract_state) = "stopped";
-        - script.execute: publish_cover_contract_state
-
-# =============================================================================
-# SKRIPTE – Hardware-Zugriff (Wrapper für Cover-Aktionen)
+# SKRIPTE – Firmware-analoge Shutter-Steuerung
 # =============================================================================
 script:
   - id: apply_setup_sensor_interval
@@ -475,29 +432,208 @@ script:
       - lambda: |-
           // NET-ZRL hat keine periodisch zu pollenden Sensoren.
 
-  # cover_hw_open – Startet Aufwaertsfahrt
-  #   Parameter: keine  |  Rückgabe: keine
+  - id: configure_zrl_setup_portal
+    then:
+      - lambda: |-
+          SmartHomeSetupPortal::configure_device(
+            [](std::string &page, SmartHomeSetupPortal::AsyncWebServerRequest *source_server) {
+              const auto field_value = [&](const char *name, int current) -> std::string {
+                if (source_server != nullptr && source_server->hasArg(name)) return source_server->arg(name);
+                return current > 0 ? std::to_string(current) : std::string();
+              };
+              const std::string up_text = field_value("travel_time_up_ms", id(cover_contract_travel_up_ms));
+              const std::string down_text = field_value("travel_time_down_ms", id(cover_contract_travel_down_ms));
+              const std::string default_text = field_value("default_estimated_travel_time_ms", (int) id(setup_cover_default_travel_ms).state);
+              const std::string mapping = source_server != nullptr && source_server->hasArg("relay_up_mapping")
+                ? source_server->arg("relay_up_mapping")
+                : id(setup_relay_up_mapping).current_option();
+              page += "<div class=\"field\"><label for=\"travel_time_up_ms\">travel_time_up_ms</label><input id=\"travel_time_up_ms\" name=\"travel_time_up_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"leer = unveraendert\" value=\"";
+              page += SmartHomeSetupPortal::html_escape(up_text);
+              page += "\"><div class=\"hint\">Aktuell nur Zahl setzen.</div></div>";
+              page += "<div class=\"field\"><label for=\"travel_time_down_ms\">travel_time_down_ms</label><input id=\"travel_time_down_ms\" name=\"travel_time_down_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" placeholder=\"leer = unveraendert\" value=\"";
+              page += SmartHomeSetupPortal::html_escape(down_text);
+              page += "\"><div class=\"hint\">Aktuell nur Zahl setzen.</div></div>";
+              page += "<div class=\"field\"><label for=\"default_estimated_travel_time_ms\">default_estimated_travel_time_ms</label><input id=\"default_estimated_travel_time_ms\" name=\"default_estimated_travel_time_ms\" type=\"number\" min=\"1000\" max=\"180000\" step=\"1\" inputmode=\"numeric\" value=\"";
+              page += SmartHomeSetupPortal::html_escape(default_text);
+              page += "\"><div class=\"hint\">Fallbackfahrt bei Start.</div></div>";
+              page += "<div class=\"field\"><label for=\"relay_up_mapping\">Relais-Zuordnung fuer Richtung up</label><select id=\"relay_up_mapping\" name=\"relay_up_mapping\">";
+              page += mapping == "relay_b" ? "<option value=\"relay_a\">relay_a = up</option><option value=\"relay_b\" selected>relay_b = up</option>"
+                                            : "<option value=\"relay_a\" selected>relay_a = up</option><option value=\"relay_b\">relay_b = up</option>";
+              page += "</select><div class=\"hint\">Status: ";
+              page += id(cover_contract_calibrated) ? "Kalibriert" : "Nicht kalibriert";
+              page += "</div></div>";
+            },
+            [](SmartHomeSetupPortal::AsyncWebServerRequest *request, std::string &error) -> bool {
+              auto parse_optional_travel = [](const std::string &text, int current, int &out) -> bool {
+                if (text.empty()) {
+                  out = current;
+                  return true;
+                }
+                return SmartHomeSetupPortal::parse_uint_field(text, 1000, 180000, out);
+              };
+              int up_ms = 0;
+              int down_ms = 0;
+              int default_ms = 0;
+              if (!parse_optional_travel(request->arg("travel_time_up_ms"), id(cover_contract_travel_up_ms), up_ms)) {
+                error = "travel_time_up_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms. Leer laesst den aktuellen Wert unveraendert.";
+                return false;
+              }
+              if (!parse_optional_travel(request->arg("travel_time_down_ms"), id(cover_contract_travel_down_ms), down_ms)) {
+                error = "travel_time_down_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms. Leer laesst den aktuellen Wert unveraendert.";
+                return false;
+              }
+              if (!SmartHomeSetupPortal::parse_uint_field(request->arg("default_estimated_travel_time_ms"), 1000, 180000, default_ms)) {
+                error = "default_estimated_travel_time_ms ist ungueltig. Erlaubt sind 1000 bis 180000 ms.";
+                return false;
+              }
+              const std::string mapping = request->arg("relay_up_mapping");
+              if (mapping != "relay_a" && mapping != "relay_b") {
+                error = "relay_up_mapping ist ungueltig.";
+                return false;
+              }
+              id(cover_contract_travel_up_ms) = up_ms;
+              id(cover_contract_travel_down_ms) = down_ms;
+              id(cover_contract_calibrated) = up_ms >= 1000 && down_ms >= 1000;
+              if (!id(cover_contract_calibrated)) id(cover_contract_position) = 255;
+              auto default_call = id(setup_cover_default_travel_ms).make_call();
+              default_call.set_value(default_ms);
+              default_call.perform();
+              auto mapping_call = id(setup_relay_up_mapping).make_call();
+              mapping_call.set_option(mapping.c_str());
+              mapping_call.perform();
+              id(publish_cover_contract_state).execute();
+              return true;
+            },
+            [](std::string &page, SmartHomeSetupPortal::AsyncWebServerRequest *) {
+              const std::string up_text = id(cover_contract_travel_up_ms) > 0 ? std::to_string(id(cover_contract_travel_up_ms)) : "-";
+              const std::string down_text = id(cover_contract_travel_down_ms) > 0 ? std::to_string(id(cover_contract_travel_down_ms)) : "-";
+              page += "<form class=\"card\" method=\"post\" action=\"/save\"><div class=\"section-head\"><h2>Kalibrierung</h2><span class=\"tag\">reset</span></div>";
+              page += "<div class=\"sub\">Loescht nur die gespeicherten Fahrzeiten.</div><div class=\"meta\"><span>up <code>";
+              page += up_text;
+              page += "</code></span><span>down <code>";
+              page += down_text;
+              page += "</code></span></div><input type=\"hidden\" name=\"device_action\" value=\"reset_calibration\">";
+              page += "<div class=\"actions\"><button class=\"btn btn-danger\" type=\"submit\">Kalibrierung loeschen</button>";
+              page += "<div class=\"footer\">Basisdaten und Relais-Zuordnung bleiben unberuehrt.</div></div></form>";
+            },
+            [](SmartHomeSetupPortal::AsyncWebServerRequest *request, std::string &title, std::string &message, int &status_code, bool &restart_required) -> bool {
+              restart_required = false;
+              if (request->arg("device_action") != "reset_calibration") {
+                title = "Aktion ungueltig";
+                message = "Die angeforderte NET-ZRL-Aktion wird nicht unterstuetzt.";
+                status_code = 400;
+                return false;
+              }
+              id(clear_cover_calibration).execute();
+              title = "Kalibrierung geloescht";
+              message = "Fahrzeiten entfernt. Setup bleibt offen.";
+              status_code = 200;
+              return true;
+            });
+
+  - id: cover_hw_start_direction
+    parameters:
+      direction: int
+      auto_stop_ms: int
+      targets_end: bool
+      targets_intermediate: bool
+      target_position: int
+    then:
+      - lambda: |-
+          if (direction == 0 || id(cover_runtime_direction) != 0) return;
+          const uint32_t now = millis();
+          if (id(cover_last_relay_change_ms) > 0 && now - id(cover_last_relay_change_ms) < 300UL) {
+            delay(300UL - (now - id(cover_last_relay_change_ms)));
+          }
+          id(cover_relay_up).turn_off();
+          id(cover_relay_down).turn_off();
+          id(cover_runtime_direction) = direction > 0 ? 1 : -1;
+          id(cover_movement_started_ms) = millis();
+          id(cover_movement_auto_stop_ms) = auto_stop_ms > 0 ? (uint32_t) auto_stop_ms : 0UL;
+          id(cover_movement_start_position) =
+            id(cover_contract_calibrated) && id(cover_contract_position) >= 0 && id(cover_contract_position) <= 100
+              ? id(cover_contract_position)
+              : 0;
+          id(cover_movement_targets_end) = targets_end;
+          id(cover_movement_targets_intermediate) = targets_intermediate;
+          id(cover_movement_target_position) = target_position;
+          id(cover_contract_state) = direction > 0 ? "opening" : "closing";
+
+          const bool up_uses_relay_b = id(setup_relay_up_mapping).current_option() == "relay_b";
+          const bool use_second_relay = direction > 0 ? up_uses_relay_b : !up_uses_relay_b;
+          if (use_second_relay) id(cover_relay_down).turn_on();
+          else id(cover_relay_up).turn_on();
+          id(cover_last_relay_change_ms) = millis();
+
+  # cover_hw_open – normale Auf-Fahrt oder Kalibrier-Auf-Fahrt
   - id: cover_hw_open
     then:
-      - cover.open: zrl_cover
+      - lambda: |-
+          int auto_stop_ms = 0;
+          bool targets_end = false;
+          if (id(cover_calib_phase) == 1) {
+            auto_stop_ms = (int) id(setup_cover_default_travel_ms).state;
+          } else if (id(cover_calib_phase) == 5) {
+            auto_stop_ms = 180000;
+          } else if (id(cover_contract_calibrated) && id(cover_contract_travel_up_ms) >= 1000) {
+            auto_stop_ms = (id(cover_contract_travel_up_ms) * 12) / 10;
+            targets_end = true;
+          } else {
+            auto_stop_ms = (int) id(setup_cover_default_travel_ms).state;
+            targets_end = auto_stop_ms > 0;
+          }
+          id(cover_hw_start_direction).execute(1, auto_stop_ms, targets_end, false, 100);
 
-  # cover_hw_close – Startet Abwaertsfahrt
-  #   Parameter: keine  |  Rückgabe: keine
+  # cover_hw_close – normale Ab-Fahrt oder Kalibrier-Ab-Fahrt
   - id: cover_hw_close
     then:
-      - cover.close: zrl_cover
+      - lambda: |-
+          int auto_stop_ms = 0;
+          bool targets_end = false;
+          if (id(cover_calib_phase) == 3) {
+            auto_stop_ms = 180000;
+          } else if (id(cover_contract_calibrated) && id(cover_contract_travel_down_ms) >= 1000) {
+            auto_stop_ms = (id(cover_contract_travel_down_ms) * 12) / 10;
+            targets_end = true;
+          } else {
+            auto_stop_ms = (int) id(setup_cover_default_travel_ms).state;
+            targets_end = auto_stop_ms > 0;
+          }
+          id(cover_hw_start_direction).execute(-1, auto_stop_ms, targets_end, false, 0);
 
   # cover_hw_stop – Stoppt die Fahrt
-  #   Setzt partial_active=false falls eine Teilfahrt unterbrochen wurde
-  #   Parameter: keine  |  Rückgabe: keine
   - id: cover_hw_stop
     then:
-      - cover.stop: zrl_cover
       - lambda: |-
-          // Prueft ob eine Teilfahrt aktiv war → Flag zuruecksetzen
-          if (id(cover_partial_active)) {
-            id(cover_partial_active) = false;
+          if (id(cover_runtime_direction) != 0 && id(cover_contract_calibrated)) {
+            const int travel_ms = id(cover_runtime_direction) > 0 ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
+            if (travel_ms >= 1000) {
+              const uint32_t elapsed = millis() - id(cover_movement_started_ms);
+              int delta = (int)((elapsed * 100UL) / (uint32_t) travel_ms);
+              int next = id(cover_movement_start_position);
+              next += id(cover_runtime_direction) > 0 ? delta : -delta;
+              if (next < 0) next = 0;
+              if (next > 100) next = 100;
+              id(cover_contract_position) = next;
+            }
           }
+          if (id(cover_movement_targets_intermediate) && id(cover_contract_calibrated)) {
+            id(cover_contract_position) = id(cover_movement_target_position);
+          }
+          if (id(cover_movement_targets_end)) {
+            id(cover_contract_position) = id(cover_runtime_direction) > 0 ? 100 : 0;
+          }
+          id(cover_relay_up).turn_off();
+          id(cover_relay_down).turn_off();
+          id(cover_last_relay_change_ms) = millis();
+          id(cover_runtime_direction) = 0;
+          id(cover_movement_started_ms) = 0;
+          id(cover_movement_auto_stop_ms) = 0;
+          id(cover_movement_start_position) = id(cover_contract_position);
+          id(cover_movement_target_position) = id(cover_contract_position);
+          id(cover_movement_targets_end) = false;
+          id(cover_movement_targets_intermediate) = false;
+          id(cover_contract_state) = "stopped";
 
   # cover_hw_set_position(target_position int) – Faehrt eine Zielposition an
   #   Berechnet aus aktuelle-Position und Ziel die noetige Teil-Fahrzeit:
@@ -514,11 +650,10 @@ script:
     then:
       - lambda: |-
           // Prueft ob Cover nicht kalibriert ist → Teilpositionierung nicht moeglich
-          if (!id(cover_contract_calibrated)) {
+          if (!id(cover_contract_calibrated) || id(cover_contract_position) < 0 || id(cover_contract_position) > 100) {
             ESP_LOGW("cover", "set_position ignored: not calibrated");
             return;
           }
-          id(sync_cover_position).execute();
           int current = id(cover_contract_position);
           int target = target_position;
           // Prueft ob Zielposition bereits erreicht ist → keine Aktion noetig
@@ -529,39 +664,54 @@ script:
           // Waehlt Fahrzeit je nach Richtung (aufwaerts/abwaerts)
           int travel_ms = target > current ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
           int partial_ms = (travel_ms * delta_abs) / 100;
-          // Prueft ob berechnete Zeit unter 500ms → Minimum setzen (Ruckler vermeiden)
-          if (partial_ms < 500) partial_ms = 500; // 500 ms Minimum-Fahrzeit (Ruckler vermeiden)
-
-          id(cover_partial_active) = true;
-          id(cover_partial_duration_ms) = partial_ms;
+          if (partial_ms < 1) partial_ms = 1;
           id(cover_contract_target_position) = target;
-      # Prueft ob Teilfahrt aktiv ist → Richtung bestimmen und Fahrt starten
-      - if:
-          condition:
-            lambda: 'return id(cover_partial_active);'
-          then:
-            # Prueft ob Ziel ueber aktueller Position → aufwaerts fahren
-            - if:
-                condition:
-                  lambda: 'return id(cover_contract_target_position) > id(cover_contract_position);'
-                then:
-                  - lambda: 'id(cover_contract_state) = "opening";'
-                  - cover.open: zrl_cover
-                else:
-                  - lambda: 'id(cover_contract_state) = "closing";'
-                  - cover.close: zrl_cover
-            - delay: !lambda 'return id(cover_partial_duration_ms);'
-            - cover.stop: zrl_cover
-            - lambda: |-
-                id(cover_partial_active) = false;
-                id(cover_contract_position) = id(cover_contract_target_position);
-                id(cover_contract_state) = "stopped";
-            - script.execute: publish_cover_contract_state
+          const int direction = target > current ? 1 : -1;
+          id(cover_hw_start_direction).execute(direction, partial_ms, false, true, target);
 
 # =============================================================================
 # INTERVAL – Regelmaessiger Refresh aller Status-Topics (alle 5 Minuten)
 # =============================================================================
 interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          if (id(cover_runtime_direction) == 0) return;
+
+          if (id(cover_contract_calibrated)) {
+            const int travel_ms = id(cover_runtime_direction) > 0 ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
+            if (travel_ms >= 1000) {
+              const uint32_t elapsed = millis() - id(cover_movement_started_ms);
+              int delta = (int)((elapsed * 100UL) / (uint32_t) travel_ms);
+              int next = id(cover_movement_start_position);
+              next += id(cover_runtime_direction) > 0 ? delta : -delta;
+              if (next < 0) next = 0;
+              if (next > 100) next = 100;
+              id(cover_contract_position) = next;
+            }
+          }
+
+          if (id(cover_movement_auto_stop_ms) == 0) return;
+          if (millis() - id(cover_movement_started_ms) < id(cover_movement_auto_stop_ms)) return;
+
+          if (id(cover_calib_phase) == 1) {
+            id(cover_hw_stop).execute();
+            id(cover_calib_phase) = 2;
+            id(publish_cover_contract_state).execute();
+            return;
+          }
+          if (id(cover_calib_phase) == 3 || id(cover_calib_phase) == 5) {
+            id(cover_hw_stop).execute();
+            id(cover_calib_phase) = 0;
+            id(cover_calib_temp_up_ms) = 0;
+            id(cover_calib_temp_down_ms) = 0;
+            id(cover_contract_state) = "stopped";
+            id(publish_cover_contract_state).execute();
+            return;
+          }
+
+          id(cover_hw_stop).execute();
+          id(publish_cover_contract_state).execute();
   - interval: 1s
     then:
       - if:

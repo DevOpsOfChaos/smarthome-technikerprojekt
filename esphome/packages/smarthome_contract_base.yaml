@@ -26,7 +26,8 @@
 #
 # Abhaengigkeiten:
 #   Wird importiert von: Device-Dateien
-#   Importiert selbst:   (keine – reines Basis-Package)
+#   C++-Includes liegen bewusst in den konkreten Device-YAMLs, weil ESPHome
+#   Include-Pfade relativ zur konsumierenden YAML-Datei aufloest.
 # =============================================================================
 
 # =============================================================================
@@ -60,13 +61,8 @@ substitutions:
 # =============================================================================
 # SETUP-PORTAL – Lokale AP-/Webserver-Schicht fuer Geraeteeinstellungen
 # =============================================================================
-esphome:
-  includes:
-    - ../packages/setup_portal.h
-    - ../packages/smarthome_command_dispatch.h
-
 web_server:
-  port: 80
+  port: 81
   version: 3
   local: true
   include_internal: true
@@ -185,8 +181,54 @@ script:
   - id: enter_setup_portal
     then:
       - lambda: |-
-          SmartHomeSetupPortal::start("${node_name}-setup", "${setup_ap_password}");
-          id(setup_portal_active) = true;
+          SmartHomeSetupPortal::CommonConfig config;
+          config.title = "${device_name} Setup";
+          config.intro = "Geraet lokal konfigurieren.";
+          config.status_label = "${setup_status_field_name}";
+          config.sensor_label = "${setup_sensor_field_name}";
+          config.status_min = atoi("${setup_status_min}");
+          config.status_max = atoi("${setup_status_max}");
+          config.sensor_min = atoi("${setup_sensor_min}");
+          config.sensor_max = atoi("${setup_sensor_max}");
+          SmartHomeSetupPortal::configure_common(
+            config,
+            []() -> std::string {
+              return id(stored_master_mac);
+            },
+            [](const std::string &value, std::string &error) -> bool {
+              if (!SmartHomeSetupPortal::validate_master_mac(value)) {
+                error = "master_mac ist ungueltig.";
+                return false;
+              }
+              id(stored_master_mac) = value;
+              auto call = id(setup_master_mac_text).make_call();
+              call.set_value(value);
+              call.perform();
+              return true;
+            },
+            []() -> int {
+              return (int) id(setup_status_interval_number).state;
+            },
+            [](int value) {
+              auto call = id(setup_status_interval_number).make_call();
+              call.set_value(value);
+              call.perform();
+            },
+            []() -> int {
+              return (int) id(setup_sensor_interval_number).state;
+            },
+            [](int value) {
+              auto call = id(setup_sensor_interval_number).make_call();
+              call.set_value(value);
+              call.perform();
+            });
+          id(setup_portal_active) = SmartHomeSetupPortal::start("${node_name}-setup", "${setup_ap_password}");
+
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          SmartHomeSetupPortal::handle_client();
 
 text:
   - platform: template
