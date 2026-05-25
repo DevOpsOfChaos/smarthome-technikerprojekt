@@ -404,7 +404,7 @@ globals:
     restore_value: no
     initial_value: "65535" # 0xFFFF = Sentinel "kein gueltiger Wert"
   # LED-Ring-Anzeige:
-  # Teil der Technikerarbeit ist nur die lokale Luftqualitaetsanzeige per AQI.
+  # Teil des Funktionsumfangs ist nur die lokale Luftqualitaetsanzeige per AQI.
   # Die weiteren Zustandswerte dienen optionalen ESPHome-Komfortanimationen und
   # erweitern nicht den oeffentlichen MQTT-Serververtrag.
   - id: led_ring_enabled
@@ -478,7 +478,7 @@ script:
             root["fault"] = id(hardware_fault) || id(contract_fault);
 
   # LED-Ring-Anzeige:
-  # Teil der Technikerarbeit ist die erste Phase: Luftqualitaet per AQI.
+  # Teil des Funktionsumfangs ist die erste Phase: Luftqualitaet per AQI.
   # Die anschliessenden Temperatur-/Feuchtephasen sind ESPHome-Komfortfunktion
   # und nicht Bestandteil der Technikerprojekt-Firmwarelinie.
   - id: start_led_ring_comfort_sequence
@@ -703,7 +703,7 @@ light:
     chipset: WS2812
     effects:
       # LED-Ring-Anzeige:
-      # Teil der Technikerarbeit ist nur die AQI-/Luftqualitaetsphase.
+      # Teil des Funktionsumfangs ist nur die AQI-/Luftqualitaetsphase.
       # Temperatur, Feuchte, ACK-Impuls, Lux-Blockade und Runtime-Config sind
       # ESPHome-Komfortfunktionen ausserhalb der Technikerprojekt-Firmwarelinie.
       # Keine dieser Anzeigen veraendert Topics oder Payload-Felder.
@@ -802,7 +802,7 @@ light:
             const uint32_t phase_s = total_s > 0 ? elapsed_s % total_s : 0;
 
             if (phase_s < aqi_phase_s) {
-              // Teil der Technikerarbeit: lokale Luftqualitaetsanzeige per AQI.
+              // Teil des Funktionsumfangs: lokale Luftqualitaetsanzeige per AQI.
               const float pulse = 0.55f + 0.45f * ((sinf(now / 360.0f) + 1.0f) / 2.0f);
               set_pulsed_aqi(pulse);
               return;

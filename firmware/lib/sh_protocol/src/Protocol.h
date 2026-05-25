@@ -141,49 +141,6 @@
 #define SH_CFG_RING_MODE              0x52U
 
 // ============================================================
-// TLV-TAGS - Schluessel fuer optionale Zusatzfelder (Type-Length-Value)
-//   STATE-Tags (0x01-0x61): Messwerte die ein Node zusaetzlich melden kann
-//   EVENT-Tags (0x01-0x0A): Zusatzdaten zu Events
-// ============================================================
-
-#define SH_TLV_STATE_TIMESTAMP        0x01U
-#define SH_TLV_STATE_LAST_TRIGGER     0x02U
-#define SH_TLV_STATE_ERROR            0x03U
-
-#define SH_TLV_STATE_TEMP_01C         0x20U
-#define SH_TLV_STATE_HUM_01PCT        0x21U
-#define SH_TLV_STATE_LUX              0x22U
-#define SH_TLV_STATE_AQI              0x23U
-#define SH_TLV_STATE_TVOC_PPB         0x24U
-#define SH_TLV_STATE_ECO2_PPM         0x25U
-#define SH_TLV_STATE_MOTION           0x26U
-#define SH_TLV_STATE_WINDOW           0x27U
-#define SH_TLV_STATE_RAIN_RAW         0x28U
-#define SH_TLV_STATE_BATTERY_PCT      0x29U
-#define SH_TLV_STATE_BATTERY_MV       0x2AU
-#define SH_TLV_STATE_GAS_OHM          0x2BU
-
-#define SH_TLV_STATE_RELAY0           0x40U
-#define SH_TLV_STATE_RELAY1           0x41U
-#define SH_TLV_STATE_COVER_POSITION   0x42U
-#define SH_TLV_STATE_COVER_STATE      0x43U
-#define SH_TLV_STATE_COVER_CALIBRATED 0x44U
-
-#define SH_TLV_STATE_RSSI_DBM         0x60U
-#define SH_TLV_STATE_BOOT_COUNTER     0x61U
-
-#define SH_TLV_EVENT_TYPE             0x01U
-#define SH_TLV_EVENT_TIMESTAMP        0x02U
-#define SH_TLV_EVENT_RELAY_INDEX      0x03U
-#define SH_TLV_EVENT_RELAY_TRIGGER    0x04U
-#define SH_TLV_EVENT_RELAY_STATE      0x05U
-#define SH_TLV_EVENT_BUTTON_INDEX     0x06U
-#define SH_TLV_EVENT_BUTTON_TYPE      0x07U
-#define SH_TLV_EVENT_COVER_TARGET     0x08U
-#define SH_TLV_EVENT_COVER_STATE      0x09U
-#define SH_TLV_EVENT_SENSOR_ERROR     0x0AU
-
-// ============================================================
 // EVENT-TYPEN - Semantische Ereignisse die ein Node melden kann
 // ============================================================
 
@@ -786,23 +743,6 @@ typedef struct __attribute__((packed)) {
 static_assert(sizeof(EventReportPayload) == 22,
     "EventReportPayload muss 22 Bytes groß sein");
 
-/*
- * Kurzbeschreibung: TLV-Eintrag: Type-Length-Value fuer optionale Zusatzfelder (6 Bytes, nicht packed).
- *
- * Wird in erweiterten Payloads als optionale Anhaengsel verwendet.
- * Value ist auf 4 Bytes fix begrenzt - groessere Werte muessen auf mehrere
- * TlvEntries verteilt werden.
- *
- * Hinweis: SH_TLV_STATE_*-Tags beschreiben Sensormesswerte (Temperatur, Lux, ...).
- *       SH_TLV_EVENT_*-Tags beschreiben Event-Zusatzdaten (Relay-Index, Trigger, ...).
- */
-// TlvEntry ist reserviert fuer zukuenftige TLV-basierte Protokollerweiterungen.
-// Derzeit ungenutzt, aber Teil des Protokollvertrags.
-typedef struct {
-    uint8_t  type;     // TLV-Tag (SH_TLV_STATE_TEMP_01C, SH_TLV_EVENT_TYPE, ...)
-    uint8_t  length;   // Laenge des value-Feldes in Bytes (max 4)
-    uint8_t  value[4]; // Getypte Rohdaten (Interpretation abhaengig von type)
-} TlvEntry;
 
 /*
  * Kurzbeschreibung: Befuellt einen MsgHeader mit den Grundwerten.
