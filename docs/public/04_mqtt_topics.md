@@ -15,24 +15,67 @@
 
 ---
 
+## Geräte-IDs – Zwei getrennte Linien
+
+Das Projekt betreibt zwei alternative Firmware-Linien mit **unterschiedlichen Geräte-IDs**:
+
+| Gerätetyp | ESPHome-Linie (MQTT direkt) | Firmware-Linie (ESP-NOW → Master) |
+|-----------|----------------------------|-----------------------------------|
+| Flurmodul | `NET-ERL-010` | `NET-ERL-001` |
+| Flurmodul LED-Ring | `NET-ERL-020` | `NET-ERL-002` |
+| Wetterstation | `NET-SEN-020` | `NET-SEN-002` |
+| Rollladen | `NET-ZRL-020` | `NET-ZRL-002` |
+| Fensterkontakt | `bat_sen_010` | `bat_sen_01` |
+| Regensensor | `bat_sen_020` | `bat_sen_02` |
+
+**Wichtig:** MQTT-Topics sind case-sensitiv!
+Die beiden Linien unterscheiden sich im **Suffix** (Ziffernfolge), nicht in der Schreibweise:
+- ESPHome verwendet durchgehend **dreistellige** Suffixe (`010`, `020`).
+- Firmware verwendet **zweistellige** Suffixe bei `bat_sen` (`01`, `02`) und
+  **dreistellige** bei NET-Geräten (`001`, `002`).
+- `bat_sen`-Geräte sind in **beiden** Linien klein mit Underscore geschrieben.
+- NET-Geräte sind in **beiden** Linien groß mit Bindestrich geschrieben.
+
+Alle folgenden Payload-Beispiele verwenden die **ESPHome-IDs**,
+da diese Doku den MQTT-Vertrag der ESPHome-Linie beschreibt.
+
+---
+
 ## Meta-Payload
 
 ```json
 {
   "device_id": "NET-ERL-010",
-  "device_name": "Flur Modul",
-  "fw_version": "1",
-  "fw_variant": "net_erl_hall_module",
-  "caps": 93,
-  "control_mode": "relay_light",
-  "config_profile": 1,
-  "reporting_mode": 1,
-  "sensor_mask": "THLMXXXXXX",
-  "input_mask": "XXXXX",
+  "device_name": "NET-ERL Hall Module",
+  "device_class": "net_erl",
   "power_type": "mains",
-  "schema_version": 1
+  "fw_version": 1,
+  "caps": 93,
+  "mac_address": "AA:BB:CC:DD:EE:FF",
+  "meta_schema_version": 1,
+  "control_mode": "relay_light",
+  "config_profile": "hall_light",
+  "reporting_mode": "hybrid",
+  "sensor_mask": "THLMXXXXXX",
+  "input_mask": "XXXXX"
 }
 ```
+
+| Feld | Typ | Beschreibung |
+|------|-----|-------------|
+| `device_id` | string | Eindeutige Geräte-ID |
+| `device_name` | string | Anzeigename |
+| `device_class` | string | Geräteklasse: `net_erl`, `net_sen`, `net_zrl`, `bat_sen` |
+| `power_type` | string | Stromversorgung: `mains` oder `battery` |
+| `fw_version` | int | Firmware-Version (integer) |
+| `caps` | int | Fähigkeiten-Bitmaske |
+| `mac_address` | string | MAC-Adresse (Format `AA:BB:CC:DD:EE:FF`, kann Leerstring sein) |
+| `meta_schema_version` | int | Schema-Version des Meta-Payloads |
+| `control_mode` | string | Steuermodus (z.B. `relay_light`, `cover`, `none`) |
+| `config_profile` | string | Konfigurationsprofil (z.B. `hall_light`, `cover_basic`) |
+| `reporting_mode` | string | Meldeverhalten (z.B. `hybrid`, `sleep_event`) |
+| `sensor_mask` | string | 10-stellige Sensormaske |
+| `input_mask` | string | 5-stellige Eingabemaske |
 
 ### Caps-Bitmaske
 
@@ -63,8 +106,8 @@
 | `NET-ERL-020` (LED Ring) | 54397 | RELAY(1)+TEMP(4)+HUM(8)+LUX(16)+AQI(32)+MOTION(64)+BUTTON(1024)+LED_RING(4096)+GAS(16384)+PRESSURE(32768) |
 | `NET-SEN-020` (Wetter) | 33052 | TEMP(4)+HUM(8)+LUX(16)+RAIN(256)+PRESSURE(32768) |
 | `NET-ZRL-020` (Rollladen) | 10243 | RELAY(1)+RELAY2(2)+MULTIBUTTON(2048)+COVER(8192) |
-| `BAT-SEN-010` (Fenster) | 640 | BATTERY(512)+WINDOW(128) |
-| `BAT-SEN-020` (Regen) | 768 | BATTERY(512)+RAIN(256) |
+| `bat_sen_010` (Fenster) | 640 | BATTERY(512)+WINDOW(128) |
+| `bat_sen_020` (Regen) | 768 | BATTERY(512)+RAIN(256) |
 
 ---
 
@@ -161,11 +204,11 @@
 }
 ```
 
-### BAT-SEN (Batterie)
+### bat_sen (Batterie)
 
 ```json
 {
-  "device_id": "BAT-SEN-010",
+  "device_id": "bat_sen_010",
   "battery_pct": 85,
   "battery_mv": 2900,
   "window_open": 0,
@@ -286,19 +329,28 @@ werden nur über den Firmware-Master-Pfad (ESP-NOW) unterstützt.
 ```
 
 **`status` Werte:**
-| status | code | Bedeutung |
-|--------|-----:|-----------|
-| `ok` | 0 | Erfolg |
-| `sent` | 0 | Gesendet (get_state) |
-| `busy` | -2 | Gerät hat noch offenen Auftrag |
-| `unsupported` | -3 | Kommando nicht unterstützt |
-| `send_failed` | -4 | ESP-NOW-Versand fehlgeschlagen |
-| `timeout` | 3 | Keine ACK-Antwort erhalten |
-| `unknown_device` | -6 | Gerät nicht registriert |
-| `meta_required` | -9 | HELLO-Metadaten fehlen |
-| `no_route` | -8 | MAC-Adresse unbekannt |
-| `not_calibrated` | -5 | Rollladen nicht kalibriert |
-| `missing_request_id` | -20 | request_id fehlt |
+
+| status | Bedeutung | Master Firmware | ESPHome | master_compat |
+|--------|-----------|:-:|:-:|:-:|
+| `ok` | Erfolg | 0 | 0 | 0 |
+| `sent` | Gesendet (get_state) | 0 | 0 | 0 |
+| `busy` | Gerät hat noch offenen Auftrag | -2 | -2 | -2 |
+| `timeout` | Keine ACK-Antwort erhalten | 3 | — | 3 |
+| `unsupported` | Kommando nicht unterstützt | **-3** | **-2** | **-2** |
+| `invalid_payload` | Ungültiger Payload (JSON-Fehler, fehlende Felder) | -21 | -21 | -21 |
+| `send_failed` | ESP-NOW-Versand fehlgeschlagen | -4 | — | -4 |
+| `not_calibrated` | Rollladen nicht kalibriert | -5 | -5 | -5 |
+| `unknown_device` | Gerät nicht registriert | -6 | -6 | -6 |
+| `registry_full` | Registry voll (max. 16 Nodes) | -7 | — | — |
+| `no_route` | MAC-Adresse unbekannt | -8 | — | — |
+| `meta_required` | HELLO-Metadaten fehlen | -9 | — | — |
+| `missing_request_id` | request_id fehlt im Payload | — | -20 | -20 |
+
+> **Hinweis zu abweichenden Codes:** Die drei Linien verwenden teils
+> unterschiedliche Codes für dieselbe Bedeutung.
+> - `unsupported`: Master Firmware `-3`, ESPHome/master_compat `-2`
+> - `invalid_payload`: alle Linien verwenden `-21`
+> - `—` = Code wird von dieser Linie nicht verwendet.
 
 ## Availability-Payload
 

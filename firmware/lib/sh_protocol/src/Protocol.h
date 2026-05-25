@@ -907,12 +907,14 @@ static inline void safeCopyMask(const char* src, char* dst, size_t dst_len, char
 /*
  * Kurzbeschreibung: Prueft ob eine Device-ID dem erwarteten Format entspricht.
  *
- * Gueltige Formate:
- * - 10 Zeichen (z.B. "NET-ERL-001"): Praefix-3, Minus, Suffix-3, Minus, 3 Ziffern
- * - 11 Zeichen (z.B. "BAT-SEN-001"): Praefix-3, Minus, Suffix-3, Minus, 3 Ziffern
+ * Gueltiges Format:
+ * - 1 bis SH_DEVICE_ID_LEN-1 Zeichen
+ * - keine Schraegstriche, Leerzeichen oder Sonderzeichen, die MQTT-Topics
+ *   oder JSON-Felder unnoetig erschweren
  *
- * Erlaubte Zeichen: Grossbuchstaben (A-Z), Ziffern (0-9), Minus ('-').
- * Die letzten 3 Zeichen muessen ausschliesslich Ziffern sein.
+ * Erlaubte Zeichen: Buchstaben (A-Z, a-z), Ziffern (0-9), Minus ('-')
+ * und Unterstrich ('_'). Damit sind sowohl NET-ERL-001 als auch bat_sen_01
+ * gueltige IDs. Die ID ist Identitaet, keine Typableitung.
  *
  * Eingabewert id: Zu pruefender String
  * Ausgabewert: true, wenn die ID dem Format entspricht
@@ -920,17 +922,15 @@ static inline void safeCopyMask(const char* src, char* dst, size_t dst_len, char
 static inline bool isValidDeviceId(const char* id) {
     if (!id) return false;
     const size_t len = strlen(id);
-    if (len != 10 && len != 11) return false;
-    for (int i = (int)len - 3; i < (int)len; i++) {
-        if (!isdigit((unsigned char)id[i])) return false;
-    }
-    if (id[len - 4] != '-') return false;
+    if (len == 0 || len >= SH_DEVICE_ID_LEN) return false;
+    bool hasAlnum = false;
     for (size_t i = 0; i < len; i++) {
         const char c = id[i];
-        if (c == '-') continue;
-        if (!isdigit((unsigned char)c) && !isupper((unsigned char)c)) return false;
+        if (c == '-' || c == '_') continue;
+        if (!isdigit((unsigned char)c) && !isalpha((unsigned char)c)) return false;
+        hasAlnum = true;
     }
-    return true;
+    return hasAlnum;
 }
 
 /*

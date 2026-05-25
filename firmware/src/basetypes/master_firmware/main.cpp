@@ -181,6 +181,7 @@ constexpr int STATUS_CODE_UNKNOWN_DEVICE = -6;      // device_id nicht in Regist
 constexpr int STATUS_CODE_REGISTRY_FULL  = -7;      // Registry voll (max. 16 Nodes)
 constexpr int STATUS_CODE_NO_ROUTE       = -8;      // MAC unbekannt, Retry nicht moeglich
 constexpr int STATUS_CODE_META_REQUIRED  = -9;      // HELLO-Meta fehlt fuer sichere Validierung
+constexpr int STATUS_CODE_INVALID_PAYLOAD = -21;    // MQTT-Payload ungueltig
 
 // Registry-Persistenz im ESP32-NVS. Gespeichert werden nur stabile Meta-Daten
 // aus HELLO, niemals Laufzeitwerte wie online, Pending-CMDs oder Sensorzustaende.
@@ -2851,7 +2852,7 @@ static void handleMqttSetRelay(size_t nodeIndex, const char* requestId, const ch
         }
         return;
     }
-    publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
+    publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", STATUS_CODE_INVALID_PAYLOAD, SH_MSG_CMD, 0U, "master_validation");
 }
 
 // Aufgabe: Behandelt Cover-MQTT-Kommandos (open, close, stop, set_position).
@@ -2885,7 +2886,7 @@ static void handleMqttCoverCommand(size_t nodeIndex, const char* cmd, const char
     // set_position
     long position = -1L;
     if (!jsonHoleZahl(json, "position", &position) || position < 0L || position > 100L) {
-        publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CMD, 0U, "master_validation");
+        publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", STATUS_CODE_INVALID_PAYLOAD, SH_MSG_CMD, 0U, "master_validation");
         return;
     }
     if (!nodeStates[nodeIndex].cover_calibrated && position != 0L && position != 100L) {
@@ -2909,7 +2910,7 @@ static void handleMqttSetConfig(size_t nodeIndex, const char* requestId, const c
     char errorText[96] = {0};
     if (!parseSetConfigMinimal(nodeIndex, json, &paramId, &value, errorText, sizeof(errorText))) {
         logf("WARN", "set_config fuer %s verworfen: %s", nodeStates[nodeIndex].device_id, errorText);
-        publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", -3, SH_MSG_CFG, 0U, "master_validation");
+        publishNodeAck(nodeIndex, requestId, commandChannel, "invalid_payload", STATUS_CODE_INVALID_PAYLOAD, SH_MSG_CFG, 0U, "master_validation");
         return;
     }
     if (!sendeConfigCommand(nodeIndex, paramId, value, requestId, commandChannel)) {
