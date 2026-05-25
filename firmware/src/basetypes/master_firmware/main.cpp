@@ -159,11 +159,14 @@ constexpr size_t REQUEST_ID_LEN = 96U;
 constexpr long CFG_REPORT_INTERVAL_MIN = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MIN_S;
 constexpr long CFG_REPORT_INTERVAL_MAX = (long)SmartHome::ShStorage::SH_STORED_REPORT_INTERVAL_MAX_S;
 constexpr unsigned long HELLO_REQUEST_RETRY_INTERVAL_MS = 30000UL;
+constexpr unsigned long WLAN_INIT_SETTLE_MS = 500UL;
 // Bewusst gleich BATTERY_NODE_OFFLINE_TIMEOUT_MS: eine vollstaendige Schlafphase als Gnadenfrist.
 // Aenderungen an BATTERY_NODE_OFFLINE_TIMEOUT_MS ziehen diese TTL automatisch mit.
 constexpr unsigned long PROVISIONAL_NODE_TTL_MS = BATTERY_NODE_OFFLINE_TIMEOUT_MS;
 
 // Ungueltigkeits-Marker fuer STATE-Payload-Felder (wenn Sensor nicht vorhanden)
+constexpr uint16_t NET_SEN_HUM_UNGUELTIG = 0xFFFFU;
+constexpr uint16_t NET_SEN_LUX_UNGUELTIG = 0xFFFFU;
 constexpr uint32_t NET_SEN_PRESSURE_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint32_t NET_SEN_GAS_OHM_UNGUELTIG = 0xFFFFFFFFUL;
 constexpr uint16_t NET_SEN_AIR_METRIC_UNGUELTIG = 0xFFFFU;
@@ -188,6 +191,8 @@ constexpr int STATUS_CODE_INVALID_PAYLOAD = -21;    // MQTT-Payload ungueltig
 constexpr char REGISTRY_PREF_NAMESPACE[] = "master_reg";
 constexpr char REGISTRY_PREF_KEY[] = "nodes_v1";
 constexpr uint32_t REGISTRY_PERSIST_MAGIC = 0x53485231UL; // "SHR1"
+// Bei Aenderungen an PersistedNodeSlot oder MAX_DYNAMIC_NODES erhoehen.
+// Alte NVS-Blobs werden dann verworfen und die Registry wird aus HELLO neu aufgebaut.
 constexpr uint16_t REGISTRY_PERSIST_VERSION = 1U;
 
 // =============================================================================
@@ -418,15 +423,6 @@ void macText(const uint8_t* mac, char* buffer, size_t bufferSize) {
     copyText(buffer, bufferSize, local);
 }
 
-// Aufgabe: Wandelt eine MAC in einen lesbaren String (AA:BB:CC:DD:EE:FF).
-// Nutzt einen thread-lokalen Puffer – Aufrufer muss das Ergebnis sofort
-// kopieren, falls es ueber mehrere Aufrufe hinweg benoetigt wird.
-static const char* macToText(const uint8_t* mac) {
-    static char buf[18];
-    macText(mac, buf, sizeof(buf));
-    return buf;
-}
-
 // Aufgabe: Beschreibt, ob der MQTT-Broker als IP-Adresse oder Hostname genutzt wird.
 // Eingabewerte: keine.
 // Ausgabewert: "ip" oder "host" fuer Logs und Statusausgaben.
@@ -458,6 +454,9 @@ const char* powerTypeText(uint8_t powerType) {
     return powerType == SH_POWER_BATTERY ? "battery" : "mains";
 }
 
+// Aufgabe: Liefert den lesbaren Versorgungstyp einer Node.
+// Eingabewert: nodeIndex ist der Index in nodeStates[].
+// Ausgabewert: "battery", "mains" oder "unknown" bei fehlender Meta.
 const char* nodePowerTypeText(size_t nodeIndex) {
     if (!nodeStates[nodeIndex].meta_bekannt) return "unknown";
     return powerTypeText(nodeStates[nodeIndex].power_type);
@@ -571,8 +570,8 @@ void initialisiereNodeSlot(NodeRuntime& node) {
     node.cover_state = SH_COVER_STATE_STOPPED;
     node.cover_position = COVER_POSITION_UNBEKANNT;
     node.temp_01c = INT16_MIN;
-    node.hum_01pct = 0xFFFFU;
-    node.lux = 0xFFFFU;
+    node.hum_01pct = NET_SEN_HUM_UNGUELTIG;
+    node.lux = NET_SEN_LUX_UNGUELTIG;
     node.pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
     node.gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
     node.aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
@@ -837,8 +836,8 @@ void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
     if (!nodeHasCap(nodeIndex, SH_CAP_RELAY2)) nodeStates[nodeIndex].relay_2 = false;
     // INT16_MIN = Sentinel "kein gueltiger Messwert" (Temperatur in Zehntelgrad).
     if (!nodeHasCap(nodeIndex, SH_CAP_TEMP)) nodeStates[nodeIndex].temp_01c = INT16_MIN;
-    if (!nodeHasCap(nodeIndex, SH_CAP_HUM)) nodeStates[nodeIndex].hum_01pct = 0xFFFFU;
-    if (!nodeHasCap(nodeIndex, SH_CAP_LUX)) nodeStates[nodeIndex].lux = 0xFFFFU;
+    if (!nodeHasCap(nodeIndex, SH_CAP_HUM)) nodeStates[nodeIndex].hum_01pct = NET_SEN_HUM_UNGUELTIG;
+    if (!nodeHasCap(nodeIndex, SH_CAP_LUX)) nodeStates[nodeIndex].lux = NET_SEN_LUX_UNGUELTIG;
     if (!nodeHasCap(nodeIndex, SH_CAP_PRESSURE)) nodeStates[nodeIndex].pressure_pa = NET_SEN_PRESSURE_UNGUELTIG;
     if (!nodeHasCap(nodeIndex, SH_CAP_AQI)) {
         // AQI, TVOC und eCO2 werden gemeinsam als Luftqualitaetsblock behandelt.
@@ -904,11 +903,14 @@ bool stellePeerSicher(const uint8_t* mac) {
 
     esp_err_t err = esp_now_add_peer(&peerInfo);
     if (err != ESP_OK) {
-        logf("WARN", "Peer konnte nicht angelegt werden (err=%d)", (int)err);
+        char text[18] = {0};
+        macText(mac, text, sizeof(text));
+        logf("WARN", "Peer konnte nicht angelegt werden fuer %s (err=%d)", text, (int)err);
         return false;
     }
 
-    const char* text = macToText(mac);
+    char text[18] = {0};
+    macText(mac, text, sizeof(text));
     logf("INFO", "Peer aktiv: %s", text);
     return true;
 }
@@ -949,13 +951,15 @@ bool sendePaketMitOptionen(
         return false;
     }
     if (!stellePeerSicher(zielMac)) {
-        const char* txt = macToText(zielMac);
+        char txt[18] = {0};
+        macText(zielMac, txt, sizeof(txt));
         logf("WARN", "%s: Peer nicht sicher/angelegt fuer %s", label, txt);
         return false;
     }
 
     uint8_t buffer[SH_ESPNOW_MAX_BYTES] = {0};
     SmartHome::MsgHeader header = {};
+    // Bewusster uint8_t-Rollover: 0..255 ist fuer ESP-NOW-Sequenzen ausreichend.
     const uint8_t effektiveSeq = festeSeq ? seq : masterStatus.naechste_seq++;
     SmartHome::fillHeader(header, msgType, effektiveSeq, flags, (uint16_t)payloadLen);
 
@@ -976,7 +980,8 @@ bool sendePaketMitOptionen(
         return false;
     }
 
-    const char* text = macToText(zielMac);
+    char text[18] = {0};
+    macText(zielMac, text, sizeof(text));
     logf("INFO", "%s gesendet an %s", label, text);
     if (verwendeteSeq != nullptr) {
         // Aufrufer mit ACK-Erwartung brauchen exakt diese Sequenz, um das
@@ -1181,8 +1186,8 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             // Relais-Nodes koennen je nach Profil nur Relais oder zusaetzlich
             // Komfort-/Luftwerte melden. Unknown-Marker werden vorher zu null.
             schreibeIntOrNull(tempText, sizeof(tempText), nodeStates[nodeIndex].temp_01c, INT16_MIN);
-            schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, 0xFFFFU);
-            schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, 0xFFFFU);
+            schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, NET_SEN_HUM_UNGUELTIG);
+            schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, NET_SEN_LUX_UNGUELTIG);
             schreibeUIntOrNull(pressureText, sizeof(pressureText), nodeStates[nodeIndex].pressure_pa, NET_SEN_PRESSURE_UNGUELTIG);
             schreibeUIntOrNull(gasText, sizeof(gasText), nodeStates[nodeIndex].gas_ohm, NET_SEN_GAS_OHM_UNGUELTIG);
             schreibeUIntOrNull(aqiText, sizeof(aqiText), nodeStates[nodeIndex].aqi, NET_SEN_AIR_METRIC_UNGUELTIG);
@@ -1235,8 +1240,8 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             // NET-SEN hat keinen Relaisanteil. Das JSON konzentriert sich auf
             // Sensorwerte und Fehlerstatus.
             schreibeIntOrNull(tempText, sizeof(tempText), nodeStates[nodeIndex].temp_01c, INT16_MIN);
-            schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, 0xFFFFU);
-            schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, 0xFFFFU);
+            schreibeUIntOrNull(humText, sizeof(humText), nodeStates[nodeIndex].hum_01pct, NET_SEN_HUM_UNGUELTIG);
+            schreibeUIntOrNull(luxText, sizeof(luxText), nodeStates[nodeIndex].lux, NET_SEN_LUX_UNGUELTIG);
             schreibeUIntOrNull(pressureText, sizeof(pressureText), nodeStates[nodeIndex].pressure_pa, NET_SEN_PRESSURE_UNGUELTIG);
             schreibeUIntOrNull(gasText, sizeof(gasText), nodeStates[nodeIndex].gas_ohm, NET_SEN_GAS_OHM_UNGUELTIG);
             schreibeUIntOrNull(aqiText, sizeof(aqiText), nodeStates[nodeIndex].aqi, NET_SEN_AIR_METRIC_UNGUELTIG);
@@ -1453,6 +1458,15 @@ void publishNodeAck(size_t nodeIndex, const char* requestId, const char* channel
     publishNodeAckById(nodeStates[nodeIndex].device_id, requestId, channel, statusText, statusCode, ackMsgType, ackSeq, source);
 }
 
+// Aufgabe: Wandelt den ACK-Status in den MQTT-Statustext.
+// Eingabewert: status ist ein SH_ACK_*-Wert aus der Node-Antwort.
+// Ausgabewert: "ok", "rejected" oder "error".
+const char* ackStatusText(uint8_t status) {
+    if (status == SH_ACK_OK) return "ok";
+    if (status == SH_ACK_REJECTED) return "rejected";
+    return "error";
+}
+
 // Aufgabe: Verkuendet nach MQTT-Reconnect alle bekannten Node-Daten erneut.
 // Eingabewerte: keine.
 // Ausgabewert: keiner; Meta, Availability und bekannte States werden erneut publiziert.
@@ -1492,7 +1506,8 @@ void aktualisiereNodeKontakt(size_t nodeIndex, const uint8_t* mac) {
         nodeStates[nodeIndex].mac_bekannt = true;
         stellePeerSicher(nodeStates[nodeIndex].mac);
         if (neueMac) {
-            const char* text = macToText(mac);
+            char text[18] = {0};
+            macText(mac, text, sizeof(text));
             logf("INFO", "%s MAC aktualisiert: %s", nodeStates[nodeIndex].device_id, text);
         }
     }
@@ -1608,7 +1623,8 @@ int registriereProvisorischMitId(const uint8_t* senderMac, const char* deviceId)
         return -1;
     }
 
-    const char* macTxt = macToText(senderMac);
+    char macTxt[18] = {0};
+    macText(senderMac, macTxt, sizeof(macTxt));
     logf("INFO", "Provisorische Registration: device_id=%s mac=%s, warte auf HELLO", deviceId ? deviceId : "?", macTxt);
 
     const int idIndex = findeNodeIndex(deviceId);
@@ -1696,7 +1712,8 @@ bool fordereHelloBeiBedarf(size_t nodeIndex, const uint8_t* senderMac, const cha
         return false;
     }
 
-    const char* macTxt = macToText(senderMac);
+    char macTxt[18] = {0};
+    macText(senderMac, macTxt, sizeof(macTxt));
     logf("INFO", "%s: Meta fuer %s fehlt, sende HELLO_REQUEST an %s",
          grund ? grund : "HELLO_SYNC",
          nodeStates[nodeIndex].device_id,
@@ -1736,6 +1753,38 @@ void verarbeiteHeartbeat(const uint8_t* senderMac, const SmartHome::HeartbeatPay
 // Jeder Parser interpretiert die Payload-Bytes gemaess der Payload-Laenge.
 // Rueckgabe: true = erfolgreich geparst, false = ungueltige Laenge.
 
+template <typename StatePayload>
+static void kopiereRelayComfortBasisFelder(size_t nodeIndex, const StatePayload& state) {
+    nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+    nodeStates[nodeIndex].temp_01c = state.temp_01c;
+    nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
+    nodeStates[nodeIndex].lux = state.lux;
+    nodeStates[nodeIndex].motion = (state.motion != 0U);
+    nodeStates[nodeIndex].fault = (state.fault != 0U);
+    nodeStates[nodeIndex].auto_flags = state.auto_flags;
+}
+
+template <typename StatePayload>
+static void kopiereRelayComfortExtendedFelder(size_t nodeIndex, const StatePayload& state, uint32_t gasOhm) {
+    kopiereRelayComfortBasisFelder(nodeIndex, state);
+    nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
+    nodeStates[nodeIndex].gas_ohm = gasOhm;
+    nodeStates[nodeIndex].aqi = state.aqi;
+    nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
+    nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
+}
+
+template <typename StatePayload>
+static void kopiereZrlLiveFelder(size_t nodeIndex, const StatePayload& state) {
+    nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
+    nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
+    nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
+    nodeStates[nodeIndex].cover_state = state.cover_state;
+    nodeStates[nodeIndex].cover_position = state.cover_position;
+    nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
+    nodeStates[nodeIndex].fault = (state.fault != 0U);
+}
+
 static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t payloadLen) {
     // NET-ERL hat die meisten Varianten: vom einfachen Relais bis zum
     // LED-Ring-Modul mit erweiterten Luftqualitaetswerten. Die Reihenfolge
@@ -1759,15 +1808,9 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
     if (payloadLen == sizeof(SmartHome::RelayComfortStateReportPayload) ||
         payloadLen == sizeof(SmartHome::RelayComfortConfigStateReportPayload)) {
         const SmartHome::RelayComfortStateReportPayload& state = *reinterpret_cast<const SmartHome::RelayComfortStateReportPayload*>(payload);
-        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-        nodeStates[nodeIndex].temp_01c = state.temp_01c;
-        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-        nodeStates[nodeIndex].lux = state.lux;
+        kopiereRelayComfortBasisFelder(nodeIndex, state);
         // Sensor-Erweiterungsfelder sind in diesem Payload-Typ nicht belegt.
         setzeNetSenZusatzwerteUnbekannt(nodeIndex);
-        nodeStates[nodeIndex].motion = (state.motion != 0U);
-        nodeStates[nodeIndex].fault = (state.fault != 0U);
-        nodeStates[nodeIndex].auto_flags = state.auto_flags;
         return true;
     }
     // ExtendedRelayComfortConfigStateReportPayload und
@@ -1780,18 +1823,7 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
     if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortStateReportPayload)) {
         const SmartHome::ExtendedRelayComfortStateReportPayload& state =
             *reinterpret_cast<const SmartHome::ExtendedRelayComfortStateReportPayload*>(payload);
-        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-        nodeStates[nodeIndex].temp_01c = state.temp_01c;
-        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-        nodeStates[nodeIndex].lux = state.lux;
-        nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-        nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
-        nodeStates[nodeIndex].aqi = state.aqi;
-        nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-        nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-        nodeStates[nodeIndex].motion = (state.motion != 0U);
-        nodeStates[nodeIndex].fault = (state.fault != 0U);
-        nodeStates[nodeIndex].auto_flags = state.auto_flags;
+        kopiereRelayComfortExtendedFelder(nodeIndex, state, NET_SEN_GAS_OHM_UNGUELTIG);
         return true;
     }
     if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortConfigStateReportPayload)) {
@@ -1802,52 +1834,19 @@ static bool parseNetErlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
             // LED-Ring-Node: Config-State-Layout parsen.
             const SmartHome::ExtendedRelayComfortConfigStateReportPayload& state =
                 *reinterpret_cast<const SmartHome::ExtendedRelayComfortConfigStateReportPayload*>(payload);
-            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-            nodeStates[nodeIndex].temp_01c = state.temp_01c;
-            nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-            nodeStates[nodeIndex].lux = state.lux;
-            nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-            nodeStates[nodeIndex].gas_ohm = NET_SEN_GAS_OHM_UNGUELTIG;
-            nodeStates[nodeIndex].aqi = state.aqi;
-            nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-            nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-            nodeStates[nodeIndex].motion = (state.motion != 0U);
-            nodeStates[nodeIndex].fault = (state.fault != 0U);
-            nodeStates[nodeIndex].auto_flags = state.auto_flags;
+            kopiereRelayComfortExtendedFelder(nodeIndex, state, NET_SEN_GAS_OHM_UNGUELTIG);
         } else {
             // Standard-ERL ohne LED-Ring: Gas-State-Layout parsen.
             const SmartHome::ExtendedRelayComfortGasStateReportPayload& state =
                 *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasStateReportPayload*>(payload);
-            nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-            nodeStates[nodeIndex].temp_01c = state.temp_01c;
-            nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-            nodeStates[nodeIndex].lux = state.lux;
-            nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-            nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-            nodeStates[nodeIndex].aqi = state.aqi;
-            nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-            nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-            nodeStates[nodeIndex].motion = (state.motion != 0U);
-            nodeStates[nodeIndex].fault = (state.fault != 0U);
-            nodeStates[nodeIndex].auto_flags = state.auto_flags;
+            kopiereRelayComfortExtendedFelder(nodeIndex, state, state.gas_ohm);
         }
         return true;
     }
     if (payloadLen == sizeof(SmartHome::ExtendedRelayComfortGasConfigStateReportPayload)) {
         const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload& state =
             *reinterpret_cast<const SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
-        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-        nodeStates[nodeIndex].temp_01c = state.temp_01c;
-        nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
-        nodeStates[nodeIndex].lux = state.lux;
-        nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
-        nodeStates[nodeIndex].gas_ohm = state.gas_ohm;
-        nodeStates[nodeIndex].aqi = state.aqi;
-        nodeStates[nodeIndex].tvoc_ppb = state.tvoc_ppb;
-        nodeStates[nodeIndex].eco2_ppm = state.eco2_ppm;
-        nodeStates[nodeIndex].motion = (state.motion != 0U);
-        nodeStates[nodeIndex].fault = (state.fault != 0U);
-        nodeStates[nodeIndex].auto_flags = state.auto_flags;
+        kopiereRelayComfortExtendedFelder(nodeIndex, state, state.gas_ohm);
         return true;
     }
     logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
@@ -1859,26 +1858,14 @@ static bool parseNetZrlState(size_t nodeIndex, const uint8_t* payload, uint16_t 
     // zusaetzliche Konfigwerte, aber dieselben Live-Felder.
     if (payloadLen == sizeof(SmartHome::ZrlStateReportPayload)) {
         const SmartHome::ZrlStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlStateReportPayload*>(payload);
-        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-        nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
-        nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
-        nodeStates[nodeIndex].cover_state = state.cover_state;
-        nodeStates[nodeIndex].cover_position = state.cover_position;
-        nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
-        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        kopiereZrlLiveFelder(nodeIndex, state);
         return true;
     }
     if (payloadLen == sizeof(SmartHome::ZrlConfigStateReportPayload)) {
         // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
         // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
         const SmartHome::ZrlConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::ZrlConfigStateReportPayload*>(payload);
-        nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
-        nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
-        nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);
-        nodeStates[nodeIndex].cover_state = state.cover_state;
-        nodeStates[nodeIndex].cover_position = state.cover_position;
-        nodeStates[nodeIndex].cover_calibrated = (state.cover_calibrated != 0U);
-        nodeStates[nodeIndex].fault = (state.fault != 0U);
+        kopiereZrlLiveFelder(nodeIndex, state);
         return true;
     }
     logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
@@ -2097,8 +2084,7 @@ void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payloa
         payload.ack_seq == nodeStates[nodeIndex].pending_cfg.hdr.seq) {
         // CFG-ACK bestaetigt genau eine offene Konfigurationsnachricht. Danach
         // wird der Pending-Slot sofort geloescht, damit neue CFGs erlaubt sind.
-        const char* statusText = payload.status == SH_ACK_OK ? "ok" : (payload.status == SH_ACK_REJECTED ? "rejected" : "error");
-        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cfg.hdr.request_id, nodeStates[nodeIndex].pending_cfg.hdr.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
+        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cfg.hdr.request_id, nodeStates[nodeIndex].pending_cfg.hdr.command_channel, ackStatusText(payload.status), (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
         nodeStates[nodeIndex].pending_cfg = {};
         return;
     }
@@ -2108,8 +2094,7 @@ void verarbeiteAck(const uint8_t* senderMac, const SmartHome::AckPayload& payloa
         payload.ack_seq == nodeStates[nodeIndex].pending_cmd.hdr.seq) {
         // CMD-ACK laeuft getrennt von CFG-ACK. Entscheidend sind Nachrichtentyp
         // und Sequenz, nicht nur die Absender-MAC.
-        const char* statusText = payload.status == SH_ACK_OK ? "ok" : (payload.status == SH_ACK_REJECTED ? "rejected" : "error");
-        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cmd.hdr.request_id, nodeStates[nodeIndex].pending_cmd.hdr.command_channel, statusText, (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
+        publishNodeAck((size_t)nodeIndex, nodeStates[nodeIndex].pending_cmd.hdr.request_id, nodeStates[nodeIndex].pending_cmd.hdr.command_channel, ackStatusText(payload.status), (int)payload.status, payload.ack_msg_type, payload.ack_seq, "node_ack");
         nodeStates[nodeIndex].pending_cmd = {};
         return;
     }
@@ -2216,7 +2201,8 @@ void onEspNowReceive(const uint8_t* senderMac, const uint8_t* daten, int laenge)
 // Eingabewerte: mac ist das Ziel, status ist der ESP-NOW-Sendestatus.
 // Ausgabewert: keiner.
 void logEspNowSendStatus(const uint8_t* mac, esp_now_send_status_t status) {
-    const char* text = macToText(mac);
+    char text[18] = {0};
+    macText(mac, text, sizeof(text));
     logf(
         status == ESP_NOW_SEND_SUCCESS ? "INFO" : "WARN",
         "ESP-NOW Sendestatus an %s: %s",
@@ -2315,7 +2301,8 @@ bool sendeHelloRequestAnMac(const uint8_t* mac) {
         logf("WARN", "HELLO_REQUEST: ungueltige MAC, Abbruch");
         return false;
     }
-    const char* mactxt = macToText(mac);
+    char mactxt[18] = {0};
+    macText(mac, mactxt, sizeof(mactxt));
     SmartHome::CmdPayload payload = {};
     payload.cmd_type = SH_CMD_HELLO_REQUEST;
     const bool ok = sendePaket(mac, SH_MSG_CMD, &payload, sizeof(payload), "HELLO_REQUEST");

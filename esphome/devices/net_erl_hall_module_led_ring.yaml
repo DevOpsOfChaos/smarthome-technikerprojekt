@@ -63,6 +63,7 @@ esphome:
               id(pending_auto_on_decision) = true;
             }
           }
+      - script.execute: apply_setup_sensor_interval
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_net_erl_led_state
@@ -434,6 +435,14 @@ globals:
   # Ende ESPHome-Komfortfunktion.
 
 script:
+  - id: apply_setup_sensor_interval
+    then:
+      - lambda: |-
+          const uint32_t interval_ms = (uint32_t) id(setup_sensor_interval_number).state * 1000UL;
+          id(env_bme680_component).set_update_interval(interval_ms);
+          id(env_veml7700_sensor).set_update_interval(interval_ms);
+          id(env_ens160_component).set_update_interval(interval_ms);
+
   - id: publish_net_erl_led_state
     then:
       - mqtt.publish_json:
@@ -473,7 +482,7 @@ script:
             if (id(blocked_by_lux)) auto_flags_val |= 0x08;
             if (id(pending_auto_on_decision)) auto_flags_val |= 0x01;
             root["auto_flags"] = auto_flags_val;
-            root["report_interval_s"] = atoi("${setup_status_default}");
+            root["report_interval_s"] = (int) id(setup_status_interval_number).state;
             root["auto_on_lux_threshold"] = atoi("${auto_on_lux_threshold}");
             root["fault"] = id(hardware_fault) || id(contract_fault);
 
@@ -841,8 +850,9 @@ light:
 
 sensor:
   - platform: bme680
+    id: env_bme680_component
     address: ${bme680_address}
-    update_interval: 60s
+    update_interval: ${setup_sensor_default}s
     temperature:
       name: "${device_name} Temperature"
       internal: true
@@ -893,8 +903,9 @@ sensor:
           - script.execute: publish_net_erl_led_state
     iir_filter: 3x
   - platform: veml7700
+    id: env_veml7700_sensor
     address: ${veml7700_address}
-    update_interval: 60s
+    update_interval: ${setup_sensor_default}s
     gain: 1X
     integration_time: 400ms
     ambient_light:
@@ -909,8 +920,9 @@ sensor:
           - script.execute: evaluate_auto_on_from_lux
           - script.execute: publish_net_erl_led_state
   - platform: ens160_i2c
+    id: env_ens160_component
     address: ${ens160_address}
-    update_interval: 60s
+    update_interval: ${setup_sensor_default}s
     eco2:
       name: "${device_name} eCO2"
       internal: true
@@ -950,9 +962,9 @@ sensor:
                 id(env_aqi) = (raw_aqi >= 1 && raw_aqi <= 5) ? raw_aqi * 100 : raw_aqi; // ENS160: AQI-Rohwert 1-5 auf Projekt-Skala 100-500 mappen
                 if (id(env_aqi) <= 0 || id(env_aqi) > 500) id(env_aqi) = 65535;
                 id(env_has_air) = id(env_aqi) != 65535;
-            // Hinweis: env_has_air wird auch von eco2/tvoc-Handlern gesetzt.
-            // Bei ENS160-Teilausfall kann eco2 nach aqi feuern und env_has_air ueberschreiben.
-            // Vollstaendige Loesung braeuchte separate env_has_eco2/env_has_tvoc/env_has_aqi.
+                // Hinweis: env_has_air wird auch von eco2/tvoc-Handlern gesetzt.
+                // Bei ENS160-Teilausfall kann eco2 nach aqi feuern und env_has_air ueberschreiben.
+                // Vollstaendige Loesung braeuchte separate env_has_eco2/env_has_tvoc/env_has_aqi.
               } else {
                 id(env_aqi) = 65535;
               }
@@ -1023,9 +1035,21 @@ interval:
             id(publish_net_erl_led_state).execute();
           }
       - script.execute: refresh_led_ring_comfort_display
-  - interval: ${report_interval_s}s
+  - interval: 1s
     then:
-      - script.execute: publish_net_erl_led_state
+      - if:
+          condition:
+            lambda: |-
+              static uint32_t last_status_publish_ms = 0;
+              const uint32_t now = millis();
+              const uint32_t interval_ms = (uint32_t) id(setup_status_interval_number).state * 1000UL;
+              if (last_status_publish_ms == 0 || now - last_status_publish_ms >= interval_ms) {
+                last_status_publish_ms = now;
+                return true;
+              }
+              return false;
+          then:
+            - script.execute: publish_net_erl_led_state
   - interval: 5min
     then:
       - script.execute: publish_contract_meta

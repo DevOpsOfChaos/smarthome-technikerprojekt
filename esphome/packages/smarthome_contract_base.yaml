@@ -233,6 +233,9 @@ number:
     restore_value: true
     initial_value: ${setup_sensor_default}
     internal: true
+    on_value:
+      then:
+        - script.execute: apply_setup_sensor_interval
 
 button:
   - platform: template

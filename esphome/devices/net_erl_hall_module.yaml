@@ -47,6 +47,7 @@ esphome:
           id(contract_online) = true;
           id(relay_1_state) = id(relay_1_output).state;
           id(motion_state) = id(pir_sensor).state;
+      - script.execute: apply_setup_sensor_interval
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_net_erl_state
@@ -258,6 +259,13 @@ globals:
     # Aktuell: nur "Sensor nie erreicht" wird als Fault gemeldet.
 
 script:
+  - id: apply_setup_sensor_interval
+    then:
+      - lambda: |-
+          const uint32_t interval_ms = (uint32_t) id(setup_sensor_interval_number).state * 1000UL;
+          id(env_bme280_component).set_update_interval(interval_ms);
+          id(env_veml7700_sensor).set_update_interval(interval_ms);
+
   - id: publish_net_erl_state
     then:
       - mqtt.publish_json:
@@ -277,7 +285,7 @@ script:
             root["eco2_ppm"] = nullptr;
             root["motion"] = id(motion_state);
             root["auto_flags"] = 0; // Auto-Light-Flags: 0 = keine Automation (manuelles Relais)
-            root["report_interval_s"] = atoi("${setup_status_default}"); // Report-Intervall in Sekunden
+            root["report_interval_s"] = (int) id(setup_status_interval_number).state; // Report-Intervall in Sekunden
             // Lux-Schwelle nicht anwendbar (kein Auto-Light)
             root["auto_on_lux_threshold"] = nullptr;
             root["fault"] = id(hardware_fault) || id(contract_fault);
@@ -353,8 +361,9 @@ binary_sensor:
 
 sensor:
   - platform: bme280_i2c
+    id: env_bme280_component
     address: ${bme280_address}
-    update_interval: 60s  # Sensor alle 60 s pollen (BME280, VEML7700)
+    update_interval: ${setup_sensor_default}s  # Wird im Setup ueber sensor_interval angepasst.
     temperature:
       id: env_temperature_sensor
       name: "${device_name} Temperature"
@@ -382,7 +391,7 @@ sensor:
           - script.execute: publish_net_erl_state
   - platform: veml7700
     address: ${veml7700_address}
-    update_interval: 60s  # Sensor alle 60 s pollen (BME280, VEML7700)
+    update_interval: ${setup_sensor_default}s  # Wird im Setup ueber sensor_interval angepasst.
     id: env_veml7700_sensor
     ambient_light:
       name: "${device_name} Illuminance"
@@ -395,9 +404,21 @@ sensor:
           - script.execute: publish_net_erl_state
 
 interval:
-  - interval: ${setup_status_default}s
+  - interval: 1s
     then:
-      - script.execute: publish_net_erl_state
+      - if:
+          condition:
+            lambda: |-
+              static uint32_t last_status_publish_ms = 0;
+              const uint32_t now = millis();
+              const uint32_t interval_ms = (uint32_t) id(setup_status_interval_number).state * 1000UL;
+              if (last_status_publish_ms == 0 || now - last_status_publish_ms >= interval_ms) {
+                last_status_publish_ms = now;
+                return true;
+              }
+              return false;
+          then:
+            - script.execute: publish_net_erl_state
   - interval: 5min  # Periodischer Refresh alle 5 min (Meta, Availability, State)
     then:
       - script.execute: publish_contract_meta

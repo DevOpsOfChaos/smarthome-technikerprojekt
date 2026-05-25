@@ -174,8 +174,6 @@ mqtt:
 
 deep_sleep:
   id: deep_sleep_1
-  run_duration: ${rx_window_ms}ms
-  sleep_duration: 900s # 900 s = 15 min Deep-Sleep-Dauer
   wakeup_pin:
     number: ${contact_pin}
     allow_other_uses: true
@@ -204,6 +202,11 @@ globals:
     initial_value: "false"      # BAT-SEN: keine diagnostischen Sensoren, hardware_fault bleibt immer false.
 
 script:
+  - id: apply_setup_sensor_interval
+    then:
+      - lambda: |-
+          // BAT-SEN nutzt den Wert als Deep-Sleep run_duration.
+
   - id: publish_bat_window_state
     then:
       - mqtt.publish_json:
@@ -217,6 +220,20 @@ script:
             root["rain_raw"] = nullptr;
             root["button_flags"] = 0;
             root["fault"] = id(hardware_fault) || id(contract_fault);
+
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              const uint32_t rx_window_ms = (uint32_t) id(setup_sensor_interval_number).state;
+              return !id(setup_portal_active) && millis() >= rx_window_ms;
+          then:
+            - deep_sleep.enter:
+                id: deep_sleep_1
+                sleep_duration: !lambda |-
+                  return (uint32_t) id(setup_status_interval_number).state * 1000UL;
 
 binary_sensor:
   - platform: gpio

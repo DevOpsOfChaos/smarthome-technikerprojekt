@@ -95,6 +95,7 @@ esphome:
             id(cover_contract_travel_up_ms) = atoi("${default_cover_travel_ms}");
             id(cover_contract_travel_down_ms) = atoi("${default_cover_travel_ms}");
           }
+      - script.execute: apply_setup_sensor_interval
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_cover_contract_state
@@ -356,6 +357,13 @@ number:
     restore_value: true
     initial_value: ${default_cover_travel_ms}
     internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (!id(cover_contract_calibrated)) {
+              id(cover_contract_travel_up_ms) = (int)x;
+              id(cover_contract_travel_down_ms) = (int)x;
+            }
 
 select:
   - platform: template
@@ -462,6 +470,11 @@ cover:
 # SKRIPTE – Hardware-Zugriff (Wrapper für Cover-Aktionen)
 # =============================================================================
 script:
+  - id: apply_setup_sensor_interval
+    then:
+      - lambda: |-
+          // NET-ZRL hat keine periodisch zu pollenden Sensoren.
+
   # cover_hw_open – Startet Aufwaertsfahrt
   #   Parameter: keine  |  Rückgabe: keine
   - id: cover_hw_open
@@ -549,6 +562,21 @@ script:
 # INTERVAL – Regelmaessiger Refresh aller Status-Topics (alle 5 Minuten)
 # =============================================================================
 interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              static uint32_t last_status_publish_ms = 0;
+              const uint32_t now = millis();
+              const uint32_t interval_ms = (uint32_t) id(setup_status_interval_number).state * 1000UL;
+              if (last_status_publish_ms == 0 || now - last_status_publish_ms >= interval_ms) {
+                last_status_publish_ms = now;
+                return true;
+              }
+              return false;
+          then:
+            - script.execute: publish_cover_contract_state
   - interval: 5min # 5 min periodischer Refresh
     then:
       - script.execute: publish_contract_meta
