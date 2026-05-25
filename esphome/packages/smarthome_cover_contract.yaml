@@ -62,11 +62,11 @@ globals:
     restore_value: yes
     initial_value: "false"
   - id: cover_contract_travel_up_ms    # Gemessene Fahrzeit hoch in ms (0=nicht kalibriert)
-    type: int                          # Wird im RTC-Speicher gehalten
+    type: uint32_t                     # Wird im RTC-Speicher gehalten
     restore_value: yes
     initial_value: "0"
   - id: cover_contract_travel_down_ms  # Gemessene Fahrzeit runter in ms (0=nicht kalibriert)
-    type: int                          # Wird im RTC-Speicher gehalten
+    type: uint32_t                     # Wird im RTC-Speicher gehalten
     restore_value: yes
     initial_value: "0"
   - id: cover_calib_phase              # Aktuelle Phase der Kalibrierungs-State-Machine (0-5)
@@ -74,7 +74,7 @@ globals:
     restore_value: no
     initial_value: "0"
   - id: cover_calib_start_ms           # Zeitstempel (millis()) beim Start einer Fahrphase
-    type: int
+    type: uint32_t
     restore_value: no
     initial_value: "0"
   - id: cover_calib_up_measured        # true wenn Hochfahrt gemessen wurde (Phase 1→2)
@@ -82,11 +82,11 @@ globals:
     restore_value: no
     initial_value: "false"
   - id: cover_calib_temp_up_ms         # Gemessene Zeit der Hochfahrt (Zwischenspeicher vor dem Speichern)
-    type: int
+    type: uint32_t
     restore_value: no
     initial_value: "0"
   - id: cover_calib_temp_down_ms       # Gemessene Zeit der Runterfahrt (Zwischenspeicher vor dem Speichern)
-    type: int
+    type: uint32_t
     restore_value: no
     initial_value: "0"
   - id: hardware_fault
@@ -185,24 +185,24 @@ script:
     then:
       - lambda: |-
           if (id(cover_calib_phase) == 3) {
-            unsigned long elapsed = millis() - (unsigned long)id(cover_calib_start_ms);
-            if (elapsed >= 2000 && elapsed <= 180000) {
-              id(cover_calib_temp_down_ms) = (int)elapsed;
+            uint32_t elapsed = millis() - id(cover_calib_start_ms);
+            if (elapsed >= 2000UL && elapsed <= 180000UL) {
+              id(cover_calib_temp_down_ms) = elapsed;
               id(cover_calib_phase) = 4;
-              ESP_LOGI("calib", "Down travel measured: %d ms. Start up measurement.", (int)elapsed);
+              ESP_LOGI("calib", "Down travel measured: %u ms. Start up measurement.", elapsed);
             } else {
-              ESP_LOGW("calib", "Invalid down travel time: %d ms (need 2000-180000)", (int)elapsed);
+              ESP_LOGW("calib", "Invalid down travel time: %u ms (need 2000-180000)", elapsed);
               id(cover_calib_phase) = 0;
             }
           } else if (id(cover_calib_phase) == 5) {
-            unsigned long elapsed = millis() - (unsigned long)id(cover_calib_start_ms);
-            if (elapsed >= 2000 && elapsed <= 180000) {
-              id(cover_calib_temp_up_ms) = (int)elapsed;
+            uint32_t elapsed = millis() - id(cover_calib_start_ms);
+            if (elapsed >= 2000UL && elapsed <= 180000UL) {
+              id(cover_calib_temp_up_ms) = elapsed;
               id(cover_calib_up_measured) = true;
-              ESP_LOGI("calib", "Up travel measured: %d ms. Saving calibration.", (int)elapsed);
+              ESP_LOGI("calib", "Up travel measured: %u ms. Saving calibration.", elapsed);
               id(finish_cover_calibration).execute();
             } else {
-              ESP_LOGW("calib", "Invalid up travel time: %d ms (need 2000-180000)", (int)elapsed);
+              ESP_LOGW("calib", "Invalid up travel time: %u ms (need 2000-180000)", elapsed);
               id(cover_calib_phase) = 0;
             }
           }
@@ -221,7 +221,7 @@ script:
             id(cover_contract_calibrated) = true;
             id(cover_contract_position) = 100;
             id(cover_calib_phase) = 0;
-            ESP_LOGI("calib", "Calibration saved: up=%d ms, down=%d ms",
+            ESP_LOGI("calib", "Calibration saved: up=%u ms, down=%u ms",
               id(cover_contract_travel_up_ms),
               id(cover_contract_travel_down_ms));
             id(publish_cover_contract_state).execute();
@@ -314,7 +314,7 @@ mqtt:
                 }
               }
 
-              if (invalid || !changed) {
+              if (invalid) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -21;
                 id(contract_last_status_text) = "invalid_payload";

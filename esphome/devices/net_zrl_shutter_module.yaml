@@ -146,6 +146,10 @@ mqtt:
     then:
       - lambda: |-
           id(contract_online) = true;
+          if (id(setup_portal_active)) {
+            SmartHomeSetupPortal::stop();
+            id(setup_portal_active) = false;
+          }
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_cover_contract_state
@@ -606,7 +610,7 @@ script:
     then:
       - lambda: |-
           if (id(cover_runtime_direction) != 0 && id(cover_contract_calibrated)) {
-            const int travel_ms = id(cover_runtime_direction) > 0 ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
+            const uint32_t travel_ms = id(cover_runtime_direction) > 0 ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
             if (travel_ms >= 1000) {
               const uint32_t elapsed = millis() - id(cover_movement_started_ms);
               int delta = (int)((elapsed * 100UL) / (uint32_t) travel_ms);
@@ -662,8 +666,8 @@ script:
           // Berechnet absolute Abweichung zwischen Ziel- und aktueller Position
           int delta_abs = target > current ? target - current : current - target;
           // Waehlt Fahrzeit je nach Richtung (aufwaerts/abwaerts)
-          int travel_ms = target > current ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
-          int partial_ms = (travel_ms * delta_abs) / 100;
+          uint32_t travel_ms = target > current ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
+          int partial_ms = (int)((travel_ms * (uint32_t)delta_abs) / 100UL);
           if (partial_ms < 1) partial_ms = 1;
           id(cover_contract_target_position) = target;
           const int direction = target > current ? 1 : -1;
@@ -679,7 +683,7 @@ interval:
           if (id(cover_runtime_direction) == 0) return;
 
           if (id(cover_contract_calibrated)) {
-            const int travel_ms = id(cover_runtime_direction) > 0 ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
+            const uint32_t travel_ms = id(cover_runtime_direction) > 0 ? id(cover_contract_travel_up_ms) : id(cover_contract_travel_down_ms);
             if (travel_ms >= 1000) {
               const uint32_t elapsed = millis() - id(cover_movement_started_ms);
               int delta = (int)((elapsed * 100UL) / (uint32_t) travel_ms);

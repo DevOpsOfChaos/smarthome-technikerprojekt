@@ -107,6 +107,10 @@ mqtt:
     then:
       - lambda: |-
           id(contract_online) = true;
+          if (id(setup_portal_active)) {
+            SmartHomeSetupPortal::stop();
+            id(setup_portal_active) = false;
+          }
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_net_erl_led_state
@@ -252,7 +256,7 @@ mqtt:
                 }
               }
 
-              if (invalid || !changed) {
+              if (invalid) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -21;
                 id(contract_last_status_text) = "invalid_payload";
@@ -362,7 +366,15 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
-  - id: env_has_air
+  - id: env_has_aqi
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_eco2
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: env_has_tvoc
     type: bool
     restore_value: no
     initial_value: "false"
@@ -370,7 +382,7 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
-    # Design-Limit: env_has_*-Flags sind Einweg-Latches (werden nur auf true gesetzt).
+    # Design-Limit: Basis-Sensorflags sind Einweg-Latches (werden nur auf true gesetzt).
     # Ein Sensorausfall NACH erfolgreichem Erstkontakt wird NICHT erkannt.
     # ESPHome bietet kein on_failure fuer I2C-Sensoren in YAML.
     # Vollstaendige Erkennung braeuchte last_*_ms + Timeout (180s).
@@ -452,7 +464,8 @@ script:
           topic: smarthome/device/${device_id}/state
           retain: true
           payload: |-
-            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux) || (millis() >= 180000UL && !id(env_has_air));
+            const bool env_has_air_combined = id(env_has_aqi) && id(env_has_eco2) && id(env_has_tvoc);
+            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux) || (millis() >= 180000UL && !env_has_air_combined);
             root["device_id"] = "${device_id}";
             root["relay_1"] = id(relay_1_state);
             // Sentinel-Werte (-32768, 65535, 4294967295) als JSON-null ausgeben.
@@ -467,15 +480,12 @@ script:
             else root["pressure_pa"] = nullptr;
             if (id(env_has_gas))  root["gas_ohm"] = id(env_gas_ohm);
             else root["gas_ohm"] = nullptr;
-            if (id(env_has_air)) {
-              root["aqi"] = id(env_aqi);
-              root["tvoc_ppb"] = id(env_tvoc_ppb);
-              root["eco2_ppm"] = id(env_eco2_ppm);
-            } else {
-              root["aqi"] = nullptr;
-              root["tvoc_ppb"] = nullptr;
-              root["eco2_ppm"] = nullptr;
-            }
+            if (id(env_has_aqi)) root["aqi"] = id(env_aqi);
+            else root["aqi"] = nullptr;
+            if (id(env_has_tvoc)) root["tvoc_ppb"] = id(env_tvoc_ppb);
+            else root["tvoc_ppb"] = nullptr;
+            if (id(env_has_eco2)) root["eco2_ppm"] = id(env_eco2_ppm);
+            else root["eco2_ppm"] = nullptr;
             root["motion"] = id(motion_state);
             int auto_flags_val = 0;
             auto_flags_val |= 0x20;
@@ -895,7 +905,7 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (id(bme680_gas_read_count) < 255) id(bme680_gas_read_count)++; // max. 255 Zaehler (uint8_t-Limit)
+              if (id(bme680_gas_read_count) < 255) id(bme680_gas_read_count)++; // Zaehler 0-255, manuell geklemmt
               if (millis() >= 180000UL && id(bme680_gas_read_count) >= 5 && x > 0) { // 180000 ms = 3 min BME680-Gaswarmup; mind. 5 gueltige Messungen vor Gas-Report
                 id(env_gas_ohm) = (uint32_t) lroundf(x);
                 id(env_has_gas) = true;
@@ -934,9 +944,10 @@ sensor:
           - lambda: |-
               if (millis() >= 180000UL && x > 0) { // 180000 ms = 3 min ENS160-Warmup
                 id(env_eco2_ppm) = (int) lroundf(x);
-                id(env_has_air) = true;
+                id(env_has_eco2) = true;
               } else {
                 id(env_eco2_ppm) = 65535; // 0xFFFF = Sentinel "kein gueltiger Wert"
+                id(env_has_eco2) = false;
               }
           - script.execute: publish_net_erl_led_state
           - script.execute: refresh_led_ring_comfort_display
@@ -946,11 +957,12 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (millis() >= 180000UL && x >= 0) { // 180000 ms = 3 min ENS160-Warmup
+              if (millis() >= 180000UL && x > 0) { // 180000 ms = 3 min ENS160-Warmup
                 id(env_tvoc_ppb) = (int) lroundf(x);
-                id(env_has_air) = true;
+                id(env_has_tvoc) = true;
               } else {
                 id(env_tvoc_ppb) = 65535; // 0xFFFF = Sentinel "kein gueltiger Wert"
+                id(env_has_tvoc) = false;
               }
           - script.execute: publish_net_erl_led_state
           - script.execute: refresh_led_ring_comfort_display
@@ -964,12 +976,10 @@ sensor:
                 int raw_aqi = (int) lroundf(x);
                 id(env_aqi) = (raw_aqi >= 1 && raw_aqi <= 5) ? raw_aqi * 100 : raw_aqi; // ENS160: AQI-Rohwert 1-5 auf Projekt-Skala 100-500 mappen
                 if (id(env_aqi) <= 0 || id(env_aqi) > 500) id(env_aqi) = 65535;
-                id(env_has_air) = id(env_aqi) != 65535;
-                // Hinweis: env_has_air wird auch von eco2/tvoc-Handlern gesetzt.
-                // Bei ENS160-Teilausfall kann eco2 nach aqi feuern und env_has_air ueberschreiben.
-                // Vollstaendige Loesung braeuchte separate env_has_eco2/env_has_tvoc/env_has_aqi.
+                id(env_has_aqi) = id(env_aqi) != 65535;
               } else {
                 id(env_aqi) = 65535;
+                id(env_has_aqi) = false;
               }
           - script.execute: publish_net_erl_led_state
           - script.execute: refresh_led_ring_comfort_display

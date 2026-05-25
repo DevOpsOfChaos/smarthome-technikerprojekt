@@ -368,7 +368,9 @@ inline bool start(const char *ssid, const char *password) {
   return true;
 }
 
-inline void handle_client() {}
+inline void handle_client() {
+  // No-op: AsyncWebServer wird intern von ESP-IDF/Arduino-Tasks bedient.
+}
 
 inline void stop() {
   if (!active) return;

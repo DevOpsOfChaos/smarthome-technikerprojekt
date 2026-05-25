@@ -224,12 +224,6 @@ script:
             });
           id(setup_portal_active) = SmartHomeSetupPortal::start("${node_name}-setup", "${setup_ap_password}");
 
-interval:
-  - interval: 100ms
-    then:
-      - lambda: |-
-          SmartHomeSetupPortal::handle_client();
-
 text:
   - platform: template
     id: setup_master_mac_text

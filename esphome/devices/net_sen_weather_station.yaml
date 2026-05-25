@@ -89,6 +89,10 @@ mqtt:
     then:
       - lambda: |-
           id(contract_online) = true;
+          if (id(setup_portal_active)) {
+            SmartHomeSetupPortal::stop();
+            id(setup_portal_active) = false;
+          }
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_net_sen_state
@@ -152,7 +156,7 @@ mqtt:
                 }
               }
 
-              if (invalid || !changed) {
+              if (invalid) {
                 id(contract_fault) = true;
                 id(contract_last_status_code) = -21;
                 id(contract_last_status_text) = "invalid_payload";

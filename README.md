@@ -1,134 +1,73 @@
 # smarthome-technikerprojekt
 
-Öffentliches Hauptrepo für ein modulares Smart-Home-Technikerprojekt mit klarer Trennung zwischen Geräteschicht, Master und Server.
+Smart-Home-Grundsystem – Technikerarbeit 2026
 
-## Projektidee
+## Projektübersicht
 
-Dieses Projekt baut kein beliebiges Smart-Home-Spielzeug und keine überladene Produktplattform, sondern eine **technisch saubere, nachvollziehbare und real testbare Systemlinie** für ein Technikerprojekt.
+Eigenständig entwickeltes, lokal betriebenes Smart-Home-Grundsystem mit selbst aufgebauten Mikrocontrollergeräten, ESP-NOW-Funkkommunikation und Node-RED-Dashboard.
 
-Im Mittelpunkt stehen:
-- **dezentrale ESP32-Geräte** für Sensorik und Aktorik
-- **ESP-NOW** als Funkweg zwischen Geräten und Master
-- **ein Master** als einzige Brücke zwischen Funknetz und Server
-- **MQTT** ausschließlich zwischen Master und Server
-- **Node-RED** als Server- und Visualisierungskern
-- **ESPHome als alternative MQTT-Linie** für Nutzer, die lieber mit Home Assistant/ESPHome arbeiten
-- eine Architektur, die **lehrerlesbar, modular und begründbar** bleibt
+- **Keine Cloud** – alles läuft lokal
+- **Keine Herstellerbindung** – ESP32-C3, eigene Platinen, eigene Firmware
+- **Vollständig nachvollziehbar** – von der Platine bis zur Bedienoberfläche
 
-## Systemarchitektur in Kurzform
+## Architektur
 
-Das System ist bewusst in drei Schichten getrennt:
+```
+Geräte (ESP32-C3) ──ESP-NOW──▶ Master ──MQTT──▶ Server (Raspberry Pi)
+                                                 ├── Mosquitto (Broker)
+                                                 ├── Node-RED (Logik + Dashboard)
+                                                 └── SQLite (Persistenz)
+```
 
-### 1. Geräteebene
-Dezentrale Module auf ESP32-Basis übernehmen konkrete Sensor- und Aktorfunktionen.
+## Gerätetypen
 
-Aktuelle Basistypen:
-- `master`
-- `net_erl`
-- `net_zrl`
-- `net_sen`
-- `bat_sen`
+| Typ | Instanzen | Funktion |
+|-----|-----------|----------|
+| **net_erl** | Hall-Light, Kitchen | Relais, Umweltsensorik, Bewegung |
+| **net_zrl** | Rollladen | 2-Relais-Steuerung, Kalibrierung |
+| **net_sen** | Außensensor | BME280, VEML7700, Regensensor |
+| **bat_sen** | Regen, Fenster | Batteriebetrieb, Deep-Sleep |
 
-Konkrete Geräte werden auf dieser Grundlage aufgebaut, statt für jeden Sonderfall eine neue Architektur einzuführen.
+## Repository-Struktur
 
-### 2. Master
-Der Master ist die **einzige technische Brücke** zwischen ESP-NOW und MQTT.
+| Verzeichnis | Inhalt |
+|-------------|--------|
+| `firmware/` | PlatformIO-Projekt (Basistypen + Geräteinstanzen) |
+| `hardware/` | KiCAD-Schaltpläne, Platinenlayouts, 3D-Modelle |
+| `server/` | Docker-Compose-Stack (Mosquitto, Node-RED, SQLite) |
+| `docs/` | Technische Dokumentation und Referenz |
+| `tests/` | Testskripte und Checklisten |
+| `PROTOKOLL/` | Entwicklungs- und Testprotokolle |
+| `esphome/` | ESPHome-Alternativlinie (nicht Teil der Technikerarbeit) |
 
-Er ist bewusst **kein halber Server** und **keine zweite Logikplattform**, sondern:
-- Funk-Gateway
-- MQTT-Brücke
-- einfache Projektion und Weiterleitung relevanter Zustände
-- technischer Knotenpunkt für Commands, ACKs und Statuspfade
+## Quick Start
 
-### 3. Server
-Der Server bildet die aktuelle öffentliche Serverlinie für:
-- MQTT-Ingest
-- Geräteobjekt und Zustandsmodell
-- SQLite-basierte Snapshot-Persistenz
-- Node-RED-basierte Bedien- und Diagnosepfade
-- Geräteanzeige, Gerätestatus und sichere Steuerung
+### Server starten
+```bash
+cd server
+docker compose up -d
+```
+Dashboard: http://localhost:1880/ui
 
-## Verbindliche technische Leitplanken
+### Firmware bauen
+```bash
+cd firmware
+pio run -e net_erl_hall_light -t upload
+```
 
-Die eigene Firmware-Linie folgt bewusst einigen harten Architekturregeln:
+## Technologien
 
-- **Nodes sprechen nicht direkt mit dem Server.**
-- **MQTT ist kein zweiter Gerätebus**, sondern nur die Verbindung zwischen Master und Server.
-- **Der Master bleibt die einzige Brücke.**
-- **Sondergeräte werden nicht durch neue Server-Spezialarchitekturen erschlagen**, sondern sauber über Basistypen, Geräteebene und Fähigkeiten eingeordnet.
-- **Kleine, begründete Änderungen** sind wichtiger als breite Umbauten.
-- Öffentliche Doku und Code sollen **technisch sauber, nachvollziehbar und präsentierbar** bleiben.
+- **MCU:** ESP32-C3 (RISC-V)
+- **Kommunikation:** ESP-NOW (lokal), MQTT (Server)
+- **Server:** Node-RED, Mosquitto, SQLite, Docker
+- **Firmware:** PlatformIO, Arduino-Framework
+- **Hardware:** KiCAD, Eigenentwurf
 
-Daneben enthält `esphome/` eine bewusst getrennte Alternative. Diese Geräte sprechen direkt MQTT mit dem Serververtrag. Das ist kein Ersatz für die Architektur-Hauptlinie, sondern ein praktischer Weg für Anwender, die ESPHome bevorzugen.
+## Lizenz
 
-## Aktueller öffentlicher Stand
+All rights reserved. Dieses Repository ist Teil einer schulischen Prüfungsleistung.  
+Nach Abschluss der Prüfung behält sich der Autor einen Wechsel auf eine freizügigere Lizenz vor.
 
-Der aktuelle öffentliche Repo-Stand ist **kein fertiges Endprodukt**, sondern eine bewusst kontrollierte offizielle Linie.
+## Autor
 
-Bereits sichtbar und nachweisbar sind unter anderem:
-- öffentliche Projektdokumentation und Architekturgrundlinie
-- Serverbasis mit MQTT-Ingest für Geräte und Master
-- gemeinsames Geräteobjekt und separater Masterpfad
-- minimales SQLite-Schema für aktuelle Zustände und Persistenz
-- Dashboard als belastbare öffentliche Serverlinie
-- realer Gerätepfad `net_erl_hall_module` mit überprüftem Normalbetrieb
-- vorbereiteter Gerätepfad `net_erl_hall_module_led_ring`
-- real nachgewiesener Setup-Pfad für Hall-Modul
-- realer Gerätepfad `net_zrl_shutter_module` als Rolladenpfad
-- realer Gerätepfad `net_sen_weather_station` mit BME280, VEML7700 und digitalem Regenpfad
-- real nachgewiesener Setup-Pfad für `net_sen`
-- vorbereitete ESPHome-YAMLs für Hall-Modul, LED-Ring-Modul, Wetterstation, Rollladenmodul, Fensterkontakt und Regensensor
-- reale Entwicklungs- und Verifikationsnachweise unter `PROTOKOLL/`
-
-Wichtig:
-Das Repo zeigt damit bereits einen **real belastbaren technischen Kern** aus Server, Master und konkreten Gerätepfaden, ohne künstlich zu behaupten, dass das Gesamtsystem schon vollständig fertig wäre.
-
-## Einstieg für Leser
-
-Wer das Projekt strukturiert verstehen will, startet hier:
-
-1. [Öffentliche Dokumentation](docs/public/README.md)
-2. [Projektüberblick](docs/public/01_projektueberblick.md)
-3. [Architektur und Kommunikation](docs/public/02_architektur_und_kommunikation.md)
-4. [Aktueller Status und nächste Schritte](docs/public/03_aktueller_status_und_naechste_schritte.md)
-5. [Eigene Firmware oder ESPHome?](docs/public/18_firmware_oder_esphome.md)
-6. [Server-Schnellstart](docs/public/04_server_schnellstart_phase1.md)
-
-Für den aktuellen Serverkern zusätzlich sinnvoll:
-- [Server Überblick](docs/public/server/01_server_v1_ueberblick.md)
-- [Geräteobjekt und MQTT-Ingest](docs/public/server/02_phase1_mqtt_ingest_geraeteobjekt.md)
-
-## Repo-Struktur
-
-- `docs/public/` – öffentliche technische Dokumentation und Einstiegspunkte
-- `firmware/` – Firmware für Basistypen und konkrete Geräte
-- `esphome/` – ESPHome-Alternative mit direktem MQTT-Vertrag zum Server
-- `server/` – Node-RED-, MQTT- und Datenhaltungsstruktur
-- `hardware/` – Hardware-Unterlagen, Schaltpläne und Layoutdaten
-- `tests/` – Tests, Checklisten und technische Nachweise
-- `PROTOKOLL/` – offizielle Projektprotokolle und Entwicklungsnachweise
-- `docs/` – zusätzlicher Pages-/Doku-Einstieg für den öffentlichen Lesepfad
-
-## Dokumentation und Nachweise
-
-Ein zentrales Ziel dieses Projekts ist nicht nur Code, sondern **sauber belegbare technische Entwicklung**.
-
-Darum spielen diese Bereiche eine wichtige Rolle:
-- `docs/public/` für die offizielle technische Projektlinie
-- `tests/` für strukturierte Testpfade
-- `PROTOKOLL/` für reale Entwicklungs-, Diagnose- und Verifikationsnachweise
-
-Damit bleibt der Fortschritt nicht nur behauptet, sondern im Repo nachvollziehbar.
-
-## Öffentliche Projektseite
-
-Für das Repo ist ein GitHub-Pages-Einstieg über `docs/` vorbereitet:
-- [Projekt-Landingpage](docs/index.md)
-
-## Repository
-
-- GitHub-Repo: `DevOpsOfChaos/smarthome-technikerprojekt`
-
-## Grundhaltung dieses Projekts
-
-Dieses Projekt soll zeigen, dass ein Smart-Home-System auch im Rahmen einer Technikerarbeit **klar, modular, testbar und dokumentierbar** aufgebaut werden kann – ohne unnötige Komplexität, ohne Architektur-Show und ohne unsaubere Mischzustände.
+Manuel Ries – Heinrich-Hertz-Schule Hamburg – Technikerarbeit 2026
