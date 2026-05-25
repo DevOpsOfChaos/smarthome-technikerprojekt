@@ -13,7 +13,7 @@ Das **NET-ERL-002** ist die erweiterte Variante des Flurmoduls. Zusätzlich zum 
 | **Leistungskreis** | [leistungskreis_1relais.md](leistungskreis_1relais.md) — 1× HF46F, HLK-5M05 |
 | **Steuerkreis** | [../shared/modularer_steuerkreis.md](../shared/modularer_steuerkreis.md) — ESP32-C3 |
 | **Relais** | 1× Hongfa HF46F/5-HS1 |
-| **LED-Ring** | 12× WS2812 NeoPixel (GPIO8) |
+| **LED-Ring** | 17× WS2812 NeoPixel (GPIO4) |
 | **Versorgung** | 230V AC → 5V DC (HLK-5M05) |
 
 ## Sensorik
@@ -33,7 +33,7 @@ Das **NET-ERL-002** ist die erweiterte Variante des Flurmoduls. Zusätzlich zum 
 | GPIO1 | I²C SCL | BME680 + VEML7700 + ENS160 |
 | GPIO6 | UART RX | LD2410 Radar |
 | GPIO7 | UART TX | LD2410 Radar |
-| GPIO8 | NeoPixel Data | WS2812 LED-Ring (12 LEDs) |
+| GPIO4 | NeoPixel Data | WS2812 LED-Ring (17 LEDs) |
 | GPIO9 | Taster | Bedientaster (mit Pullup) |
 | GPIO10 | Trigger_PIN1 | Relais (via PC817) |
 | GPIO20 | UART RX | Debug/Programmierung |
@@ -52,12 +52,12 @@ Das **NET-ERL-002** ist die erweiterte Variante des Flurmoduls. Zusätzlich zum 
 | `SH_CAP_GAS` | 0x4000 | VOC-Gas (BME680) |
 | `SH_CAP_PRESSURE` | 0x8000 | Luftdruck (BME680) |
 | `SH_CAP_BUTTON` | 0x0400 | Taster (GPIO9) |
-| `SH_CAP_LED_RING` | 0x1000 | NeoPixel-Ring (GPIO8) |
+| `SH_CAP_LED_RING` | 0x1000 | NeoPixel-Ring (GPIO4) |
 
 ## LED-Ring
 
-- 12× WS2812B NeoPixel, angesteuert über GPIO8
-- **Achtung:** GPIO8 wird auch von der onboard RGB-LED genutzt. Im Gerät wird der LED-Ring priorisiert.
+- 17× WS2812B NeoPixel, angesteuert über GPIO4
+- GPIO4 wird verwendet, damit GPIO8 als ESP32-C3-Strapping-Pin nicht durch den LED-Ring belastet wird.
 - Funktionen: Statusanzeige, Helligkeits-Feedback, Farbcodierung für AQI
 
 ## LD2410 Radar

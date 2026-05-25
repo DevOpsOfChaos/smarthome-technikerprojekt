@@ -13,5 +13,5 @@
 
 - [ ] I²C-Pullups (JP1/JP2) geschlossen für BME680 + VEML7700 + ENS160
 - [ ] LD2410 Radar an UART (GPIO6/7)
-- [ ] NeoPixel-Ring an GPIO8 (12× WS2812)
+- [ ] NeoPixel-Ring an GPIO4 (17× WS2812)
 - [ ] Taster an GPIO9

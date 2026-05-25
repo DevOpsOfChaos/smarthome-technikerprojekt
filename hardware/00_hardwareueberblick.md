@@ -44,7 +44,7 @@ Die beiden Platinen werden über ein 5-poliges JST-PH-Kabel verbunden (5V, GND, 
 | 1 | I²C SCL | I²C SCL | I²C SCL | I²C SCL | I²C-Takt |
 | 2 | V-Mess (Batterie) | frei | NC | NC | Batterie-ADC |
 | 3 | frei | frei | NC | NC | — |
-| 4 | frei | frei | NC | NC | — |
+| 4 | frei | frei | LED-Ring (NET-ERL-002) | NC | WS2812-Datenpin beim LED-Ring-Modul |
 | 5 | frei | frei | Trigger_PIN2 | Trigger_PIN2 (Runter) | Relais 2 |
 | 6 | frei | frei | frei | frei | — |
 | 7 | frei | frei | frei | frei | — |
