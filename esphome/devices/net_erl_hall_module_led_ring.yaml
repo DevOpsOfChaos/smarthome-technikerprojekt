@@ -61,6 +61,8 @@ esphome:
           id(contract_online) = true;
           id(relay_1_state) = id(relay_1_output).state;
           id(motion_state) = id(presence_input).state;
+          id(bme680_init_ms) = now;
+          id(ens160_init_ms) = now;
           if (id(motion_state)) {
             id(last_motion_ms) = now;
             if (!id(relay_1_state)) {
@@ -388,11 +390,44 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
-    # Design-Limit: Basis-Sensorflags sind Einweg-Latches (werden nur auf true gesetzt).
-    # Ein Sensorausfall NACH erfolgreichem Erstkontakt wird NICHT erkannt.
-    # ESPHome bietet kein on_failure fuer I2C-Sensoren in YAML.
-    # Vollstaendige Erkennung braeuchte last_*_ms + Timeout (180s).
-    # Aktuell: nur "Sensor nie erreicht" wird als Fault gemeldet.
+  # I2C-Robustheit: Letzte erfolgreiche Update-Zeitstempel (0 = noch nie gelesen).
+  # Werden in jedem on_value-Handler gesetzt. Ein 30s-Monitor-Intervall
+  # prueft auf Stale-Sensoren und setzt env_has_*-Flags zurueck.
+  - id: last_bme_update_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: last_veml_update_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: last_ens_update_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  # I2C-Robustheit: Kumulierte Fehlerzaehler (zaehlt Stale-Epochen, max 255).
+  - id: bme_fail_count
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: veml_fail_count
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: ens_fail_count
+    type: int
+    restore_value: no
+    initial_value: "0"
+  # I2C-Robustheit: Init-Zeitstempel (relativer Warmup statt absolute millis()).
+  # Ermoeglicht korrekten Warmup-Neustart nach Sensor-Recovery.
+  - id: bme680_init_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: ens160_init_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
   - id: env_temp_01c
     type: int
     restore_value: no
@@ -470,8 +505,7 @@ script:
           topic: smarthome/device/${device_id}/state
           retain: true
           payload: |-
-            const bool env_has_air_combined = id(env_has_aqi) && id(env_has_eco2) && id(env_has_tvoc);
-            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux) || (millis() >= 1200000UL && !env_has_air_combined);
+            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);
             root["device_id"] = "${device_id}";
             root["relay_1"] = id(relay_1_state);
             // Sentinel-Werte (-32768, 65535, 4294967295) als JSON-null ausgeben.
@@ -881,6 +915,8 @@ sensor:
           - lambda: |-
               id(env_temp_01c) = (int) lroundf(x * 10.0f) + atoi("${temp_offset_01c}");
               id(env_has_temp) = true;
+              id(last_bme_update_ms) = millis();
+              id(bme_fail_count) = 0;
           - script.execute: publish_net_erl_led_state
     humidity:
       name: "${device_name} Humidity"
@@ -894,6 +930,8 @@ sensor:
               if (hum_01pct > 1000) hum_01pct = 1000;
               id(env_hum_01pct) = hum_01pct;
               id(env_has_hum) = true;
+              id(last_bme_update_ms) = millis();
+              id(bme_fail_count) = 0;
           - script.execute: publish_net_erl_led_state
     pressure:
       name: "${device_name} Pressure"
@@ -904,6 +942,8 @@ sensor:
           - lambda: |-
               id(env_pressure_pa) = (uint32_t) lroundf(x * 100.0f);
               id(env_has_pressure) = true;
+              id(last_bme_update_ms) = millis();
+              id(bme_fail_count) = 0;
           - script.execute: publish_net_erl_led_state
     gas_resistance:
       name: "${device_name} Gas Resistance"
@@ -912,9 +952,11 @@ sensor:
         then:
           - lambda: |-
               if (id(bme680_gas_read_count) < 255) id(bme680_gas_read_count)++; // Zaehler 0-255, manuell geklemmt
-              if (millis() >= 180000UL && id(bme680_gas_read_count) >= 5 && x > 0) { // 180000 ms = 3 min BME680-Gaswarmup; mind. 5 gueltige Messungen vor Gas-Report
+              if (id(bme680_init_ms) > 0 && millis() - id(bme680_init_ms) >= 180000UL && id(bme680_gas_read_count) >= 5 && x > 0) { // 180000 ms = 3 min BME680-Gaswarmup; mind. 5 gueltige Messungen vor Gas-Report
                 id(env_gas_ohm) = (uint32_t) lroundf(x);
                 id(env_has_gas) = true;
+                id(last_bme_update_ms) = millis();
+                id(bme_fail_count) = 0;
               } else {
                 id(env_gas_ohm) = 4294967295UL; // 0xFFFFFFFF = Sentinel "kein gueltiger Wert"
                 id(env_has_gas) = false;
@@ -936,6 +978,8 @@ sensor:
               id(env_lux) = (int) lroundf(x);
               if (id(env_lux) < 0) id(env_lux) = 65535;
               id(env_has_lux) = id(env_lux) != 65535;
+              id(last_veml_update_ms) = millis();
+              id(veml_fail_count) = 0;
           - script.execute: evaluate_auto_on_from_lux
           - script.execute: publish_net_erl_led_state
   - platform: ens160_i2c
@@ -948,9 +992,11 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (millis() >= 1200000UL && x > 0) { // 1200000 ms = 20 min ENS160-Warmup
+              if (id(ens160_init_ms) > 0 && millis() - id(ens160_init_ms) >= 1200000UL && x > 0) { // 1200000 ms = 20 min ENS160-Warmup
                 id(env_eco2_ppm) = (int) lroundf(x);
                 id(env_has_eco2) = true;
+                id(last_ens_update_ms) = millis();
+                id(ens_fail_count) = 0;
               } else {
                 id(env_eco2_ppm) = 65535; // 0xFFFF = Sentinel "kein gueltiger Wert"
                 id(env_has_eco2) = false;
@@ -963,9 +1009,11 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (millis() >= 1200000UL && x > 0) { // 1200000 ms = 20 min ENS160-Warmup
+              if (id(ens160_init_ms) > 0 && millis() - id(ens160_init_ms) >= 1200000UL && x > 0) { // 1200000 ms = 20 min ENS160-Warmup
                 id(env_tvoc_ppb) = (int) lroundf(x);
                 id(env_has_tvoc) = true;
+                id(last_ens_update_ms) = millis();
+                id(ens_fail_count) = 0;
               } else {
                 id(env_tvoc_ppb) = 65535; // 0xFFFF = Sentinel "kein gueltiger Wert"
                 id(env_has_tvoc) = false;
@@ -978,11 +1026,13 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (millis() >= 1200000UL) { // 1200000 ms = 20 min ENS160-Warmup
+              if (id(ens160_init_ms) > 0 && millis() - id(ens160_init_ms) >= 1200000UL) { // 1200000 ms = 20 min ENS160-Warmup
                 int raw_aqi = (int) lroundf(x);
                 id(env_aqi) = (raw_aqi >= 1 && raw_aqi <= 5) ? raw_aqi * 100 : raw_aqi; // ENS160: AQI-Rohwert 1-5 auf Projekt-Skala 100-500 mappen
                 if (id(env_aqi) <= 0 || id(env_aqi) > 500) id(env_aqi) = 65535;
                 id(env_has_aqi) = id(env_aqi) != 65535;
+                id(last_ens_update_ms) = millis();
+                id(ens_fail_count) = 0;
               } else {
                 id(env_aqi) = 65535;
                 id(env_has_aqi) = false;
@@ -1054,6 +1104,77 @@ interval:
             id(publish_net_erl_led_state).execute();
           }
       - script.execute: refresh_led_ring_comfort_display
+  - interval: 30s
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          const uint32_t poll_ms = (uint32_t) id(setup_sensor_interval_number).state * 1000UL;
+          // Stale-Timeout: mindestens 180s (BME/VEML) bzw. 120s (ENS160),
+          // aber nie weniger als 3x das konfigurierte Poll-Intervall,
+          // um False-Positives bei langen Poll-Intervallen zu vermeiden.
+          const uint32_t bme_timeout = poll_ms * 3UL > 180000UL ? poll_ms * 3UL : 180000UL;
+          const uint32_t ens_timeout = poll_ms * 3UL > 120000UL ? poll_ms * 3UL : 120000UL;
+          bool state_changed = false;
+
+          // BME680 stale check (alle Sub-Sensorwerte zuruecksetzen).
+          if (id(last_bme_update_ms) > 0 && (now - id(last_bme_update_ms)) >= bme_timeout) {
+            if (id(env_has_temp) || id(env_has_hum) || id(env_has_pressure) || id(env_has_gas)) {
+              id(env_has_temp) = false;
+              id(env_has_hum) = false;
+              id(env_has_pressure) = false;
+              id(env_has_gas) = false;
+              id(env_temp_01c) = -32768;
+              id(env_hum_01pct) = 65535;
+              id(env_pressure_pa) = 4294967295UL;
+              id(env_gas_ohm) = 4294967295UL;
+              if (id(bme_fail_count) < 255) id(bme_fail_count)++;
+              if (id(bme680_gas_read_count) > 0) id(bme680_gas_read_count) = 0;
+              id(event_type) = 15;
+              id(event_trigger) = 3;
+              id(event_param1) = 1;
+              id(event_param2) = id(bme_fail_count);
+              id(flush_device_event).execute();
+              state_changed = true;
+            }
+          }
+
+          // VEML7700 stale check.
+          if (id(last_veml_update_ms) > 0 && (now - id(last_veml_update_ms)) >= bme_timeout) {
+            if (id(env_has_lux)) {
+              id(env_has_lux) = false;
+              id(env_lux) = 65535;
+              if (id(veml_fail_count) < 255) id(veml_fail_count)++;
+              id(event_type) = 15;
+              id(event_trigger) = 3;
+              id(event_param1) = 2;
+              id(event_param2) = id(veml_fail_count);
+              id(flush_device_event).execute();
+              state_changed = true;
+            }
+          }
+
+          // ENS160 stale check (alle drei ENS-Werte zuruecksetzen).
+          if (id(last_ens_update_ms) > 0 && (now - id(last_ens_update_ms)) >= ens_timeout) {
+            if (id(env_has_aqi) || id(env_has_eco2) || id(env_has_tvoc)) {
+              id(env_has_aqi) = false;
+              id(env_has_eco2) = false;
+              id(env_has_tvoc) = false;
+              id(env_aqi) = 65535;
+              id(env_eco2_ppm) = 65535;
+              id(env_tvoc_ppb) = 65535;
+              if (id(ens_fail_count) < 255) id(ens_fail_count)++;
+              id(event_type) = 15;
+              id(event_trigger) = 3;
+              id(event_param1) = 3;
+              id(event_param2) = id(ens_fail_count);
+              id(flush_device_event).execute();
+              state_changed = true;
+            }
+          }
+
+          if (state_changed) {
+            id(publish_net_erl_led_state).execute();
+          }
   - interval: 1s
     then:
       - if:
