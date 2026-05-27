@@ -63,7 +63,7 @@ Das NET-ERL-002 Hall Module LED Ring ist die leistungsfähigste NET-ERL-Variante
 | Min/Max Report-Intervall | 5 s / 600 s | Konfigurierbare Grenzen |
 | Auto-Off-Delay | 15 s (default) | Nachlaufzeit nach letzter Präsenz |
 | Auto-On-Lux-Schwelle | 250 Lux (default) | Helligkeitsschwelle für automatisches Einschalten |
-| I2C-Takt | 100000 Hz (100 kHz I2C-Standardtakt) | Reduzierter I2C-Takt für stabilere Kommunikation |
+| I2C-Takt | 5000 Hz (5 kHz) | Reduzierter I2C-Takt für stabilere Kommunikation |
 | Button-Debounce | 40 ms | Entprellzeit des lokalen Tasters |
 
 ### Gas-/ENS160-Warmup
@@ -282,7 +282,7 @@ Nach 45 s erlischt der Ring. Jede neue Präsenz startet die Sequenz neu (wenn si
 
 | AQI-Bereich | Farbe | RGB (skaliert) | Bedeutung |
 |---|---|---|---|
-| Ungültig | Grau | 90, 90, 90 | Sensor nicht bereit |
+| Ungültig | Blau | 0, 70, 220 | Sensor nicht bereit |
 | ≤ 50 | Grün | 0, 210, 80 | Gute Luftqualität |
 | ≤ 100 | Gelb | 180, 190, 0 | Moderate Luftqualität |
 | ≤ 150 | Orange | 255, 115, 0 | Ungesund für empfindliche Gruppen |
@@ -321,7 +321,7 @@ Laut Quellcode-Kommentierung:
 ## 10. Device-Hook-Implementierungen
 
 ### `netErlDeviceInit()`
-Initialisiert I2C-Bus mit 100000 Hz (100 kHz I2C-Standardtakt) Takt und 50 ms Timeout, BME680 mit Gas-Heater (320 °C/150 ms), VEML7700 mit 400 ms Integrationszeit, ENS160 mit Fallback-Adress-Scan, LD2410 OUT als INPUT, NeoPixel-Ring.
+Initialisiert I2C-Bus mit 5000 Hz (5 kHz) Takt und 50 ms Timeout, BME680 mit Gas-Heater (320 °C/150 ms), VEML7700 mit 400 ms Integrationszeit, ENS160 mit Fallback-Adress-Scan, LD2410 OUT als INPUT, NeoPixel-Ring.
 
 ### `netErlDeviceResetSensorDefaults()`
 Setzt alle Sensorwerte auf ungültige Markierungen:
@@ -398,7 +398,7 @@ NetErlPersistedData:
 
 ## 12. Design-Entscheidungen
 
-### I2C-Takt 100000 Hz (100 kHz I2C-Standardtakt)
+### I2C-Takt 5000 Hz (5 kHz)
 `NET_ERL_I2C_CLOCK_HZ = 5000`: Der I2C-Bus wird auf nur 5 kHz reduziert. Grund: Drei Sensoren (BME680, VEML7700, ENS160) teilen sich einen Bus. Längere Leitungen und mögliche Störeinkopplungen werden durch den niedrigen Takt entschärft.
 
 ### BME680 Gas-Heater 320 °C / 150 ms

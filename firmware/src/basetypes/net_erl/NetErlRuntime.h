@@ -737,7 +737,11 @@ bool sendState() {
     if (ps == 0UL || ps > SH_MAX_PAYLOAD_BYTES) return false;
     uint8_t buf[SH_MAX_PAYLOAD_BYTES] = {};
     netErlDeviceFillStatePayload(buf, &ps);      // Zweiter Aufruf: Daten schreiben
-    if (!sendPacketWithRetry(runtime.master_mac, SH_MSG_STATE, buf, ps, "STATE")) return false;
+    if (!sendPacketWithRetry(runtime.master_mac, SH_MSG_STATE, buf, ps, "STATE")) {
+        logMsg("WARN", "STATE not sent payload=%u", (unsigned)ps);
+        return false;
+    }
+    logMsg("INFO", "STATE sent payload=%u", (unsigned)ps);
     runtime.state_report_offen = false; runtime.letzter_state_ms = millis(); return true;
 }
 
@@ -919,6 +923,7 @@ void handleHelloAck(const uint8_t* s, const SmartHome::HelloAckPayload& p) {
     if (!isMaster(s)) { logMsg("WARN", "HELLO_ACK: Absender ist nicht Master"); return; }
     runtime.master_bekannt = true; runtime.state_report_offen = true;
     ensurePeer(runtime.master_mac);
+    logMsg("INFO", "HELLO_ACK accepted, STATE pending");
 }
 
 // =============================================================================

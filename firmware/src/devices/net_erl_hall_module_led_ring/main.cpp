@@ -154,7 +154,7 @@ namespace {
     }
 
     uint32_t ringAqiColor() {
-        if (aqi == AIR_METRIC_UNGUELTIG) return ringColor(90, 90, 90);
+        if (aqi == AIR_METRIC_UNGUELTIG) return ringColor(0, 70, 220);
         if (aqi <= 50U) return ringColor(0, 210, 80);
         if (aqi <= 100U) return ringColor(180, 190, 0);
         if (aqi <= 150U) return ringColor(255, 115, 0);
@@ -178,6 +178,21 @@ namespace {
         if (ring_initialized) return;
         ledRing.begin();
         ledRing.setBrightness(255);
+        ledRing.clear();
+        ledRing.show();
+        logMsg("INFO", "LED ring init pin=%d count=%u brightness=%u", PIN_LED_RING, (unsigned)LED_RING_COUNT, (unsigned)NET_ERL_LED_RING_BRIGHTNESS);
+
+        // Kurztest beim Boot: Wenn dieser Test dunkel bleibt, liegt das Problem
+        // nicht an AQI/Warmup, sondern an Pin, Datenrichtung, GND oder Versorgung.
+        ringSetAll(ringColor(255, 0, 0));
+        ledRing.show();
+        delay(180);
+        ringSetAll(ringColor(0, 255, 0));
+        ledRing.show();
+        delay(180);
+        ringSetAll(ringColor(0, 0, 255));
+        ledRing.show();
+        delay(180);
         ledRing.clear();
         ledRing.show();
         ring_initialized = true;
@@ -329,6 +344,7 @@ namespace {
             bme680.setTemperatureOversampling(BME680_OS_8X); bme680.setHumidityOversampling(BME680_OS_2X);
             bme680.setPressureOversampling(BME680_OS_4X); bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
             bme680.setGasHeater(320U, 150U); // 320 °C Heiztemperatur, 150 ms Heizdauer (BME680-Gasprofil).
+            logMsg("INFO", "BME680 init ok addr=0x%02X", a);
             return true;
         }
         return false;
@@ -355,6 +371,7 @@ namespace {
         ens160_start_ms = millis();
         letzter_ens_gueltig_ms = 0;
         resetEnsValues();
+        logMsg("INFO", "ENS160 init ok addr=0x%02X", address);
         return true;
     }
 
@@ -491,7 +508,7 @@ void netErlDeviceUpdateIndicators(bool relayOn) {
 // Master-Kommandos duerfen Auto-Light spaeter uebersteuern. Die urspruengliche
 // Auto-On-Entscheidung bleibt trotzdem sauber getrennt.
 void netErlDevicePollSensors(unsigned long nowMs) {
-    if ((nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
+    if (letztes_env_sample_ms != 0 && (nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     letztes_env_sample_ms = nowMs;
 
     // Recovery: ausgefallene Sensoren erst nach dem Retry-Intervall neu initialisieren.

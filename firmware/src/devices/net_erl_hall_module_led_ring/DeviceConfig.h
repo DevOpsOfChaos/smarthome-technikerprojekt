@@ -79,7 +79,7 @@
 #define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 #define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL    // 30000 Millisekunden = 30 Sekunden.
 
-#define NET_ERL_I2C_CLOCK_HZ 100000UL  // 100 kHz I2C-Standardtakt (BME680, ENS160, VEML7700).
+#define NET_ERL_I2C_CLOCK_HZ 5000UL  // 5 kHz I2C-Takt fuer langen/stoeranfaelligen Sensorbus.
 
 // BME680
 #define NET_ERL_BME680_PRIMARY_ADDRESS 0x76

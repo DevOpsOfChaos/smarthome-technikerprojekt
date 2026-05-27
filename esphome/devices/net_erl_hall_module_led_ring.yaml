@@ -27,6 +27,7 @@ substitutions:
   relay_pin: GPIO10
   button_pin: GPIO6
   presence_pin: GPIO7
+  presence_poll_interval: 50ms
   led_ring_pin: GPIO4
   led_ring_count: "17" # 17 NeoPixel-LEDs im Ring
   led_ring_default_brightness_pct: "18" # 18 % Helligkeit (Standard, 1-60 %)
@@ -35,7 +36,7 @@ substitutions:
   led_ring_humidity_phase_s: "15" # 15 s Anzeigedauer Feuchte-Phase
   i2c_sda_pin: GPIO0
   i2c_scl_pin: GPIO1
-  bme680_address: "0x76"
+  bme680_address: "0x77"
   veml7700_address: "0x10"
   ens160_address: "0x52"
   temp_offset_01c: "0"    # Temperatur-Offset in Zehntelgrad (negativ = nach unten korrigieren)
@@ -67,6 +68,9 @@ esphome:
             }
           }
       - script.execute: apply_setup_sensor_interval
+      - component.update: env_bme680_component
+      - component.update: env_veml7700_sensor
+      - component.update: env_ens160_component
       - script.execute: publish_contract_meta
       - script.execute: publish_contract_availability
       - script.execute: publish_net_erl_led_state
@@ -284,6 +288,7 @@ mqtt:
 i2c:
   sda: ${i2c_sda_pin}
   scl: ${i2c_scl_pin}
+  frequency: 5kHz
   scan: true
 
 globals:
@@ -754,9 +759,9 @@ light:
             };
             auto set_pulsed_aqi = [&](float pulse) {
               const int aqi = id(env_aqi);
-              int red = 90;
-              int green = 90;
-              int blue = 90;
+              int red = 0;
+              int green = 70;
+              int blue = 220;
               if (aqi != 65535) {
                 if (aqi <= 50) {
                   red = 0; green = 210; blue = 80;
@@ -986,7 +991,7 @@ sensor:
           - script.execute: refresh_led_ring_comfort_display
 
 interval:
-  - interval: 1s
+  - interval: ${presence_poll_interval}
     then:
       - lambda: |-
           const uint32_t now = millis();
