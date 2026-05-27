@@ -20,7 +20,8 @@
  - 50 Millisekunden Sensor-Poll-Intervall fuer LD2410.
  - 60000 Millisekunden Umweltsensor-Intervall entsprechen 60 Sekunden.
  - 30000 Millisekunden Recovery/Snapshot entsprechen 30 Sekunden.
- - 180000 Millisekunden Gas-/ENS160-Warmup entsprechen 180 Sekunden oder 3 Minuten.
+ - 180000 Millisekunden Gas-Warmup entsprechen 180 Sekunden oder 3 Minuten.
+ - 1200000 Millisekunden ENS160-Warmup entsprechen 1200 Sekunden oder 20 Minuten.
  - 120000 Millisekunden ENS160-Stale-Timeout entsprechen 120 Sekunden oder 2 Minuten.
  - 40 Millisekunden Button-Entprellzeit.
 
@@ -90,7 +91,7 @@
 // ENS160
 #define NET_ERL_ENS160_PRIMARY_ADDRESS 0x52
 #define NET_ERL_ENS160_FALLBACK_ADDRESS 0x53
-#define NET_ERL_ENS160_WARMUP_MS 180000UL          // 180000 Millisekunden = 3 Minuten.
+#define NET_ERL_ENS160_WARMUP_MS 1200000UL         // 1200000 Millisekunden = 20 Minuten.
 #define NET_ERL_ENS160_STALE_TIMEOUT_MS 120000UL   // 120000 Millisekunden = 2 Minuten.
 
 // Button

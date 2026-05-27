@@ -73,7 +73,7 @@ Das NET-ERL-002 Hall Module LED Ring ist die leistungsfähigste NET-ERL-Variante
 | BME680 Gas-Warmup | 180 s (3 min) | Wartezeit vor Freigabe der Gaswerte |
 | BME680 Gas-Min-Reads | 5 | Mindestens 5 gültige Messungen vor Gas-Freigabe |
 | BME680 Heizprofil | 320 °C / 150 ms | Heizdauer und -temperatur für eine Gas-Messung |
-| ENS160 Warmup | 180 s (3 min) | Wartezeit vor Freigabe der AQI-Werte |
+| ENS160 Warmup | 1200 s (20 min) | Wartezeit vor Freigabe der AQI-/TVOC-/eCO2-Werte |
 | ENS160 Stale-Timeout | 120 s (2 min) | AQI/TVOC/eCO2 werden ungültig bei ausbleibenden Messwerten |
 
 ### LED-Ring-Timing

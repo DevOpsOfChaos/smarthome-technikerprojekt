@@ -471,7 +471,7 @@ script:
           retain: true
           payload: |-
             const bool env_has_air_combined = id(env_has_aqi) && id(env_has_eco2) && id(env_has_tvoc);
-            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux) || (millis() >= 180000UL && !env_has_air_combined);
+            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux) || (millis() >= 1200000UL && !env_has_air_combined);
             root["device_id"] = "${device_id}";
             root["relay_1"] = id(relay_1_state);
             // Sentinel-Werte (-32768, 65535, 4294967295) als JSON-null ausgeben.
@@ -948,7 +948,7 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (millis() >= 180000UL && x > 0) { // 180000 ms = 3 min ENS160-Warmup
+              if (millis() >= 1200000UL && x > 0) { // 1200000 ms = 20 min ENS160-Warmup
                 id(env_eco2_ppm) = (int) lroundf(x);
                 id(env_has_eco2) = true;
               } else {
@@ -963,7 +963,7 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (millis() >= 180000UL && x > 0) { // 180000 ms = 3 min ENS160-Warmup
+              if (millis() >= 1200000UL && x > 0) { // 1200000 ms = 20 min ENS160-Warmup
                 id(env_tvoc_ppb) = (int) lroundf(x);
                 id(env_has_tvoc) = true;
               } else {
@@ -978,7 +978,7 @@ sensor:
       on_value:
         then:
           - lambda: |-
-              if (millis() >= 180000UL) { // 180000 ms = 3 min ENS160-Warmup
+              if (millis() >= 1200000UL) { // 1200000 ms = 20 min ENS160-Warmup
                 int raw_aqi = (int) lroundf(x);
                 id(env_aqi) = (raw_aqi >= 1 && raw_aqi <= 5) ? raw_aqi * 100 : raw_aqi; // ENS160: AQI-Rohwert 1-5 auf Projekt-Skala 100-500 mappen
                 if (id(env_aqi) <= 0 || id(env_aqi) > 500) id(env_aqi) = 65535;
