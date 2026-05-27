@@ -71,6 +71,15 @@ web_server:
 captive_portal:
 
 # =============================================================================
+# DEBUG/API – Netzwerk-Logs fuer das ESPHome-Dashboard in Home Assistant
+# =============================================================================
+api:
+  reboot_timeout: 0s
+
+debug:
+  update_interval: 60s
+
+# =============================================================================
 # OTA – Wireless-Update-Dienst fuer alle ESPHome-Geraete
 # =============================================================================
 ota:

@@ -23,6 +23,8 @@ Wenn dein MQTT-Broker keine Zugangsdaten nutzt, muessen die `username`/`password
 
 Die ESPHome-YAMLs aktivieren OTA zentral ueber `packages/smarthome_contract_base.yaml`. Deshalb muss die zuerst per Kabel geflashte Factory-Firmware bereits mit demselben `ota_password` gebaut worden sein, sonst kann ein spaeteres Wireless-Update nicht sauber authentifizieren.
 
+Fuer Diagnosezwecke ist in allen ESPHome-Geraeten `logger.level: DEBUG` aktiv. Zusaetzlich stellt `packages/smarthome_contract_base.yaml` die native ESPHome-API mit `reboot_timeout: 0s` und die `debug`-Komponente bereit, damit die Logs im ESPHome-Dashboard von Home Assistant per Netzwerk sichtbar sind. Der MQTT-Vertrag bleibt trotzdem die produktive Server-Schnittstelle; die API ist nur fuer ESPHome-Dashboard, Logs und Diagnose gedacht.
+
 Wichtig bei manuellen Dateien:
 
 - `firmware.factory.bin` ist nur fuer den ersten Flash per Kabel ab Adresse `0x0`.
@@ -51,6 +53,14 @@ Ein einzelnes Geraet kompilieren:
 ```powershell
 .\scripts\check_esphome.ps1 -Device net_erl_hall_module_led_ring -Compile
 ```
+
+Live-Abgleich gegen die Node-RED-Datenbank auf Home Assistant:
+
+```powershell
+.\scripts\check_ha_device_contract.ps1
+```
+
+Der Check kopiert nur die SQLite-Datenbank per SSH/SCP in ein temporaeres lokales Verzeichnis und vergleicht sie mit den Device-IDs aus `esphome/devices/`. Er meldet fehlende Geraete, unvollstaendige Metadaten, Offline-/Stale-Zustaende und alte oder falsche IDs, die noch im Server liegen.
 
 Wenn PlatformIO-Tools lokal inkonsistent sind, kann der isolierte lokale Cache hart neu aufgebaut werden:
 

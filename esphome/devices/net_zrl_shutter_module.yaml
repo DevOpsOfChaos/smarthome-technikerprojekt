@@ -115,6 +115,7 @@ esp32:
     type: arduino
 
 logger:
+  level: DEBUG
 
 wifi:
   ssid: !secret wifi_ssid
