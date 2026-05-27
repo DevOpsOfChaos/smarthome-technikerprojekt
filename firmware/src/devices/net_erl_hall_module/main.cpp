@@ -84,10 +84,19 @@ Adafruit_VEML7700 veml7700 = Adafruit_VEML7700();
 // DEVICE-SPEZIFISCHER ZUSTAND
 // =============================================================================
 namespace {
+    // -- Sensor-Gesundheit ------------------------------------------------
     bool bme280_ok = false, veml7700_ok = false;
+    uint8_t bme_fail_count = 0, veml_fail_count = 0;
+    unsigned long bme_last_ok_ms = 0, veml_last_ok_ms = 0;
     unsigned long letzter_bme_recovery_ms = 0, letzter_veml_recovery_ms = 0;
     unsigned long letztes_env_sample_ms = 0;
     unsigned long veml7700_bereit_seit_ms = 0;
+
+    // -- I2C-Bus-Zustand ---------------------------------------------------
+    uint8_t  i2c_recovery_count = 0;
+    unsigned long last_i2c_recovery_ms = 0;
+    constexpr uint32_t I2C_RECOVERY_COOLDOWN_MS = 30000UL;               // 30 s zwischen I2C-Recoveries.
+    constexpr uint8_t  SENSOR_MAX_FAIL_BEFORE_RECOVERY = 3;              // Nach 3 Fehlern → I2C-Recovery.
 
     // Sensor-Messwerte
     int16_t temp_01c = INT16_MIN;                                       // INT16_MIN = Sentinel "kein gueltiger Messwert" (Temperatur).
@@ -135,6 +144,69 @@ namespace {
         veml7700_bereit_seit_ms = jetzt;
         return true;
     }
+
+    // Aufgabe: I2C-Bus-Recovery via SCL-Pulse (holt SDA aus stuck-LOW).
+    void i2cBusRecoveryPulse() {
+        pinMode(PIN_SENSOR_SCL, OUTPUT);
+        pinMode(PIN_SENSOR_SDA, INPUT_PULLUP);
+        for (int i = 0; i < 12; i++) {
+            digitalWrite(PIN_SENSOR_SCL, LOW);
+            delayMicroseconds(20);
+            digitalWrite(PIN_SENSOR_SCL, HIGH);
+            delayMicroseconds(20);
+        }
+        digitalWrite(PIN_SENSOR_SCL, HIGH);
+        delayMicroseconds(10);
+        pinMode(PIN_SENSOR_SDA, OUTPUT);
+        digitalWrite(PIN_SENSOR_SDA, HIGH);
+        delayMicroseconds(10);
+        pinMode(PIN_SENSOR_SDA, INPUT_PULLUP);
+    }
+
+    // Aufgabe: I2C-Bus-Recovery mit Cooldown.
+    // Beendet Wire, macht SCL-Pulse (Bus-Recovery), und initialisiert neu.
+    // Nur ausfuehren, wenn die Cooldown-Zeit abgelaufen ist.
+    bool recoverI2cBus(unsigned long nowMs, const char* reason) {
+        if ((nowMs - last_i2c_recovery_ms) < I2C_RECOVERY_COOLDOWN_MS) {
+            return false;
+        }
+        last_i2c_recovery_ms = nowMs;
+        i2c_recovery_count++;
+        logMsg("WARN", "I2C recovery #%u reason=%s", i2c_recovery_count, reason ? reason : "?");
+
+        Wire.end();
+        delay(50);
+        i2cBusRecoveryPulse();
+        delay(10);
+        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
+        Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
+        Wire.setTimeOut(NET_ERL_I2C_TIMEOUT_MS);
+        delay(10);
+        return true;
+    }
+
+    // Aufgabe: Markiert einen Sensor als ausgefallen und loggt den Grund.
+    void markSensorFailed(bool& okFlag, uint8_t& failCount, const char* name, const char* reason) {
+        okFlag = false;
+        if (failCount < 255) failCount++;
+        logMsg("WARN", "%s fail (#%u): %s", name, failCount, reason);
+    }
+
+    // Aufgabe: Markiert einen Sensor als erfolgreich gelesen.
+    void markSensorOk(bool& okFlag, uint8_t& failCount, unsigned long& lastOkMs,
+                      unsigned long nowMs, const char* name) {
+        if (!okFlag) {
+            logMsg("INFO", "%s recovered after %u failures", name, failCount);
+        }
+        okFlag = true;
+        failCount = 0;
+        lastOkMs = nowMs;
+    }
+
+    // Aufgabe: Prueft, ob ein Sensor-Retry (nach Init-Failure) faellig ist.
+    bool sensorRetryDue(unsigned long lastRecoveryMs, unsigned long nowMs) {
+        return SmartHome::recoveryIsDue(lastRecoveryMs, nowMs, NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS);
+    }
 }
 
 // =============================================================================
@@ -147,12 +219,16 @@ namespace {
 // Aufrufer: NetErlRuntime ruft diesen Hook einmal beim Boot auf.
 void netErlDeviceInit() {
     Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
+    Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
+    Wire.setTimeOut(NET_ERL_I2C_TIMEOUT_MS);
 
     bme280_ok = initBme280();
-    if (!bme280_ok) logMsg("WARN", "BME280 init fail");
+    if (!bme280_ok) markSensorFailed(bme280_ok, bme_fail_count, "BME280", "init");
+    else markSensorOk(bme280_ok, bme_fail_count, bme_last_ok_ms, millis(), "BME280");
 
     veml7700_ok = initVeml7700(millis());
-    if (!veml7700_ok) logMsg("WARN", "VEML7700 init fail");
+    if (!veml7700_ok) markSensorFailed(veml7700_ok, veml_fail_count, "VEML7700", "init");
+    else markSensorOk(veml7700_ok, veml_fail_count, veml_last_ok_ms, millis(), "VEML7700");
 
     pinMode(PIN_PIR, INPUT);
 // Status LED not used when PIN_STATUS_LED < 0
@@ -201,7 +277,7 @@ void netErlDeviceSetRelayOutput(bool on) {
 //
 // Ablauf:
 // 1. NET_ERL_ENV_SAMPLE_INTERVAL_MS begrenzt die Messrate. Der Wert ist in Millisekunden.
-// 2. Ausgefallene Sensoren werden nach SENSOR_RECOVERY_RETRY_INTERVAL_MS erneut initialisiert.
+// 2. I2C-Bus-Recovery wenn mehrere Sensoren wiederholt ausfallen.
 // 3. BME280 liefert Temperatur in Grad Celsius und relative Feuchte in Prozent.
 // 4. VEML7700 liefert Lux; negative oder NaN-Werte gelten als Fehler.
 // 5. Late-Lux entscheidet ein wartendes Auto-On erst, wenn ein gueltiger Lux-Wert vorliegt.
@@ -213,12 +289,48 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     if ((nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     letztes_env_sample_ms = nowMs;
 
-    // Recovery: ausgefallene Sensoren erst nach dem Retry-Intervall neu initialisieren.
-    if (!bme280_ok && SmartHome::recoveryIsDue(letzter_bme_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
-        letzter_bme_recovery_ms = nowMs; bme280_ok = initBme280();
+    // WDT zuruecksetzen vor potenziell blockierenden I2C-Operationen
+    esp_task_wdt_reset();
+
+    // --- Hilfs-Lambda fuer Recovery-Pruefungen ---
+    auto recoveryNeeded = [&](bool ok, uint8_t failCount) -> bool {
+        return !ok || failCount >= SENSOR_MAX_FAIL_BEFORE_RECOVERY;
+    };
+
+    // --- I2C-Bus-Recovery wenn noetig (nach wiederholten Sensorfehlern) ---
+    bool needI2cRecovery = recoveryNeeded(bme280_ok, bme_fail_count)
+                        || recoveryNeeded(veml7700_ok, veml_fail_count);
+
+    if (needI2cRecovery) {
+        if (recoverI2cBus(nowMs, "multi_sensor_fail")) {
+            // Nach I2C-Recovery alle ausgefallenen Sensoren neu initialisieren.
+            if (!bme280_ok && sensorRetryDue(letzter_bme_recovery_ms, nowMs)) {
+                letzter_bme_recovery_ms = nowMs;
+                bme280_ok = initBme280();
+                if (bme280_ok) markSensorOk(bme280_ok, bme_fail_count, bme_last_ok_ms, nowMs, "BME280");
+                else markSensorFailed(bme280_ok, bme_fail_count, "BME280", "recovery");
+            }
+            if (!veml7700_ok && sensorRetryDue(letzter_veml_recovery_ms, nowMs)) {
+                letzter_veml_recovery_ms = nowMs;
+                veml7700_ok = initVeml7700(nowMs);
+                if (veml7700_ok) markSensorOk(veml7700_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700");
+                else markSensorFailed(veml7700_ok, veml_fail_count, "VEML7700", "recovery");
+            }
+        }
     }
-    if (!veml7700_ok && SmartHome::recoveryIsDue(letzter_veml_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
-        letzter_veml_recovery_ms = nowMs; veml7700_ok = initVeml7700(nowMs);
+
+    // --- Einzelsensor-Recovery (wenn nur ein Sensor ausgefallen, ohne I2C-Reset) ---
+    if (!bme280_ok && sensorRetryDue(letzter_bme_recovery_ms, nowMs)) {
+        letzter_bme_recovery_ms = nowMs;
+        bme280_ok = initBme280();
+        if (bme280_ok) markSensorOk(bme280_ok, bme_fail_count, bme_last_ok_ms, nowMs, "BME280");
+        else markSensorFailed(bme280_ok, bme_fail_count, "BME280", "retry");
+    }
+    if (!veml7700_ok && sensorRetryDue(letzter_veml_recovery_ms, nowMs)) {
+        letzter_veml_recovery_ms = nowMs;
+        veml7700_ok = initVeml7700(nowMs);
+        if (veml7700_ok) markSensorOk(veml7700_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700");
+        else markSensorFailed(veml7700_ok, veml_fail_count, "VEML7700", "retry");
     }
 
     // BME280 lesen: Temperatur wird spaeter als Zehntelgrad, Feuchte als 0,1 Prozent gemeldet.
@@ -238,14 +350,25 @@ void netErlDevicePollSensors(unsigned long nowMs) {
             }
             temp_01c = (int16_t)(lroundf(temp_ema) + NET_ERL_TEMP_OFFSET_01C);
             hum_01pct = SmartHome::clampHum01pct((long)(lroundf(hum_ema) + NET_ERL_HUM_OFFSET_01PCT));
-        } else { bme280_ok = false; logMsg("WARN", "BME280 unplausibel"); }
+            markSensorOk(bme280_ok, bme_fail_count, bme_last_ok_ms, nowMs, "BME280");
+        } else {
+            markSensorFailed(bme280_ok, bme_fail_count, "BME280", "unplausibel");
+            temp_01c = INT16_MIN; hum_01pct = 0xFFFFU;
+        }
     }
+
+    esp_task_wdt_reset(); // nach BME280-Read
 
     // VEML7700 lesen: Lux wird auf uint16_t begrenzt, damit der Protokoll-Payload passt.
     if (veml7700_ok) {
         float l = veml7700.readLux();
-        if (!isnan(l) && l >= 0) lux = SmartHome::clampToU16((long)lroundf(l));
-        else { veml7700_ok = false; logMsg("WARN", "VEML7700 read fail"); }
+        if (!isnan(l) && l >= 0) {
+            lux = SmartHome::clampToU16((long)lroundf(l));
+            markSensorOk(veml7700_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700");
+        } else {
+            markSensorFailed(veml7700_ok, veml_fail_count, "VEML7700", "read");
+            lux = 0xFFFFU;
+        }
     }
 
     // Status aktualisieren: fault=true sobald einer der beiden Sensoren nicht verfuegbar ist.
@@ -269,12 +392,12 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     {
         static int16_t  last_temp = INT16_MIN;
         static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU;
-        
+
         bool changed = false;
         if (temp_01c != last_temp) { last_temp = temp_01c; changed = true; }
         if (SmartHome::absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
         if (SmartHome::absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
-        
+
         if (changed) runtime.state_report_offen = true;
     }
 }

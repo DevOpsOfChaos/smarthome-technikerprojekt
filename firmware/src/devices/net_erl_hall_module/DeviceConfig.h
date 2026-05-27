@@ -69,6 +69,9 @@
 
 #define NET_ERL_BME280_ADDRESS 0x76
 
+#define NET_ERL_I2C_CLOCK_HZ 5000UL  // 5 kHz I2C-Takt fuer langen/stoeranfaelligen Sensorbus.
+#define NET_ERL_I2C_TIMEOUT_MS 50U   // 50 ms I2C-Timeout (verhindert Bus-Blockade).
+
 // Sensor-Offset-Kompensation (in Geraete-Nativeinheiten).
 // Positiver Offset = Korrektur nach oben, negativer = nach unten.
 // Beispiel: BME280 nahe Netzteil misst 30 °C bei 22 °C Raumtemperatur → Offset -80 (-8,0 °C in Zehntelgrad).

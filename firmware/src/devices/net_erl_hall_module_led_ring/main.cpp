@@ -101,10 +101,26 @@ ScioSense_ENS160* ens160 = nullptr;
 Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800);
 
 // =============================================================================
+// DIAGNOSTIC-MODUS (compile-time sensor isolation for bring-up/debug)
+// =============================================================================
+// 0 = ALL       – Normalbetrieb, alle Sensoren
+// 1 = SCAN_ONLY – Nur I2C-Scan, keine Sensor-Init, kein Sensor-Poll
+// 2 = BME_ONLY  – Nur BME680
+// 3 = VEML_ONLY – Nur VEML7700
+// 4 = ENS_ONLY  – Nur ENS160
+// 5 = ALL_STAGGERED – Alle, versetzte Lesezeitpunkte (0/300/600 ms)
+#ifndef SENSOR_DIAG_MODE
+#define SENSOR_DIAG_MODE 0
+#endif
+
+// =============================================================================
 // DEVICE-SPEZIFISCHER ZUSTAND
 // =============================================================================
 namespace {
+    // -- Sensor-Gesundheit ------------------------------------------------
     bool bme_ok = false, lux_ok = false, ens_ok = false;
+    uint8_t bme_fail_count = 0, veml_fail_count = 0, ens_fail_count = 0;
+    unsigned long bme_last_ok_ms = 0, veml_last_ok_ms = 0, ens_last_ok_ms = 0;
     uint8_t ens160_adresse = 0;
     uint8_t bme680_gueltige_messungen = 0;
     unsigned long letzter_bme_recovery_ms = 0, letzter_lux_recovery_ms = 0, letzter_ens_recovery_ms = 0;
@@ -114,7 +130,15 @@ namespace {
     unsigned long ring_sequence_started_ms = 0, ring_display_until_ms = 0;
     unsigned long ring_lux_blocked_until_ms = 0, letzter_ring_frame_ms = 0;
 
-    // Sensor-Messwerte
+    // -- I2C-Bus-Zustand ---------------------------------------------------
+    uint8_t  i2c_recovery_count = 0;
+    unsigned long last_i2c_recovery_ms = 0;
+    constexpr uint32_t I2C_RECOVERY_COOLDOWN_MS = 30000UL;               // 30 s zwischen I2C-Recoveries.
+    constexpr uint8_t  SENSOR_MAX_FAIL_BEFORE_RECOVERY = 3;              // Nach 3 Fehlern → I2C-Recovery.
+    constexpr uint32_t SENSOR_RETRY_COOLDOWN_MS = 30000UL;               // 30 s zwischen Sensor-Retries.
+    constexpr uint32_t SENSOR_STAGGER_MS = 300UL;                         // 300 ms Versatz zwischen Sensoren.
+
+    // -- Sensor-Messwerte -------------------------------------------------
     int16_t temp_01c = INT16_MIN;                                       // INT16_MIN = Sentinel "kein gueltiger Messwert" (Temperatur).
     uint16_t hum_01pct = 0xFFFFU, lux = 0xFFFFU;                       // 0xFFFF = Sentinel "kein gueltiger Wert" (Feuchte, Lux).
     uint32_t pressure_pa = 0xFFFFFFFFUL, gas_ohm = 0xFFFFFFFFUL;       // 0xFFFFFFFF = Sentinel "kein gueltiger Wert" (Druck, Gas).
@@ -125,6 +149,24 @@ namespace {
     constexpr uint16_t AIR_METRIC_UNGUELTIG = 0xFFFFU;                 // 0xFFFF = Sentinel "kein gueltiger Wert".
     constexpr uint16_t ENS160_AQI_MAX_BASIC = 5U;                       // ENS160 liefert AQI 1-5 als Rohwert.
     constexpr uint16_t I2C_TIMEOUT_MS = 50U;     // 50 ms I2C-Timeout (verhindert Bus-Blockade).
+
+    // -- Diagnostic mode helpers -------------------------------------------
+    inline bool diagBmeEnabled() {
+        return SENSOR_DIAG_MODE == 0 || SENSOR_DIAG_MODE == 2 || SENSOR_DIAG_MODE == 5;
+    }
+    inline bool diagVemlEnabled() {
+        return SENSOR_DIAG_MODE == 0 || SENSOR_DIAG_MODE == 3 || SENSOR_DIAG_MODE == 5;
+    }
+    inline bool diagEnsEnabled() {
+        return SENSOR_DIAG_MODE == 0 || SENSOR_DIAG_MODE == 4 || SENSOR_DIAG_MODE == 5;
+    }
+    inline bool diagScanOnly() { return SENSOR_DIAG_MODE == 1; }
+    inline bool diagStaggered() { return SENSOR_DIAG_MODE == 5; }
+
+    // -- Staggered read offsets (ms within poll interval) ------------------
+    inline unsigned long staggerOffsetBme() { return diagStaggered() ? 0UL      : 0UL; }
+    inline unsigned long staggerOffsetVeml(){ return diagStaggered() ? 300UL    : 0UL; }
+    inline unsigned long staggerOffsetEns() { return diagStaggered() ? 600UL    : 0UL; }
 }
 
 // =============================================================================
@@ -333,6 +375,84 @@ namespace {
     // Ausgabewert: keiner; 400 ms Integrationszeit bedeuten 0,4 Sekunden Lichtmessung.
     void konfVeml() { veml.setGain(VEML7700_GAIN_1); veml.setIntegrationTime(VEML7700_IT_400MS); }
 
+    // Aufgabe: Scannt den I2C-Bus und gibt gefundene Adressen als Log aus.
+    // Erwartete Adressen: 0x10 (VEML7700), 0x52 (ENS160), 0x77 (BME680).
+    void scanI2cBus() {
+        logMsg("INFO", "I2C scan start (SDA=%d SCL=%d)", PIN_SENSOR_SDA, PIN_SENSOR_SCL);
+        uint8_t found = 0;
+        for (uint8_t addr = 1; addr < 127; ++addr) {
+            Wire.beginTransmission(addr);
+            if (Wire.endTransmission() == 0) {
+                logMsg("INFO", "I2C device found at 0x%02X", addr);
+                found++;
+            }
+        }
+        logMsg("INFO", "I2C scan done: %u device(s) found", found);
+    }
+
+    // Aufgabe: I2C-Bus-Recovery via SCL-Pulse (holt SDA aus stuck-LOW).
+    void i2cBusRecoveryPulse() {
+        pinMode(PIN_SENSOR_SCL, OUTPUT);
+        pinMode(PIN_SENSOR_SDA, INPUT_PULLUP);
+        for (int i = 0; i < 12; i++) {
+            digitalWrite(PIN_SENSOR_SCL, LOW);
+            delayMicroseconds(20);
+            digitalWrite(PIN_SENSOR_SCL, HIGH);
+            delayMicroseconds(20);
+        }
+        digitalWrite(PIN_SENSOR_SCL, HIGH);
+        delayMicroseconds(10);
+        pinMode(PIN_SENSOR_SDA, OUTPUT);
+        digitalWrite(PIN_SENSOR_SDA, HIGH);
+        delayMicroseconds(10);
+        pinMode(PIN_SENSOR_SDA, INPUT_PULLUP);
+    }
+
+    // Aufgabe: I2C-Bus-Recovery mit Cooldown.
+    // Beendet Wire, macht SCL-Pulse (Bus-Recovery), und initialisiert neu.
+    // Nur ausfuehren, wenn die Cooldown-Zeit abgelaufen ist.
+    bool recoverI2cBus(unsigned long nowMs, const char* reason) {
+        if ((nowMs - last_i2c_recovery_ms) < I2C_RECOVERY_COOLDOWN_MS) {
+            return false;
+        }
+        last_i2c_recovery_ms = nowMs;
+        i2c_recovery_count++;
+        logMsg("WARN", "I2C recovery #%u reason=%s", i2c_recovery_count, reason ? reason : "?");
+
+        Wire.end();
+        delay(50);
+        i2cBusRecoveryPulse();
+        delay(10);
+        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
+        Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
+        Wire.setTimeOut(I2C_TIMEOUT_MS);
+        delay(10);
+        return true;
+    }
+
+    // Aufgabe: Markiert einen Sensor als ausgefallen und loggt den Grund.
+    void markSensorFailed(bool& okFlag, uint8_t& failCount, const char* name, const char* reason) {
+        okFlag = false;
+        if (failCount < 255) failCount++;
+        logMsg("WARN", "%s fail (#%u): %s", name, failCount, reason);
+    }
+
+    // Aufgabe: Markiert einen Sensor als erfolgreich gelesen.
+    void markSensorOk(bool& okFlag, uint8_t& failCount, unsigned long& lastOkMs,
+                      unsigned long nowMs, const char* name) {
+        if (!okFlag) {
+            logMsg("INFO", "%s recovered after %u failures", name, failCount);
+        }
+        okFlag = true;
+        failCount = 0;
+        lastOkMs = nowMs;
+    }
+
+    // Aufgabe: Prueft, ob ein Sensor-Retry (nach Init-Failure) faellig ist.
+    bool sensorRetryDue(unsigned long lastRecoveryMs, unsigned long nowMs) {
+        return SmartHome::recoveryIsDue(lastRecoveryMs, nowMs, SENSOR_RETRY_COOLDOWN_MS);
+    }
+
     // Aufgabe: Initialisiert den BME680 ueber primaere oder Fallback-I2C-Adresse.
     // Eingabewerte: keine; Adressen und I2C-Bus kommen aus DeviceConfig.h und Wire.
     // Ausgabewert: true bedeutet, der Sensor wurde gefunden und konfiguriert.
@@ -366,7 +486,18 @@ namespace {
 
     bool useEnsAddress(ScioSense_ENS160& sensor, uint8_t address) {
         ens160 = &sensor;
-        if (!ens160->begin()) return false;
+        // ENS160 begin() macht intern einen Reset. Danach Wire frisch aufsetzen
+        // um sauberen I2C-Status zu garantieren (hat im Test Sensordaten geliefert).
+        bool result = ens160->begin();
+        Wire.end();
+        delay(50);
+        i2cBusRecoveryPulse();
+        delay(10);
+        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
+        Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
+        Wire.setTimeOut(I2C_TIMEOUT_MS);
+
+        if (!result) return false;
         ens160_adresse = address;
         ens160_start_ms = millis();
         letzter_ens_gueltig_ms = 0;
@@ -419,9 +550,6 @@ namespace {
         return letzter_ens_gueltig_ms > 0 && (j - letzter_ens_gueltig_ms) > NET_ERL_ENS160_STALE_TIMEOUT_MS;
     }
 
-    bool ensFault(unsigned long j) {
-        return !ens_ok || !ens160 || (ensWarmupOk(j) && letzter_ens_gueltig_ms == 0);
-    }
 }
 
 // =============================================================================
@@ -437,15 +565,52 @@ void netErlDeviceInit() {
     Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
     Wire.setTimeOut(I2C_TIMEOUT_MS);
 
-    bme_ok = initBme();
-    if (!bme_ok) logMsg("WARN", "BME680 init fail");
+    // I2C-Scan nur im Scan-Only-Diag-Mode ausfuehren.
+    // Im Normalbetrieb wuerden 126 Adress-Durchlaeufe den Boot verzoegern
+    // und ggf. den I2C-NG-Treiber stressen.
+    if (diagScanOnly()) {
+        scanI2cBus();
+        logMsg("INFO", "SENSOR_DIAG_MODE=SCAN_ONLY – skipping sensor init");
+        pinMode(PIN_LD2410_OUT, INPUT);
+        ensureRingInitialized();
+        return;
+    }
 
-    if (!veml.begin()) { lux_ok = false; logMsg("WARN", "VEML7700 init fail"); }
-    else { lux_ok = true; konfVeml(); }
+    // BME680 (nur wenn per Diag-Mode aktiviert).
+    if (diagBmeEnabled()) {
+        bme_ok = initBme();
+        if (!bme_ok) markSensorFailed(bme_ok, bme_fail_count, "BME680", "init");
+        else markSensorOk(bme_ok, bme_fail_count, bme_last_ok_ms, millis(), "BME680");
+    } else {
+        logMsg("INFO", "BME680 disabled by SENSOR_DIAG_MODE=%d", SENSOR_DIAG_MODE);
+    }
 
-    ens_ok = initEns();
-    if (!ens_ok) { logMsg("WARN", "ENS160 init fail"); }
-    else if (!setEnsStandardMode()) { logMsg("WARN", "ENS160 mode fail"); }
+    // VEML7700 (nur wenn per Diag-Mode aktiviert).
+    if (diagVemlEnabled()) {
+        if (!veml.begin()) {
+            markSensorFailed(lux_ok, veml_fail_count, "VEML7700", "init");
+        } else {
+            lux_ok = true; konfVeml();
+            markSensorOk(lux_ok, veml_fail_count, veml_last_ok_ms, millis(), "VEML7700");
+        }
+    } else {
+        logMsg("INFO", "VEML7700 disabled by SENSOR_DIAG_MODE=%d", SENSOR_DIAG_MODE);
+    }
+
+    // ENS160 (nur wenn per Diag-Mode aktiviert).
+    if (diagEnsEnabled()) {
+        ens_ok = initEns();
+        if (!ens_ok) {
+            markSensorFailed(ens_ok, ens_fail_count, "ENS160", "init");
+        } else if (!setEnsStandardMode()) {
+            markSensorFailed(ens_ok, ens_fail_count, "ENS160", "mode");
+        } else {
+            markSensorOk(ens_ok, ens_fail_count, ens_last_ok_ms, millis(), "ENS160");
+            ens160_start_ms = millis();
+        }
+    } else {
+        logMsg("INFO", "ENS160 disabled by SENSOR_DIAG_MODE=%d", SENSOR_DIAG_MODE);
+    }
 
     pinMode(PIN_LD2410_OUT, INPUT);
     ensureRingInitialized();
@@ -511,72 +676,170 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     if (letztes_env_sample_ms != 0 && (nowMs - letztes_env_sample_ms) < NET_ERL_ENV_SAMPLE_INTERVAL_MS) return;
     letztes_env_sample_ms = nowMs;
 
-    // Recovery: ausgefallene Sensoren erst nach dem Retry-Intervall neu initialisieren.
-    if (!bme_ok && SmartHome::recoveryIsDue(letzter_bme_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
-        letzter_bme_recovery_ms = nowMs; bme_ok = initBme();
-    }
-    if (!lux_ok && SmartHome::recoveryIsDue(letzter_lux_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
-        letzter_lux_recovery_ms = nowMs; lux_ok = veml.begin();
-        if (lux_ok) konfVeml();
-    }
-    if (!ens_ok && SmartHome::recoveryIsDue(letzter_ens_recovery_ms, nowMs, SENSOR_RECOVERY_RETRY_INTERVAL_MS)) {
-        letzter_ens_recovery_ms = nowMs; ens_ok = initEns();
-        if (ens_ok && !setEnsStandardMode()) logMsg("WARN", "ENS160 mode fail");
-    }
+    // WDT zuruecksetzen vor potenziell blockierenden I2C-Operationen
+    esp_task_wdt_reset();
 
-    // BME680 lesen: Temperatur, Feuchte und Druck werden plausibilisiert.
-    bool bme_read_valid = false;
-    if (bme_ok) {
-        if (bme680.performReading()) {
-            float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
-            uint32_t g = bme680.gas_resistance;
-            if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
-                temp_01c = (int16_t)(lroundf(t * 10.0f) + NET_ERL_TEMP_OFFSET_01C);
-                hum_01pct = SmartHome::clampHum01pct((long)(lroundf(h * 10.0f) + NET_ERL_HUM_OFFSET_01PCT));
-                pressure_pa = (uint32_t)lroundf(p);
-                if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++; // Maximal 255 Zaehler (uint8_t).
-                gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
-                bme_read_valid = true;
-            } else {
-                bme_ok = false;
-                resetBmeValues();
-                logMsg("WARN", "BME680 unplausibel");
+    // Scan-Only-Modus: keine Sensor-Polls.
+    if (diagScanOnly()) return;
+
+    // --- Hilfs-Lambdas fuer Recovery-Pruefungen ---
+    auto recoveryNeeded = [&](bool ok, uint8_t failCount) -> bool {
+        return !ok || failCount >= SENSOR_MAX_FAIL_BEFORE_RECOVERY;
+    };
+
+    // --- I2C-Bus-Recovery wenn noetig (nach wiederholten Sensorfehlern) ---
+    bool needI2cRecovery = false;
+    if (diagBmeEnabled() && recoveryNeeded(bme_ok, bme_fail_count)) needI2cRecovery = true;
+    if (diagVemlEnabled() && recoveryNeeded(lux_ok, veml_fail_count)) needI2cRecovery = true;
+    if (diagEnsEnabled() && recoveryNeeded(ens_ok, ens_fail_count)) needI2cRecovery = true;
+
+    if (needI2cRecovery) {
+        if (recoverI2cBus(nowMs, "multi_sensor_fail")) {
+            // Nach I2C-Recovery alle ausgefallenen Sensoren neu initialisieren.
+            if (diagBmeEnabled() && !bme_ok && sensorRetryDue(letzter_bme_recovery_ms, nowMs)) {
+                letzter_bme_recovery_ms = nowMs;
+                bme_ok = initBme();
+                if (bme_ok) markSensorOk(bme_ok, bme_fail_count, bme_last_ok_ms, nowMs, "BME680");
+                else markSensorFailed(bme_ok, bme_fail_count, "BME680", "recovery");
             }
-        } else {
-            bme_ok = false;
-            resetBmeValues();
-            logMsg("WARN", "BME680 read fail");
+            if (diagVemlEnabled() && !lux_ok && sensorRetryDue(letzter_lux_recovery_ms, nowMs)) {
+                letzter_lux_recovery_ms = nowMs;
+                lux_ok = veml.begin();
+                if (lux_ok) { konfVeml(); markSensorOk(lux_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700"); }
+                else markSensorFailed(lux_ok, veml_fail_count, "VEML7700", "recovery");
+            }
+            if (diagEnsEnabled() && !ens_ok && sensorRetryDue(letzter_ens_recovery_ms, nowMs)) {
+                letzter_ens_recovery_ms = nowMs;
+                ens_ok = initEns();
+                if (ens_ok && !setEnsStandardMode()) markSensorFailed(ens_ok, ens_fail_count, "ENS160", "mode");
+                if (ens_ok) {
+                    markSensorOk(ens_ok, ens_fail_count, ens_last_ok_ms, nowMs, "ENS160");
+                    ens160_start_ms = nowMs;
+                } else {
+                    markSensorFailed(ens_ok, ens_fail_count, "ENS160", "recovery");
+                }
+            }
         }
     }
 
-    // VEML7700 lesen: Lux wird auf uint16_t begrenzt, damit der Protokoll-Payload passt.
-    if (lux_ok) {
-        float l = veml.readLux();
-        if (!isnan(l) && l >= 0) lux = SmartHome::clampToU16((long)lroundf(l));
-        else { lux_ok = false; lux = 0xFFFFU; logMsg("WARN", "VEML7700 read fail"); }
+    // --- Einzelsensor-Recovery (wenn nur ein Sensor ausgefallen, ohne I2C-Reset) ---
+    if (diagBmeEnabled() && !bme_ok && sensorRetryDue(letzter_bme_recovery_ms, nowMs)) {
+        letzter_bme_recovery_ms = nowMs;
+        bme_ok = initBme();
+        if (bme_ok) markSensorOk(bme_ok, bme_fail_count, bme_last_ok_ms, nowMs, "BME680");
+        else markSensorFailed(bme_ok, bme_fail_count, "BME680", "retry");
+    }
+    if (diagVemlEnabled() && !lux_ok && sensorRetryDue(letzter_lux_recovery_ms, nowMs)) {
+        letzter_lux_recovery_ms = nowMs;
+        lux_ok = veml.begin();
+        if (lux_ok) { konfVeml(); markSensorOk(lux_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700"); }
+        else markSensorFailed(lux_ok, veml_fail_count, "VEML7700", "retry");
+    }
+    if (diagEnsEnabled() && !ens_ok && sensorRetryDue(letzter_ens_recovery_ms, nowMs)) {
+        letzter_ens_recovery_ms = nowMs;
+        ens_ok = initEns();
+        if (ens_ok && !setEnsStandardMode()) markSensorFailed(ens_ok, ens_fail_count, "ENS160", "mode");
+        if (ens_ok) {
+            markSensorOk(ens_ok, ens_fail_count, ens_last_ok_ms, nowMs, "ENS160");
+            ens160_start_ms = nowMs;
+        } else {
+            markSensorFailed(ens_ok, ens_fail_count, "ENS160", "retry");
+        }
     }
 
-    // ENS160-Kompensation schreiben: BME680-Temperatur und -Feuchte verbessern die Luftwerte.
-    if (ens_ok && ens160 && bme_read_valid) {
+    // --- Sensordaten lesen (gestaggert ueber per-Sensor letzte-Lesezeit) ---
+    // Jeder Sensor hat einen eigenen Lese-Offset. Dadurch werden die drei
+    // Sensoren im Intervall [0, 300, 600] ms gelesen, statt alle drei
+    // im selben Millisekunden-Aufruf.
+    static unsigned long bme_last_read_ms = 0, veml_last_read_ms = 0, ens_last_read_ms = 0;
+    bool bme_read_valid = false;
+
+    // BME680 lesen (Offset 0 ms).
+    if (diagBmeEnabled() && bme_ok) {
+        if ((nowMs - bme_last_read_ms) >= (NET_ERL_ENV_SAMPLE_INTERVAL_MS + staggerOffsetBme())) {
+            bme_last_read_ms = nowMs;
+            if (bme680.performReading()) {
+                float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
+                uint32_t g = bme680.gas_resistance;
+                if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
+                    temp_01c = (int16_t)(lroundf(t * 10.0f) + NET_ERL_TEMP_OFFSET_01C);
+                    hum_01pct = SmartHome::clampHum01pct((long)(lroundf(h * 10.0f) + NET_ERL_HUM_OFFSET_01PCT));
+                    pressure_pa = (uint32_t)lroundf(p);
+                    if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++;
+                    gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
+                    bme_read_valid = true;
+                    markSensorOk(bme_ok, bme_fail_count, bme_last_ok_ms, nowMs, "BME680");
+                } else {
+                    markSensorFailed(bme_ok, bme_fail_count, "BME680", "unplausibel");
+                    resetBmeValues();
+                }
+            } else {
+                markSensorFailed(bme_ok, bme_fail_count, "BME680", "read");
+                resetBmeValues();
+            }
+        }
+    } else if (!diagBmeEnabled()) {
+        // BME deaktiviert: Werte bleiben auf Sentinel.
+    }
+
+    esp_task_wdt_reset(); // nach BME680-Read
+
+    // VEML7700 lesen (Offset 300 ms).
+    if (diagVemlEnabled() && lux_ok) {
+        if ((nowMs - veml_last_read_ms) >= (NET_ERL_ENV_SAMPLE_INTERVAL_MS + staggerOffsetVeml())) {
+            veml_last_read_ms = nowMs;
+            float l = veml.readLux();
+            if (!isnan(l) && l >= 0) {
+                lux = SmartHome::clampToU16((long)lroundf(l));
+                markSensorOk(lux_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700");
+            } else {
+                markSensorFailed(lux_ok, veml_fail_count, "VEML7700", "read");
+                lux = 0xFFFFU;
+            }
+        }
+    }
+
+    // ENS160-Kompensation schreiben (nur wenn BME diesen Zyklus erfolgreich gelesen hat).
+    // Der Zugriff auf bme680.temperature/humidity ist sicher, weil bme_read_valid
+    // garantiert, dass performReading() erfolgreich war und die Werte gueltig sind.
+    if (diagEnsEnabled() && ens_ok && ens160 && bme_read_valid) {
         int r = writeEnsEnv(ens160_adresse, bme680.temperature, bme680.humidity);
-        if (r != 0) { ens_ok = false; resetEnsValues(); logMsg("WARN", "ENS160 comp fail err=%d", r); }
+        if (r != 0) {
+            markSensorFailed(ens_ok, ens_fail_count, "ENS160", "comp");
+            resetEnsValues();
+        }
     }
 
-    // ENS160-Messwerte lesen: AQI500 bevorzugt, AQI 1-5 als Fallback auf 0-500 skaliert.
-    if (ens_ok && ens160 && ens160->measure(false)) {
-        uint16_t aq5 = ens160->getAQI500(), aq = ens160->getAQI();
-        uint16_t maq = (aq5 > 0 && aq5 <= 500) ? aq5 : mapAqi500(aq);
-        if (maq > 0 && ensWarmupOk(nowMs)) {
-            aqi = maq; tvoc_ppb = ens160->getTVOC();
-            eco2_ppm = ens160->geteCO2(); letzter_ens_gueltig_ms = nowMs;
+    // ENS160-Messwerte lesen (Offset 600 ms).
+    if (diagEnsEnabled() && ens_ok && ens160) {
+        if ((nowMs - ens_last_read_ms) >= (NET_ERL_ENV_SAMPLE_INTERVAL_MS + staggerOffsetEns())) {
+            ens_last_read_ms = nowMs;
+            if (ens160->measure(false)) {
+                uint16_t aq5 = ens160->getAQI500(), aq = ens160->getAQI();
+                uint16_t maq = (aq5 > 0 && aq5 <= 500) ? aq5 : mapAqi500(aq);
+                if (maq > 0 && ensWarmupOk(nowMs)) {
+                    aqi = maq; tvoc_ppb = ens160->getTVOC();
+                    eco2_ppm = ens160->geteCO2(); letzter_ens_gueltig_ms = nowMs;
+                    markSensorOk(ens_ok, ens_fail_count, ens_last_ok_ms, nowMs, "ENS160");
+                }
+            }
+            // measure(false) kann false sein, weil (a) I2C-Fehler oder (b) einfach
+            // keine neuen Daten (normal waehrend Warmup, Status-Register = 0).
+            // Kein automatisches Fail – ensStale() setzt die Werte auf Sentinel,
+            // wenn wirklich ein Fehler vorliegt.
         }
     }
 
     // Stale-Detection: alte ENS160-Werte nicht weiter als gueltig melden.
     if (ensStale(nowMs)) resetEnsValues();
 
-    // Status aktualisieren: fault=true sobald ein benoetigter Sensor nicht verfuegbar ist.
-    runtime.fault = !(bme_ok && lux_ok) || ensFault(nowMs);
+    // Status aktualisieren: fault=true nur bei Sensoren, die fuer Auto-Light
+    // oder Basis-Umweltwerte zwingend benoetigt werden. ENS160 ist traege und
+    // liefert Luftqualitaetswerte erst, sobald er bereit ist.
+    // Im Diag-Modus zaehlen nur aktivierte Sensoren.
+    bool bme_needed = diagBmeEnabled();
+    bool veml_needed = diagVemlEnabled();
+    runtime.fault = (bme_needed && !bme_ok) || (veml_needed && !lux_ok);
 
     // Late-Lux: Auto-On-Entscheidung erst ausfuehren, wenn ein Lux-Wert verfuegbar ist.
     if (runtime.motion_aktiv && runtime.pending_auto_on_decision && !runtime.relay_1 && lux != 0xFFFFU) {
@@ -604,14 +867,14 @@ void netErlDevicePollSensors(unsigned long nowMs) {
         static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU;
         static uint32_t last_press = 0xFFFFFFFFUL;
         static uint16_t last_aqi = 0xFFFFU;
-        
+
         bool changed = false;
         if (temp_01c != last_temp) { last_temp = temp_01c; changed = true; }
         if (SmartHome::absDiffU16(hum_01pct, last_hum) >= 5U) { last_hum = hum_01pct; changed = true; }
         if (SmartHome::absDiffU16(lux, last_lux) >= 5U) { last_lux = lux; changed = true; }
         if (SmartHome::absDiffU32(pressure_pa, last_press) >= 10UL) { last_press = pressure_pa; changed = true; }
         if (last_aqi != aqi) { last_aqi = aqi; changed = true; }
-        
+
         if (changed) runtime.state_report_offen = true;
     }
 }
@@ -650,7 +913,7 @@ void netErlDeviceFillStatePayload(void* payload, size_t* size) {
 uint8_t netErlDeviceBuildAutoFlags() {
     uint8_t f = 0;
     if (runtime.motion_aktiv) f |= SH_RELAY_COMFORT_FLAG_PRESENCE_SOURCE_AVAILABLE;
-    if (lux_ok) f |= SH_RELAY_COMFORT_FLAG_LIGHT_VALUE_AVAILABLE;
+    if (lux_ok && diagVemlEnabled()) f |= SH_RELAY_COMFORT_FLAG_LIGHT_VALUE_AVAILABLE;
     f |= SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED;
     if (runtime.relay_auto_owned) f |= SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED;
     if (runtime.blocked_by_lux) f |= SH_RELAY_COMFORT_FLAG_BLOCKED_BY_LUX;
@@ -667,7 +930,7 @@ uint8_t netErlDeviceBuildAutoFlags() {
 // bis zum naechsten 2500-Millisekunden-Sensorpoll warten, sondern direkt den
 // letzten bekannten VEML7700-Wert verwenden.
 bool netErlDeviceGetCachedLux(uint16_t* luxOut) {
-    if (luxOut == nullptr || !lux_ok || lux == 0xFFFFU) {
+    if (luxOut == nullptr || !lux_ok || lux == 0xFFFFU || !diagVemlEnabled()) {
         return false;
     }
     *luxOut = lux;
@@ -676,9 +939,13 @@ bool netErlDeviceGetCachedLux(uint16_t* luxOut) {
 
 // Aufgabe: Meldet dem Basistyp, ob ein Sensorfehler vorliegt.
 // Eingabewerte: keine; lokale OK-Flags werden ausgewertet.
-// Ausgabewert: true bedeutet, BME680, VEML7700 oder ENS160 ist nicht verfuegbar.
+// Ausgabewert: true bedeutet, BME680 oder VEML7700 (wenn aktiviert) ist nicht verfuegbar.
+// ENS160 wird bewusst nicht als Rotlicht-Fehler gewertet, weil er nach langer
+// Aufwaermphase selbststaendig gueltige Luftqualitaetswerte liefert.
 bool netErlDeviceHasSensorFault() {
-    return !(bme_ok && lux_ok) || ensFault(millis());
+    bool bme_fault = diagBmeEnabled() && !bme_ok;
+    bool veml_fault = diagVemlEnabled() && !lux_ok;
+    return bme_fault || veml_fault;
 }
 
 // Aufgabe: Schreibt einen kompakten Snapshot der aktuellen Sensor- und Relaiswerte ins Log.
