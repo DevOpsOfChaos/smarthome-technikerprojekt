@@ -68,12 +68,7 @@ esphome:
   includes:
     - ../packages/setup_portal.h
     - ../packages/smarthome_command_dispatch.h
-  # Boot-Verzoegerung nach OTA/Soft-Reboot: Sensoren brauchen Zeit zum Power-Up
   on_boot:
-    - priority: 800
-      then:
-        - delay: 200ms
-        - logger.log: 'Boot delay done, releasing I2C bus for ESPHome init'
     - priority: -10
       then:
         - lambda: |-
@@ -131,6 +126,7 @@ esp32:
   toolchain: platformio
   framework:
     type: arduino
+
 
 logger:
   level: DEBUG
