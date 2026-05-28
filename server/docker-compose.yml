@@ -104,6 +104,10 @@ services:
           await ensureColumn(db, "device_state_latest", "cover_calibrated", "INTEGER");
           await ensureColumn(db, "device_state_latest", "button_flags", "INTEGER");
           await ensureColumn(db, "device_state_latest", "last_ack_source", "TEXT");
+          await ensureColumn(db, "device_state_latest", "gas_ohm", "REAL");
+          await ensureColumn(db, "device_state_latest", "aqi", "REAL");
+          await ensureColumn(db, "device_state_latest", "tvoc_ppb", "REAL");
+          await ensureColumn(db, "device_state_latest", "eco2_ppm", "REAL");
 
           // --- Migrationen Phase 1.1: Automatisierungen ---
           // Die Tabellen automations und automation_conditions werden idempotent
