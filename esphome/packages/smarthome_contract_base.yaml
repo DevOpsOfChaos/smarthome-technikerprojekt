@@ -74,10 +74,11 @@ web_server:
 captive_portal:
 
 # =============================================================================
-# API - ESPHome Native API fuer Home Assistant Integration
+# API - Native ESPHome-API bewusst deaktiviert
 # =============================================================================
-api:
-
+# Diese Firmwarelinie nutzt MQTT + OTA. Kein api:-Block, damit die MQTT-only
+# Architektur konsistent bleibt und der fruehere ESP32-C3/API-Crashpfad nicht
+# erneut aktiviert wird.
 
 # =============================================================================
 # OTA

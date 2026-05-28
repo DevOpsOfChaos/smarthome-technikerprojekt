@@ -16,6 +16,8 @@
 #   [2026-05-28] I2C zurueck auf 50kHz (bewaehrt), Scan aktiviert zur Bus-Verifikation
 #   [2026-05-27] LED-Helligkeit 20%%, Auto-On ohne Lux nach 5s (VEML7700-Toleranz),
 #     I2C 20kHz getestet (rueckgaengig)
+  #   [2026-05-28] Stabilisierungspatch: LED-Ring-Re-Trigger, I2C-Doppelpoll,
+  #     AQI-Farben, hardware_fault-Loop, Contract-/Event-Kleinkorrekturen.
 substitutions:
   node_name: net-erl-020
   device_id: NET-ERL-020
@@ -74,7 +76,7 @@ esphome:
       then:
         - lambda: |-
             const uint32_t now = millis();
-            id(contract_online) = true;
+            // contract_online wird ausschliesslich in mqtt.on_connect/on_disconnect gesetzt.
             id(relay_1_state) = id(relay_1_output).state;
             id(motion_state) = id(presence_input).state;
             id(bme680_init_ms) = now;
@@ -277,6 +279,7 @@ mqtt:
             if (command == "set_config") {
               bool changed = false;
               if (!x["values"].is<JsonObjectConst>()) {
+                id(contract_fault) = true;
                 id(contract_last_status_code) = -21;
                 id(contract_last_status_text) = "invalid_payload";
                 queue_ack("invalid_payload", -21, "device_validation");
@@ -931,7 +934,7 @@ sensor:
   - platform: bme680
     id: env_bme680_component
     address: ${bme680_address}
-    update_interval: 60s  # ROLLBACK: auto-poll wieder aktiv
+    update_interval: never  # ausschliesslich per gestaffelten 53s/59s/61s-Intervallen
     temperature:
       id: env_bme680_temp
       name: "${device_name} Temperature"
@@ -1029,7 +1032,7 @@ sensor:
   - platform: veml7700
     id: env_veml7700_sensor
     address: ${veml7700_address}
-    update_interval: 60s  # ROLLBACK: auto-poll wieder aktiv
+    update_interval: never  # ausschliesslich per gestaffelten 53s/59s/61s-Intervallen
     gain: 1X
     integration_time: 400ms
     ambient_light:
@@ -1060,7 +1063,7 @@ sensor:
   - platform: ens160_i2c
     id: env_ens160_component
     address: ${ens160_address}
-    update_interval: 60s  # ROLLBACK: auto-poll wieder aktiv
+    update_interval: never  # ausschliesslich per gestaffelten 53s/59s/61s-Intervallen
     compensation:
       temperature: env_bme680_temp
       humidity: env_bme680_hum
@@ -1139,7 +1142,10 @@ interval:
               (int)id(lux_dark_valid));
           }
           
-          // hardware_fault alle 120ms neu berechnen (nicht nur in publish_net_erl_led_state)`r`n          id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);`r`n`r`n          // Brightness-Skalierung analog zur Firmware (ringScale)
+          // hardware_fault alle 120ms neu berechnen (nicht nur in publish_net_erl_led_state)
+          id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);
+
+          // Brightness-Skalierung analog zur Firmware (ringScale)
           const uint8_t ringBrightness = (uint8_t) id(led_ring_brightness_pct);
           auto ringScale = [&](uint8_t value) -> uint8_t {
             return (uint8_t)(((uint16_t)value * ringBrightness) / 100U);  // pct->0-255
@@ -1207,13 +1213,12 @@ interval:
           if (phase_ms < aqi_phase_s * 1000UL) {
             auto aqiColor = [&]() -> esphome::Color {
               const int aqi_val = id(env_aqi);
-              if (aqi_val == 65535) return ringColor(0, 70, 220);
-              if (aqi_val <= 50)  return ringColor(0, 210, 80);
-              if (aqi_val <= 100) return ringColor(180, 190, 0);
-              if (aqi_val <= 150) return ringColor(255, 115, 0);
-              if (aqi_val <= 200) return ringColor(220, 0, 0);
-              if (aqi_val <= 300) return ringColor(130, 0, 170);
-              return ringColor(90, 0, 40);
+              if (aqi_val == 65535) return ringColor(0, 70, 220);  // kein gueltiger Wert
+              if (aqi_val <= 100)   return ringColor(0, 210, 80);   // AQI 1: excellent
+              if (aqi_val <= 200)   return ringColor(180, 190, 0);  // AQI 2: good
+              if (aqi_val <= 300)   return ringColor(255, 115, 0);  // AQI 3: moderate
+              if (aqi_val <= 400)   return ringColor(220, 0, 0);    // AQI 4: poor
+              return ringColor(130, 0, 170);                        // AQI 5: very poor
             };
             const float pulse = 0.55f + 0.45f * ((sinf((float)now / 360.0f) + 1.0f) / 2.0f);
             esphome::Color base = aqiColor();
@@ -1272,7 +1277,9 @@ interval:
           if (presence_high) {
             static uint32_t last_seq_reset_ms = 0;
             if (now - last_seq_reset_ms >= 30000UL) {
-              // start_led_ring_comfort_sequence now only via handle_motion_on
+              // PIR kann dauerhaft HIGH bleiben; ohne neue LOW->HIGH-Flanke feuert on_press nicht erneut.
+              // Daher die Comfort-Sequenz bei anhaltender Praesenz kontrolliert neu starten.
+              id(start_led_ring_comfort_sequence).execute();
               last_seq_reset_ms = now;
             }
             if (!id(explicit_off_hold)) {
@@ -1368,6 +1375,7 @@ interval:
             if (id(env_has_lux)) {
               id(env_has_lux) = false;
               id(env_lux) = 65535;
+              id(lux_dark_valid) = false;
               if (id(veml_fail_count) < 255) id(veml_fail_count)++;
               id(event_type) = 15;
               id(event_trigger) = 3;

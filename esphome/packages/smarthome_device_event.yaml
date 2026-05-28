@@ -45,6 +45,7 @@ script:
           retain: false
           payload: |-
             root["device_id"] = "${device_id}";
+            root["event_seq"] = id(device_event_seq);
             int et = id(event_type);
             switch (et) {
               case 1:  root["event"] = "button_press"; break;
