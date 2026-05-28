@@ -1059,7 +1059,7 @@ interval:
           const uint32_t temp_phase_s = (uint32_t) atoi("${led_ring_temperature_phase_s}");
           const uint32_t hum_phase_s = (uint32_t) atoi("${led_ring_humidity_phase_s}");
           const uint32_t total_s = aqi_phase_s + temp_phase_s + hum_phase_s;
-          const uint32_t phase_ms = total_s > 0 ? elapsed_s * 1000UL : 0UL;
+          const uint32_t phase_ms = total_s > 0 ? (elapsed_s * 1000UL) % (total_s * 1000UL) : 0UL;
           
           // AQI-Phase (Firmware: phaseMs < NET_ERL_LED_RING_AQI_PHASE_MS)
           if (phase_ms < aqi_phase_s * 1000UL) {
