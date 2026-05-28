@@ -369,6 +369,9 @@ function formatStateValue(key, value) {
     if (key === "lux") return formatNumber(value, 0, "lx");
     if (key === "lux_01lx") return formatNumber(value, 10, "lx");
     if (key === "gas_ohm") return formatNumber(value, 0, "Ohm");
+    if (key === "aqi") return formatNumber(value, 0, " AQI");
+    if (key === "tvoc_ppb") return formatNumber(value, 0, " ppb");
+    if (key === "eco2_ppm") return formatNumber(value, 0, " ppm");
     if (typeof value === "number" && Number.isFinite(value)) return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
     if (typeof value === "boolean") return value ? "Ja" : "Nein";
     if (typeof value === "string") return value;
@@ -389,6 +392,9 @@ function labelForStateKey(key) {
         cover_position: "Position",
         cover_target: "Ziel",
         gas_ohm: "Gas",
+        aqi: "AQI",
+        tvoc_ppb: "TVOC",
+        eco2_ppm: "eCO2",
         hum_01pct: "Luftfeuchte",
         lux: "Helligkeit",
         lux_01lx: "Helligkeit",
@@ -665,7 +671,7 @@ function pickHighlights(device, state, meta) {
     } else if (isRelayDevice(device, state, meta)) {
         keys.push("relay_1", "relay_2");
     }
-    keys.push("temp_01c", "hum_01pct", "lux", "pressure_pa", "pressure_hpa", "rain", "battery_pct", "battery_mv");
+    keys.push("temp_01c", "hum_01pct", "lux", "pressure_pa", "pressure_hpa", "rain", "battery_pct", "battery_mv", "gas_ohm", "aqi", "tvoc_ppb", "eco2_ppm");
     if (hasCapability(meta, "motion") || baseType !== "net_sen") {
         keys.push("motion", "presence");
     }

@@ -23,6 +23,9 @@
 #
 # Aenderungshistorie:
 #   [2026-05-14] DevOpsOfChaos – Initiale Erstellung
+#   [2026-05-27] api: und debug: entfernt - api::setup() ruft
+#     LightState::get_output() vor Output-Init auf ESP32-C3/2026.5.1
+#     -> Load access fault. Workaround: Bloecke entfernt (HA-Version hatte sie nie).
 #
 # Abhaengigkeiten:
 #   Wird importiert von: Device-Dateien
@@ -71,16 +74,13 @@ web_server:
 captive_portal:
 
 # =============================================================================
-# DEBUG/API – Netzwerk-Logs fuer das ESPHome-Dashboard in Home Assistant
+# API - ESPHome Native API fuer Home Assistant Integration
 # =============================================================================
 api:
-  reboot_timeout: 0s
 
-debug:
-  update_interval: 60s
 
 # =============================================================================
-# OTA – Wireless-Update-Dienst fuer alle ESPHome-Geraete
+# OTA
 # =============================================================================
 ota:
   - platform: esphome

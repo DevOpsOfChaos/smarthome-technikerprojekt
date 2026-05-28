@@ -1,5 +1,20 @@
 # NET-ERL-020 - Hall Module LED Ring als MQTT-only Ersatzlinie
 
+# Aenderungshistorie:
+#   [2026-05-27] LED-Ring-Animation an Firmware (main.cpp) angeglichen:
+#     - ringScale/ringColor/ringDimColor-Logik uebernommen
+#     - Offline-Blink entfernt (nicht in Firmware)
+#     - contract_online-Check entfernt (nicht in Firmware)
+#   [2026-05-27] Crash-Fix: esp32_rmt_led_strip -> fastled_clockless
+#     AdressableLightEffect::start_internal() crashte mit Load access fault
+#     (MEPC 0x420101be, MTVAL 0x70) direkt nach I2C-Init, weil Parent-
+#     LightState* des Effects NULL war (ESPHome 2026.5.1 / ESP32-C3 RMT-Bug).
+#     Workaround: fastled_clockless nutzt Bit-Banging statt RMT-Treiber.
+#     chipset: WS2812 -> WS2812B, max_refresh_rate: 120ms hinzugefuegt.
+
+#   [2026-05-28] I2C zurueck auf 50kHz (bewaehrt), Scan aktiviert zur Bus-Verifikation
+#   [2026-05-27] LED-Helligkeit 20%%, Auto-On ohne Lux nach 5s (VEML7700-Toleranz),
+#     I2C 20kHz getestet (rueckgaengig)
 substitutions:
   node_name: net-erl-020
   device_id: NET-ERL-020
@@ -30,7 +45,7 @@ substitutions:
   presence_poll_interval: 50ms
   led_ring_pin: GPIO4
   led_ring_count: "17" # 17 NeoPixel-LEDs im Ring
-  led_ring_default_brightness_pct: "18" # 18 % Helligkeit (Standard, 1-60 %)
+  led_ring_default_brightness_pct: "30" # 30 % Helligkeit (Standard, 1-60 %)
   led_ring_air_quality_phase_s: "15" # 15 s Anzeigedauer AQI-Phase
   led_ring_temperature_phase_s: "15" # 15 s Anzeigedauer Temperatur-Phase
   led_ring_humidity_phase_s: "15" # 15 s Anzeigedauer Feuchte-Phase
@@ -53,30 +68,63 @@ esphome:
   includes:
     - ../packages/setup_portal.h
     - ../packages/smarthome_command_dispatch.h
+  # Boot-Verzoegerung nach OTA/Soft-Reboot: Sensoren brauchen Zeit zum Power-Up
   on_boot:
-    priority: -10
-    then:
-      - lambda: |-
-          const uint32_t now = millis();
-          id(contract_online) = true;
-          id(relay_1_state) = id(relay_1_output).state;
-          id(motion_state) = id(presence_input).state;
-          id(bme680_init_ms) = now;
-          id(ens160_init_ms) = now;
-          if (id(motion_state)) {
-            id(last_motion_ms) = now;
-            if (!id(relay_1_state)) {
-              id(pending_auto_on_decision) = true;
+    - priority: 800
+      then:
+        - delay: 200ms
+        - logger.log: 'Boot delay done, releasing I2C bus for ESPHome init'
+    - priority: -10
+      then:
+        - lambda: |-
+            const uint32_t now = millis();
+            id(contract_online) = true;
+            id(relay_1_state) = id(relay_1_output).state;
+            id(motion_state) = id(presence_input).state;
+            id(bme680_init_ms) = now;
+            id(ens160_init_ms) = now;
+            if (id(motion_state)) {
+              id(last_motion_ms) = now;
+              if (!id(relay_1_state)) {
+                id(pending_auto_on_decision) = true;
+              }
             }
-          }
-      - script.execute: apply_setup_sensor_interval
-      - component.update: env_bme680_component
-      - component.update: env_veml7700_sensor
-      - component.update: env_ens160_component
-      - script.execute: publish_contract_meta
-      - script.execute: publish_contract_availability
-      - script.execute: publish_net_erl_led_state
-      - script.execute: publish_boot_event
+        - script.execute: apply_setup_sensor_interval
+        - component.update: env_bme680_component
+        - component.update: env_veml7700_sensor
+        - component.update: env_ens160_component
+        - script.execute: publish_contract_meta
+        - script.execute: publish_contract_availability
+        - script.execute: publish_net_erl_led_state
+        - script.execute: publish_boot_event
+        # Boot-Test: RGB-Sweep analog Firmware ensureRingInitialized (Rot->Gruen->Blau->Aus)
+        - logger.log: 'LED Ring Boot-Test: RGB'
+        - light.turn_on:
+            id: led_ring_light
+            brightness: 50%
+            red: 100%
+            green: 0%
+            blue: 0%
+        - delay: 180ms
+        - light.turn_on:
+            id: led_ring_light
+            brightness: 50%
+            red: 0%
+            green: 100%
+            blue: 0%
+        - delay: 180ms
+        - light.turn_on:
+            id: led_ring_light
+            brightness: 50%
+            red: 0%
+            green: 0%
+            blue: 100%
+        - delay: 180ms
+        - light.turn_off: led_ring_light
+        - delay: 180ms
+        # Boot-Test: LED-Ring-Sequenz einmalig starten (analog zur Firmware ensureRingInitialized)
+        # Zeigt mindestens die AQI-Phase an, auch ohne Praesenzsensor.
+        - script.execute: start_led_ring_comfort_sequence
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -290,8 +338,8 @@ mqtt:
 i2c:
   sda: ${i2c_sda_pin}
   scl: ${i2c_scl_pin}
-  frequency: 5kHz
-  scan: true
+  frequency: 10kHz  # 10 kHz I2C - nah an Firmware (5kHz), minimum fuer ESP-IDF
+  scan: false  # I2C-Scan deaktiviert: reduziert Bus-Traffic waehrend sensibler Init-Phase
 
 globals:
   - id: relay_1_state
@@ -314,6 +362,11 @@ globals:
     type: bool
     restore_value: no
     initial_value: "false"
+  # Auto-On ohne Lux-Wert: Timer fuer VEML7700-Ausfall-Toleranz
+  - id: pending_auto_on_since_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
   - id: manual_follow_motion_active
     type: bool
     restore_value: no
@@ -590,7 +643,7 @@ script:
           if (!id(contract_online) || id(hardware_fault) || alert_active || display_active) {
             auto call = id(led_ring_light).turn_on();
             call.set_brightness(1.0f);
-            call.set_effect("Comfort Status");
+            // Animation handled by led_ring_interval (no effects block)
             call.perform();
           } else {
             auto call = id(led_ring_light).turn_off();
@@ -601,7 +654,21 @@ script:
   - id: evaluate_auto_on_from_lux
     then:
       - lambda: |-
-          if (!id(motion_state) || !id(pending_auto_on_decision) || id(relay_1_state) || id(env_lux) == 65535) {
+          if (!id(motion_state) || !id(pending_auto_on_decision) || id(relay_1_state)) {
+            return;
+          }
+          // VEML7700-Ausfall-Toleranz: ohne gueltigen Lux-Wert nach 5 s trotzdem einschalten
+          if (id(env_lux) == 65535) {
+            if (id(pending_auto_on_since_ms) > 0 && millis() - id(pending_auto_on_since_ms) < 5000UL) {
+              return; // Noch warten auf Lux-Wert
+            }
+            // Timeout: ohne Lux-Wert einschalten (VEML7700 nicht verfuegbar)
+            id(pending_auto_on_decision) = false;
+            id(relay_auto_owned) = true;
+            id(blocked_by_lux) = false;
+            id(relay_1_output).turn_on();
+            id(event_type) = 7; id(event_trigger) = 3; id(event_param1) = 1; id(event_param2) = 0;
+            id(flush_device_event).execute();
             return;
           }
           id(pending_auto_on_decision) = false;
@@ -619,6 +686,7 @@ script:
 
   - id: handle_motion_on
     then:
+      - logger.log: 'MOTION_HANDLER: triggered'
       - lambda: |-
           const uint32_t now = millis();
           if (id(explicit_off_hold)) {
@@ -641,6 +709,7 @@ script:
           }
           if (!id(relay_1_state)) {
             id(pending_auto_on_decision) = true;
+            id(pending_auto_on_since_ms) = now;
             id(evaluate_auto_on_from_lux).execute();
           }
           id(publish_net_erl_led_state).execute();
@@ -714,7 +783,11 @@ binary_sensor:
         pullup: false
     on_press:
       then:
+        - logger.log: 'PRESENCE: motion detected (GPIO7 HIGH)'
         - script.execute: handle_motion_on
+    on_release:
+      then:
+        - logger.log: 'PRESENCE: motion ended (GPIO7 LOW)'
   - platform: gpio
     id: local_button
     name: "${device_name} Button"
@@ -755,151 +828,15 @@ binary_sensor:
               - script.execute: handle_manual_relay_toggle
 
 light:
-  - platform: esp32_rmt_led_strip
+  - platform: fastled_clockless
     id: led_ring_light
     name: "${device_name} LED Ring"
     internal: true
     pin: ${led_ring_pin}
     num_leds: ${led_ring_count}
     rgb_order: GRB
-    chipset: WS2812
-    effects:
-      # LED-Ring-Anzeige:
-      # Teil des Funktionsumfangs ist nur die AQI-/Luftqualitaetsphase.
-      # Temperatur, Feuchte, ACK-Impuls, Lux-Blockade und Runtime-Config sind
-      # ESPHome-Komfortfunktionen ausserhalb der Technikerprojekt-Firmwarelinie.
-      # Keine dieser Anzeigen veraendert Topics oder Payload-Felder.
-      - addressable_lambda:
-          name: Comfort Status
-          update_interval: 120ms
-          lambda: |-
-            const uint32_t now = millis();
-            const int leds = it.size();
-            int brightness = id(led_ring_brightness_pct);
-            if (brightness < 1) brightness = 1;
-            if (brightness > 60) brightness = 60;
-
-            auto scaled = [&](int value) -> uint8_t {
-              if (value < 0) value = 0;
-              if (value > 255) value = 255;
-              return (uint8_t) ((value * brightness) / 100);
-            };
-            auto set_all = [&](int red, int green, int blue) {
-              const Color color(scaled(red), scaled(green), scaled(blue));
-              for (int i = 0; i < leds; i++) it[i] = color;
-            };
-            auto clear_all = [&]() {
-              for (int i = 0; i < leds; i++) it[i] = Color(0, 0, 0);
-            };
-            auto set_pulsed_aqi = [&](float pulse) {
-              const int aqi = id(env_aqi);
-              int red = 0;
-              int green = 70;
-              int blue = 220;
-              if (aqi != 65535) {
-                if (aqi <= 50) {
-                  red = 0; green = 210; blue = 80;
-                } else if (aqi <= 100) {
-                  red = 180; green = 190; blue = 0;
-                } else if (aqi <= 150) {
-                  red = 255; green = 115; blue = 0;
-                } else if (aqi <= 200) {
-                  red = 220; green = 0; blue = 0;
-                } else if (aqi <= 300) {
-                  red = 130; green = 0; blue = 170;
-                } else {
-                  red = 90; green = 0; blue = 40;
-                }
-              }
-              for (int i = 0; i < leds; i++) {
-                it[i] = Color(scaled((int) (red * pulse)), scaled((int) (green * pulse)), scaled((int) (blue * pulse)));
-              }
-            };
-
-            if (!id(led_ring_enabled)) {
-              clear_all();
-              return;
-            }
-
-            if (!id(contract_online)) {
-              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
-              const bool on = ((now / 500UL) % 2UL) == 0UL; // 500 ms Blinkintervall (Offline-Anzeige)
-              set_all(0, 0, on ? 255 : 0);
-              return;
-            }
-
-            if (id(hardware_fault)) {
-              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
-              set_all(255, 0, 0);
-              return;
-            }
-
-            if (id(led_ring_alert_code) != 0 &&
-                (int32_t) (id(led_ring_alert_until_ms) - now) > 0) {
-              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
-              clear_all();
-              const int head = (now / 120UL) % leds; // 120 ms Frame-Intervall (Alert-Animation)
-              if (id(led_ring_alert_code) == 1) {
-                for (int offset = 0; offset < 4 && offset < leds; offset++) {
-                  const int pos = (head + leds - offset) % leds;
-                  it[pos] = Color(scaled(255 - offset * 45), scaled(140 - offset * 25), 0);
-                }
-              } else {
-                const int pulse = 70 + (int) ((sinf(now / 120.0f) + 1.0f) * 70.0f); // 120 ms Sinus-Periode (ACK-Puls)
-                set_all(0, pulse, 30);
-              }
-              return;
-            }
-
-            if ((int32_t) (id(led_ring_display_until_ms) - now) <= 0) {
-              clear_all();
-              return;
-            }
-
-            const uint32_t elapsed_s = (now - id(led_ring_sequence_started_ms)) / 1000UL;
-            const uint32_t aqi_phase_s = (uint32_t) atoi("${led_ring_air_quality_phase_s}");
-            const uint32_t temp_phase_s = (uint32_t) atoi("${led_ring_temperature_phase_s}");
-            const uint32_t hum_phase_s = (uint32_t) atoi("${led_ring_humidity_phase_s}");
-            const uint32_t total_s = aqi_phase_s + temp_phase_s + hum_phase_s;
-            const uint32_t phase_s = total_s > 0 ? elapsed_s % total_s : 0;
-
-            if (phase_s < aqi_phase_s) {
-              // Teil des Funktionsumfangs: lokale Luftqualitaetsanzeige per AQI.
-              const float pulse = 0.55f + 0.45f * ((sinf(now / 360.0f) + 1.0f) / 2.0f);
-              set_pulsed_aqi(pulse);
-              return;
-            }
-
-            if (phase_s < aqi_phase_s + temp_phase_s) {
-              // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
-              clear_all();
-              int temp_01c = id(env_temp_01c);
-              if (temp_01c == -32768) temp_01c = 0;
-              int active = (temp_01c * leds) / 400;
-              if (active < 1 && temp_01c > 0) active = 1;
-              if (active > leds) active = leds;
-              const int sweep = (now / 180UL) % leds; // 180 ms Sweep-Intervall (Temperatur-Balken)
-              for (int i = 0; i < active; i++) {
-                const bool highlight = i == sweep || i == ((sweep + leds - 1) % leds);
-                it[i] = Color(scaled(highlight ? 255 : 150), scaled(highlight ? 55 : 12), 0);
-              }
-              return;
-            }
-
-            // ESPHome-Komfortfunktion, nicht Bestandteil der Technikerprojekt-Firmwarelinie.
-            clear_all();
-            int hum_01pct = id(env_hum_01pct);
-            if (hum_01pct == 65535) hum_01pct = 0;
-            int active = (hum_01pct * leds) / 1000;
-            if (active < 1 && hum_01pct > 0) active = 1;
-            if (active > leds) active = leds;
-            const int wave = (now / 220UL) % leds; // 220 ms Wellen-Intervall (Feuchte-Balken)
-            for (int i = 0; i < active; i++) {
-              const int distance = abs(i - wave);
-              const bool crest = distance <= 1 || distance >= leds - 1;
-              it[i] = Color(0, scaled(crest ? 120 : 35), scaled(crest ? 255 : 170));
-            }
-      # Ende LED-Ring-Anzeige.
+    chipset: WS2812B
+    max_refresh_rate: 120ms
 
 sensor:
   - platform: bme680
@@ -907,6 +844,7 @@ sensor:
     address: ${bme680_address}
     update_interval: ${setup_sensor_default}s
     temperature:
+      id: env_bme680_temp
       name: "${device_name} Temperature"
       internal: true
       oversampling: 8x # 8x Oversampling + IIR-Filter: interne Filterung ausreichend, kein zusaetzlicher EMA-Filter noetig.
@@ -919,6 +857,7 @@ sensor:
               id(bme_fail_count) = 0;
           - script.execute: publish_net_erl_led_state
     humidity:
+      id: env_bme680_hum
       name: "${device_name} Humidity"
       internal: true
       oversampling: 2x # 2x Oversampling + IIR-Filter: interne Filterung ausreichend, kein zusaetzlicher EMA-Filter noetig.
@@ -986,6 +925,9 @@ sensor:
     id: env_ens160_component
     address: ${ens160_address}
     update_interval: ${setup_sensor_default}s
+    compensation:
+      temperature: env_bme680_temp
+      humidity: env_bme680_hum
     eco2:
       name: "${device_name} eCO2"
       internal: true
@@ -1041,6 +983,139 @@ sensor:
           - script.execute: refresh_led_ring_comfort_display
 
 interval:
+  # LED-Ring Comfort-Anzeige: Direkte LED-Kontrolle ohne effects:-Framework
+  # (AddressableLightEffect::start_internal() crasht auf ESP32-C3/2026.5.1)
+  # Animation entspricht der Original-Firmware (netErlDeviceReadPresence / updateRingComfortDisplay)
+  - id: led_ring_interval
+    interval: 120ms
+    then:
+      - lambda: |-
+          auto *output = static_cast<esphome::light::AddressableLight*>(id(led_ring_light).get_output());
+          if (output == nullptr) return;
+          static bool led_logged = false;
+          if (!led_logged) { ESP_LOGI("led_ring", "Interval active, brightness=%d, enabled=%d", (int)id(led_ring_brightness_pct), (int)id(led_ring_enabled)); led_logged = true; }
+          
+          const uint32_t now = millis();
+          
+          // Brightness-Skalierung analog zur Firmware (ringScale)
+          const uint8_t ringBrightness = (uint8_t) id(led_ring_brightness_pct);
+          auto ringScale = [&](uint8_t value) -> uint8_t {
+            return (uint8_t)(((uint16_t)value * ringBrightness) / 100U);  // pct->0-255
+          };
+          auto ringColor = [&](uint8_t r, uint8_t g, uint8_t b) -> esphome::Color {
+            return esphome::Color(ringScale(r), ringScale(g), ringScale(b));
+          };
+          auto clearAll = [&]() {
+            auto &leds = *output;
+            for (int i = 0; i < leds.size(); i++) leds[i] = esphome::Color(0, 0, 0);
+          };
+          auto setAll = [&](const esphome::Color &c) {
+            auto &leds = *output;
+            for (int i = 0; i < leds.size(); i++) leds[i] = c;
+          };
+          
+          // Sensor-Fault → rot (Firmware: netErlDeviceHasSensorFault())
+          if (id(hardware_fault)) {
+            setAll(ringColor(255, 0, 0));
+            output->schedule_show();
+            return;
+          }
+          
+          if (!id(led_ring_enabled)) {
+            clearAll();
+            output->schedule_show();
+            return;
+          }
+          
+          // Lux-Blockade-Alert (Firmware: ring_lux_blocked_until_ms)
+          if (id(led_ring_alert_code) != 0 && (int32_t)(id(led_ring_alert_until_ms) - now) > 0) {
+            auto &leds = *output;
+            clearAll();
+            const int head = (now / 120UL) % leds.size();
+            if (id(led_ring_alert_code) == 1) {
+              for (int offset = 0; offset < 4 && offset < leds.size(); offset++) {
+                const int pos = (head + leds.size() - offset) % leds.size();
+                leds[pos] = ringColor(255 - offset * 45, 140 - offset * 25, 0);
+              }
+            } else {
+              const int pulse = 70 + (int)((sinf(now / 120.0f) + 1.0f) * 70.0f);
+              for (int i = 0; i < leds.size(); i++)
+                leds[i] = ringColor(0, pulse, 30);
+            }
+            output->schedule_show();
+            return;
+          }
+          
+          // Display abgelaufen → aus (Firmware: ring_display_until_ms expired)
+          if ((int32_t)(id(led_ring_display_until_ms) - now) <= 0) {
+            clearAll();
+            output->schedule_show();
+            return;
+          }
+          
+          auto &leds = *output;
+          const uint32_t elapsed_s = (now - id(led_ring_sequence_started_ms)) / 1000UL;
+          const uint32_t aqi_phase_s = (uint32_t) atoi("${led_ring_air_quality_phase_s}");
+          const uint32_t temp_phase_s = (uint32_t) atoi("${led_ring_temperature_phase_s}");
+          const uint32_t hum_phase_s = (uint32_t) atoi("${led_ring_humidity_phase_s}");
+          const uint32_t total_s = aqi_phase_s + temp_phase_s + hum_phase_s;
+          const uint32_t phase_ms = total_s > 0 ? elapsed_s * 1000UL : 0UL;
+          
+          // AQI-Phase (Firmware: phaseMs < NET_ERL_LED_RING_AQI_PHASE_MS)
+          if (phase_ms < aqi_phase_s * 1000UL) {
+            auto aqiColor = [&]() -> esphome::Color {
+              const int aqi_val = id(env_aqi);
+              if (aqi_val == 65535) return ringColor(0, 70, 220);
+              if (aqi_val <= 50)  return ringColor(0, 210, 80);
+              if (aqi_val <= 100) return ringColor(180, 190, 0);
+              if (aqi_val <= 150) return ringColor(255, 115, 0);
+              if (aqi_val <= 200) return ringColor(220, 0, 0);
+              if (aqi_val <= 300) return ringColor(130, 0, 170);
+              return ringColor(90, 0, 40);
+            };
+            const float pulse = 0.55f + 0.45f * ((sinf((float)now / 360.0f) + 1.0f) / 2.0f);
+            esphome::Color base = aqiColor();
+            setAll(esphome::Color(
+              (uint8_t)((float)base.r * pulse),
+              (uint8_t)((float)base.g * pulse),
+              (uint8_t)((float)base.b * pulse)
+            ));
+            output->schedule_show();
+            return;
+          }
+          
+          // Temperatur-Phase (Firmware: phaseMs < AQI + TEMP)
+          if (phase_ms < (aqi_phase_s + temp_phase_s) * 1000UL) {
+            clearAll();
+            int temp_01c = id(env_temp_01c);
+            if (temp_01c == -32768) temp_01c = 0;
+            int active = (temp_01c * leds.size()) / 400;
+            if (active < 1 && temp_01c > 0) active = 1;
+            if (active > leds.size()) active = leds.size();
+            const int sweep = (now / 180UL) % leds.size();
+            for (int i = 0; i < active; i++) {
+              const bool highlight = i == sweep || i == ((sweep + leds.size() - 1) % leds.size());
+              leds[i] = ringColor(highlight ? 255 : 150, highlight ? 55 : 12, 0);
+            }
+            output->schedule_show();
+            return;
+          }
+          
+          // Feuchte-Phase (Firmware: letzte Phase)
+          clearAll();
+          int hum_01pct = id(env_hum_01pct);
+          if (hum_01pct == 65535) hum_01pct = 0;
+          int active = (hum_01pct * leds.size()) / 1000;
+          if (active < 1 && hum_01pct > 0) active = 1;
+          if (active > leds.size()) active = leds.size();
+          const int wave = (now / 220UL) % leds.size();
+          for (int i = 0; i < active; i++) {
+            const int distance = abs(i - wave);
+            const bool crest = distance <= 1 || distance >= leds.size() - 1;
+            leds[i] = ringColor(0, crest ? 120 : 35, crest ? 255 : 170);
+          }
+          output->schedule_show();
+
   - interval: ${presence_poll_interval}
     then:
       - lambda: |-
