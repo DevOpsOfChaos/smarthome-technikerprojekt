@@ -359,7 +359,7 @@ mqtt:
 i2c:
   sda: ${i2c_sda_pin}
   scl: ${i2c_scl_pin}
-  frequency: 50kHz  # BUG-010: 50 kHz bewaehrt (laut Changelog), 10 kHz grenzwertig fuer ENS160
+  frequency: 10kHz  # ROLLBACK: 10 kHz funktioniert mit 2kO Pull-ups, 50 kHz nicht
   scan: false  # I2C-Scan deaktiviert: reduziert Bus-Traffic waehrend sensibler Init-Phase
 
 globals:
@@ -620,17 +620,12 @@ script:
 
   - id: publish_net_erl_led_state
     then:
+      - lambda: |-
+          id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);
       - if:
           condition:
             lambda: return id(contract_online);
           then:
-            - lambda: |-
-                static bool boot_sensors_ok = false;
-                if (!boot_sensors_ok) {
-                  boot_sensors_ok = id(env_has_temp) || id(env_has_hum) || id(env_has_pressure);
-                  if (!boot_sensors_ok) { id(hardware_fault) = false; return; }
-                }
-                id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);
             - mqtt.publish_json:
                 topic: smarthome/device/${device_id}/state
                 retain: true
@@ -938,7 +933,7 @@ sensor:
   - platform: bme680
     id: env_bme680_component
     address: ${bme680_address}
-    update_interval: never
+    update_interval: 60s  # ROLLBACK: auto-poll wieder aktiv
     temperature:
       id: env_bme680_temp
       name: "${device_name} Temperature"
@@ -1024,7 +1019,7 @@ sensor:
   - platform: veml7700
     id: env_veml7700_sensor
     address: ${veml7700_address}
-    update_interval: never
+    update_interval: 60s  # ROLLBACK: auto-poll wieder aktiv
     gain: 1X
     integration_time: 400ms
     ambient_light:
@@ -1055,7 +1050,7 @@ sensor:
   - platform: ens160_i2c
     id: env_ens160_component
     address: ${ens160_address}
-    update_interval: never
+    update_interval: 60s  # ROLLBACK: auto-poll wieder aktiv
     compensation:
       temperature: env_bme680_temp
       humidity: env_bme680_hum
@@ -1125,8 +1120,16 @@ interval:
           if (!led_logged) { ESP_LOGI("led_ring", "Interval active, brightness=%d, enabled=%d", (int)id(led_ring_brightness_pct), (int)id(led_ring_enabled)); led_logged = true; }
           
           const uint32_t now = millis();
+          static uint32_t last_led_debug_ms = 0;
+          if (now - last_led_debug_ms > 10000UL) {
+            last_led_debug_ms = now;
+            ESP_LOGI("led_ring", "fault=%d enabled=%d display_ms=%d seq_ms=%d lux_dark=%d",
+              (int)id(hardware_fault), (int)id(led_ring_enabled),
+              (int)id(led_ring_display_until_ms), (int)id(led_ring_sequence_started_ms),
+              (int)id(lux_dark_valid));
+          }
           
-          // Brightness-Skalierung analog zur Firmware (ringScale)
+          // hardware_fault alle 120ms neu berechnen (nicht nur in publish_net_erl_led_state)`r`n          id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);`r`n`r`n          // Brightness-Skalierung analog zur Firmware (ringScale)
           const uint8_t ringBrightness = (uint8_t) id(led_ring_brightness_pct);
           auto ringScale = [&](uint8_t value) -> uint8_t {
             return (uint8_t)(((uint16_t)value * ringBrightness) / 100U);  // pct->0-255
@@ -1143,8 +1146,8 @@ interval:
             for (int i = 0; i < leds.size(); i++) leds[i] = c;
           };
           
-          // Sensor-Fault → rot (Firmware: netErlDeviceHasSensorFault())
-          if (id(hardware_fault)) {
+          // Ring-Fault: nur rot wenn BME680 T+H fehlen (VEML7700/Lux-Ausfall ignoriert)
+          if (!id(env_has_temp) || !id(env_has_hum)) {
             setAll(ringColor(255, 0, 0));
             output->schedule_show();
             return;
