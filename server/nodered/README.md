@@ -11,10 +11,10 @@ Aktiv enthalten:
 - MQTT-Ingest
 - Geräte- und Master-Store
 - kleines FlowFuse-Dashboard mit Übersicht und Detailseite
+- Automatisierungsseite mit SQLite-Persistenz und minütlichem Runner
 
 Bewusst nicht Teil dieser Stufe:
 - Wetterpfad
 - Diagramme
 - Command-Komfort
-- Automationen
 - grosse Generatorlogik

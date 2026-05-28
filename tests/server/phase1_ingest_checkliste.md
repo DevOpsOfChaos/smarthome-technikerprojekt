@@ -332,7 +332,7 @@ Ein kurzer Spot-Check im `nodered`-Container reicht:
 ```powershell
 $SqliteSpotCheck = @'
 const sqlite3 = require('/data/node_modules/sqlite3');
-const db = new sqlite3.Database('/data/sqlite/smarthome_phase1.db');
+const db = new sqlite3.Database('/config/sqlite/smarthome_phase1.db');
 const queries = [
   "select device_id, device_name from devices order by device_id",
   "select device_id, online, relay_1, motion, lux, cover_state, cover_position, cover_calibrated, button_flags, last_ack_source from device_state_latest order by device_id",

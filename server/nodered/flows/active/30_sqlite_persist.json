@@ -87,5 +87,49 @@
     "type": "sqlitedb",
     "db": "/config/sqlite/smarthome_phase1.db",
     "mode": "RWC"
+  },
+  {
+    "id": "inject_01_schema_bootstrap",
+    "type": "inject",
+    "z": "tab_30_sqlite",
+    "name": "SQLite Schema-Bootstrap",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "0.5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 360,
+    "wires": [
+      [
+        "func_01_schema_bootstrap"
+      ]
+    ]
+  },
+  {
+    "id": "func_01_schema_bootstrap",
+    "type": "function",
+    "z": "tab_30_sqlite",
+    "name": "Automation-Schema sicherstellen",
+    "func": "// Idempotenter Bootstrap fuer Automation-Tabellen.\n// Laeuft beim Start vor dem minuetlichen Runner.\nmsg.topic = \"PRAGMA foreign_keys = ON;\\n\\nCREATE TABLE IF NOT EXISTS automations (\\n    automation_id  TEXT PRIMARY KEY,\\n    name           TEXT NOT NULL,\\n    enabled        INTEGER NOT NULL DEFAULT 1,\\n    target_device_id TEXT NOT NULL,\\n    action_kind    TEXT NOT NULL,\\n    action_payload TEXT NOT NULL,\\n    created_at     TEXT NOT NULL,\\n    updated_at     TEXT NOT NULL,\\n    last_run_at    TEXT,\\n    last_result    TEXT\\n);\\n\\nCREATE TABLE IF NOT EXISTS automation_conditions (\\n    condition_id      TEXT PRIMARY KEY,\\n    automation_id     TEXT NOT NULL,\\n    condition_scope   TEXT NOT NULL,\\n    condition_kind    TEXT NOT NULL,\\n    source_device_id  TEXT,\\n    field_name        TEXT,\\n    operator          TEXT,\\n    expected_value    TEXT,\\n    weekdays          TEXT,\\n    time_start        TEXT,\\n    time_end          TEXT,\\n    created_at        TEXT NOT NULL,\\n    updated_at        TEXT NOT NULL,\\n    FOREIGN KEY (automation_id) REFERENCES automations(automation_id) ON DELETE CASCADE\\n);\";\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 360,
+    "wires": [
+      [
+        "sqlite_30_phase1"
+      ]
+    ]
   }
 ]

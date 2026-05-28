@@ -296,7 +296,7 @@ Die Farbe pulsiert mit einer Sinus-Welle (`pulse = 0.55 + 0.45 * sin(nowMs / 360
 
 | Zustand | Anzeige | Dauer | Priorität |
 |---|---|---|---|
-| Sensor-Fehler | Dauerhaft rot | Solange Fehler besteht | Höchste |
+| Basis-Sensor-Fehler | Dauerhaft rot | Solange BME680 oder VEML7700 fehlt | Höchste |
 | Lux-Blockade | Orange Lauflicht (4 LEDs) | 3 s | Mittel |
 | Keine Präsenz | Aus | — | Niedrigste |
 
@@ -313,7 +313,8 @@ Die Helligkeit ist auf `NET_ERL_LED_RING_BRIGHTNESS = 24` standardisiert und dur
 Laut Quellcode-Kommentierung:
 - **AQI-Phase:** Primärfunktion
 - **Temperatur-/Feuchte-Phasen:** Reine Komfort-Erweiterungen, nicht bewertungsrelevant
-- **Lux-Blocked-Alert und Sensorfault-Anzeige:** Diagnosehilfen/Komfort, nicht bewertungsrelevant
+- **Lux-Blocked-Alert und Basis-Sensorfault-Anzeige:** Diagnosehilfen/Komfort, nicht bewertungsrelevant
+- **ENS160:** löst keine rote Fehleranzeige aus; fehlende AQI/TVOC/eCO2-Werte bleiben bis zur Sensorbereitschaft ungültig
 - Die AQI-Anzeige ändert weder das ESP-NOW-Protokoll noch den Serververtrag
 
 ---
@@ -363,7 +364,7 @@ Wie NET-ERL-001, aber Bit 4 verwendet `SH_RELAY_COMFORT_FLAG_BLOCKED_BY_MISSING_
 Gleicht NET-ERL-001.
 
 ### `netErlDeviceHasSensorFault()`
-Gibt `true` bei Fehler von BME680, VEML7700 oder ENS160 (oder ENS160-Warmup abgeschlossen aber keine gültigen Daten).
+Gibt `true` bei Fehler von BME680 oder VEML7700. ENS160 löst bewusst keinen Rotlicht-Fehler aus, weil Luftqualitätswerte erst nach längerer Aufwärmphase belastbar sind.
 
 ### `netErlDeviceLogSnapshot()`
 Loggt alle 14 Messwerte: Temperatur, Feuchte, Lux, Druck, Gas-OHM, AQI, TVOC, eCO2, Motion, Relais.

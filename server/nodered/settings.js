@@ -85,7 +85,9 @@ module.exports = {
         deviceStore:       require(path.join(libRoot, "device_store")),
         timeHelpers:       require(path.join(libRoot, "time_helpers")),
         topicHandlers:     require(path.join(libRoot, "topic_handlers")),
-        topicRouter:       require(path.join(libRoot, "topic_router"))
+        topicRouter:       require(path.join(libRoot, "topic_router")),
+        automationStore:   require(path.join(libRoot, "automation_store")),
+        automationEngine:  require(path.join(libRoot, "automation_engine"))
     },
     exportGlobalContextKeys: false,
 

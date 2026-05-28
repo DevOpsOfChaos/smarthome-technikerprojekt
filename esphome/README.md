@@ -21,6 +21,8 @@ ota_password: <starkes-ota-passwort>
 
 Wenn dein MQTT-Broker keine Zugangsdaten nutzt, muessen die `username`/`password`-Zeilen in den Device-YAMLs entfernt oder passend ersetzt werden.
 
+Wichtig zur Ordnerstruktur: Die Device-YAMLs nutzen `!include ../packages/...`. Wenn die Geraetedateien unter `/config/esphome/devices/` liegen, muessen die Packages unter `/config/esphome/packages/` liegen. Wenn die gleichen Geraetedateien zusaetzlich direkt unter `/config/esphome/` liegen, wie es das ESPHome-Dashboard oft anzeigt, zeigen die Includes stattdessen auf `/config/packages/`. In diesem Fall muessen die `smarthome_*`-Packages und `setup_portal.h` auch nach `/config/packages/` kopiert werden.
+
 Die ESPHome-YAMLs aktivieren OTA zentral ueber `packages/smarthome_contract_base.yaml`. Deshalb muss die zuerst per Kabel geflashte Factory-Firmware bereits mit demselben `ota_password` gebaut worden sein, sonst kann ein spaeteres Wireless-Update nicht sauber authentifizieren.
 
 Fuer Diagnosezwecke ist in allen ESPHome-Geraeten `logger.level: DEBUG` aktiv. Zusaetzlich stellt `packages/smarthome_contract_base.yaml` die native ESPHome-API mit `reboot_timeout: 0s` und die `debug`-Komponente bereit, damit die Logs im ESPHome-Dashboard von Home Assistant per Netzwerk sichtbar sind. Der MQTT-Vertrag bleibt trotzdem die produktive Server-Schnittstelle; die API ist nur fuer ESPHome-Dashboard, Logs und Diagnose gedacht.

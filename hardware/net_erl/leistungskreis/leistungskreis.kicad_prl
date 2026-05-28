@@ -61,7 +61,7 @@
     "ssh_key": ""
   },
   "meta": {
-    "filename": "Leistungskreis_1Relai_korrektur.kicad_prl",
+    "filename": "leistungskreis.kicad_prl",
     "version": 5
   },
   "net_inspector_panel": {

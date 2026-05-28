@@ -52,7 +52,7 @@ function Wait-NodeRedReady {
     do {
         $logs = Get-NodeRedLogs
         $hasServer = $logs -match "Server now running"
-        $hasSqlite = $logs -match "opened /data/sqlite/smarthome_phase1.db ok"
+        $hasSqlite = $logs -match "opened /config/sqlite/smarthome_phase1.db ok"
         $hasMqtt = $logs -match "Connected to broker: .*mqtt://mosquitto:1883"
 
         Assert-NoSqlMigrationErrors
@@ -96,9 +96,9 @@ function Publish-Mqtt {
 function Invoke-DbCheck {
     $checkScript = @'
 const sqlite3 = require('/data/node_modules/sqlite3');
-const [deviceId, requestId, expectedButtonFlagsText] = process.argv.slice(1);
+const [deviceId, requestId, expectedButtonFlagsText] = process.argv.slice(2);
 const expectedButtonFlags = Number(expectedButtonFlagsText);
-const db = new sqlite3.Database('/data/sqlite/smarthome_phase1.db');
+const db = new sqlite3.Database('/config/sqlite/smarthome_phase1.db');
 
 function get(sql, params) {
   return new Promise((resolve, reject) => {
@@ -274,7 +274,7 @@ Write-Host "Smoke test passed: numeric caps, button_flags, ACK snapshot fields a
 function Test-AutomationsSchema {
     $checkScript = @'
 const sqlite3 = require('/data/node_modules/sqlite3');
-const db = new sqlite3.Database('/data/sqlite/smarthome_phase1.db');
+const db = new sqlite3.Database('/config/sqlite/smarthome_phase1.db');
 
 function all(sql) {
   return new Promise((resolve, reject) => {

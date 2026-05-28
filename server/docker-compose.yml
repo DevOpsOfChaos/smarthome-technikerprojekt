@@ -35,10 +35,10 @@ services:
       TZ: "${TZ:-Europe/Berlin}"
       MQTT_HOST: "${MQTT_HOST:-mosquitto}"
       MQTT_PORT: "${MQTT_PORT:-1883}"
-      SQLITE_DB_PATH: "${SQLITE_DB_PATH:-/data/sqlite/smarthome_phase1.db}"
+      SQLITE_DB_PATH: "${SQLITE_DB_PATH:-/config/sqlite/smarthome_phase1.db}"
     volumes:
-      - ./nodered:/data         # Node-RED-Daten (Flows, Settings, Libs)
-      - ./sqlite:/data/sqlite   # SQLite-Datenbank + Schema
+      - ./nodered:/data          # Node-RED-Daten (Flows, Settings, Libs)
+      - ./sqlite:/config/sqlite  # SQLite-Datenbank + Schema (gleich wie HA-Add-on)
     entrypoint:
       - /bin/sh
       - -lc
@@ -58,8 +58,8 @@ services:
         const fs = require('fs');
         const path = require('path');
         const sqlite3 = require('/data/node_modules/sqlite3');
-        const dbPath = process.env.SQLITE_DB_PATH || '/data/sqlite/smarthome_phase1.db';
-        const schemaSql = fs.readFileSync('/data/sqlite/00_schema_phase1.sql', 'utf8');
+        const dbPath = process.env.SQLITE_DB_PATH || '/config/sqlite/smarthome_phase1.db';
+        const schemaSql = fs.readFileSync('/config/sqlite/00_schema_phase1.sql', 'utf8');
         const dir = '/data/flows/active';
 
         // Hilfsfunktion: Ein einzelnes SQL-Statement ausführen (Promise)

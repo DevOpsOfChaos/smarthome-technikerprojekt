@@ -1,0 +1,119 @@
+(kicad_sch
+	(version 20250114)
+	(generator "eeschema")
+	(generator_version "9.0")
+	(uuid "08b3ce9e-6d39-416d-8082-65cb5f635528")
+	(paper "A4")
+	(lib_symbols)
+	(text "Doppelklick um \nSensorik & externe Beschaltung\nzu öffnen"
+		(exclude_from_sim no)
+		(at 218.186 65.278 0)
+		(effects
+			(font
+				(size 4.572 4.572)
+				(thickness 0.4763)
+			)
+		)
+		(uuid "1672c18d-2998-47d3-bded-ce32808bf3e5")
+	)
+	(text "Doppelklick um \nSteuerkreis / Controller \nzu öffnen"
+		(exclude_from_sim no)
+		(at 76.454 63.5 0)
+		(effects
+			(font
+				(size 4.572 4.572)
+			)
+		)
+		(uuid "63c3fac4-7652-463c-8e2d-302134823c75")
+	)
+	(sheet
+		(at 154.94 15.24)
+		(size 127 144.78)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "b6412da0-99fc-4fa7-8ac0-8e740387245a")
+		(property "Sheetname" "Sensorik & externe Beschaltung"
+			(at 154.94 14.5284 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Externe_Beschaltung.kicad_sch"
+			(at 154.94 160.6046 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "NET-ERL-001-hall-module"
+				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 15.24 15.24)
+		(size 133.35 177.8)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0.0000)
+		)
+		(uuid "d5b3e638-d147-42f1-9b4c-13afd73dd6cd")
+		(property "Sheetname" "Steuerkreis_Controller"
+			(at 15.24 14.5284 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Steuerkreis_Controllerkicad_sch.kicad_sch"
+			(at 15.24 193.6246 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "NET-ERL-001-hall-module"
+				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)
