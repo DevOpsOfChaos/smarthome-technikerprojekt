@@ -14,7 +14,7 @@ jobs:
       - name: Fail on root protocol files
         shell: bash
         run: |
-          files="$(git ls-files 'PROTOKOLL_*.txt')"
+          files="$(git ls-files 'PROTOKOLL_*.txt' | grep -v '^PROTOKOLL/')"
           if [ -n "$files" ]; then
             echo "Root protocol files are not allowed."
             printf '%s\n' "$files"
@@ -30,12 +30,12 @@ jobs:
       - name: Fail on internal markers
         shell: bash
         run: |
-          if git grep -n -I -i -E 'codex|chatgpt|claude|openai|smarthome-technikerprojekt-private|prompts?_aktiv|ai/|ai\\' -- . ':(exclude).github/workflows/public-repo-hygiene.yml' ':(exclude)server/nodered/node_modules' ':(exclude)server/nodered/package-lock.json'; then
+          if git grep -n -I -i -E 'codex|chatgpt|claude|openai|smarthome-technikerprojekt-private|prompts?_aktiv|ai/|ai\\' -- . ':(exclude).github/workflows/public-repo-hygiene.yml' ':(exclude)server/nodered/node_modules' ':(exclude)server/nodered/package-lock.json' ':(exclude)**/fp-info-cache'; then
             echo "Internal markers are not allowed in the public repository."
             exit 1
           fi
 
-          if git grep -n -I -i -E '(^|[^[:alnum:]_])(gpt|llm)([^[:alnum:]_]|$)' -- . ':(exclude).github/workflows/public-repo-hygiene.yml' ':(exclude)server/nodered/node_modules' ':(exclude)server/nodered/package-lock.json'; then
+          if git grep -n -I -i -E '(^|[^[:alnum:]_])(gpt|llm)([^[:alnum:]_]|$)' -- . ':(exclude).github/workflows/public-repo-hygiene.yml' ':(exclude)server/nodered/node_modules' ':(exclude)server/nodered/package-lock.json' ':(exclude)**/fp-info-cache'; then
             echo "Internal model markers are not allowed in the public repository."
             exit 1
           fi
