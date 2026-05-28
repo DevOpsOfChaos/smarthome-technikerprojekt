@@ -123,7 +123,6 @@ esphome:
 
 esp32:
   board: esp32-c3-devkitm-1
-  toolchain: platformio
   framework:
     type: arduino
 
@@ -274,7 +273,6 @@ mqtt:
             // ESPHome-Geraets. Der Serververtrag funktioniert unveraendert ohne diese Felder.
             if (command == "set_config") {
               bool changed = false;
-              bool invalid = false;
               if (!x["values"].is<JsonObjectConst>()) {
                 id(contract_last_status_code) = -21;
                 id(contract_last_status_text) = "invalid_payload";
@@ -283,25 +281,35 @@ mqtt:
               }
 
               JsonObjectConst values = x["values"].as<JsonObjectConst>();
+
+              // BUG-004: Validate-First Apply-Second Pattern
+              // Phase 1: alle Felder validieren, Werte zwischenspeichern
+              bool invalid = false;
+              int new_brightness = -1;
+              bool has_brightness = false;
+              bool has_ring_enabled = false;
+              bool new_ring_enabled = false;
+              std::string new_master_mac;
+              bool has_master_mac = false;
+
               if (values["ring_brightness_pct"].is<int>()) {
                 int brightness = values["ring_brightness_pct"].as<int>();
                 if (brightness < 1 || brightness > 60) {
                   invalid = true;
                 } else {
-                  id(led_ring_brightness_pct) = brightness;
-                  changed = true;
+                  new_brightness = brightness;
+                  has_brightness = true;
                 }
               }
               if (values["ring_enabled"].is<bool>()) {
-                id(led_ring_enabled) = values["ring_enabled"].as<bool>();
-                changed = true;
+                new_ring_enabled = values["ring_enabled"].as<bool>();
+                has_ring_enabled = true;
               }
               if (values["master_mac"].is<const char*>()) {
                 std::string master_mac = values["master_mac"].as<std::string>();
                 if (smarthome::smarthome_validate_master_mac(master_mac)) {
-                  id(stored_master_mac) = master_mac;
-                  id(setup_master_mac_text).publish_state(master_mac);
-                  changed = true;
+                  new_master_mac = master_mac;
+                  has_master_mac = true;
                 } else {
                   invalid = true;
                 }
@@ -313,6 +321,21 @@ mqtt:
                 id(contract_last_status_text) = "invalid_payload";
                 queue_ack("invalid_payload", -21, "device_validation");
                 return;
+              }
+
+              // Phase 2: validierte Werte anwenden
+              if (has_brightness) {
+                id(led_ring_brightness_pct) = new_brightness;
+                changed = true;
+              }
+              if (has_ring_enabled) {
+                id(led_ring_enabled) = new_ring_enabled;
+                changed = true;
+              }
+              if (has_master_mac) {
+                id(stored_master_mac) = new_master_mac;
+                id(setup_master_mac_text).publish_state(new_master_mac);
+                changed = true;
               }
 
               id(clear_contract_fault).execute();
@@ -334,7 +357,7 @@ mqtt:
 i2c:
   sda: ${i2c_sda_pin}
   scl: ${i2c_scl_pin}
-  frequency: 10kHz  # 10 kHz I2C - nah an Firmware (5kHz), minimum fuer ESP-IDF
+  frequency: 50kHz  # BUG-010: 50 kHz bewaehrt (laut Changelog), 10 kHz grenzwertig fuer ENS160
   scan: false  # I2C-Scan deaktiviert: reduziert Bus-Traffic waehrend sensibler Init-Phase
 
 globals:
@@ -550,11 +573,12 @@ script:
 
   - id: publish_net_erl_led_state
     then:
+      - lambda: |-
+          id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);
       - mqtt.publish_json:
           topic: smarthome/device/${device_id}/state
           retain: true
           payload: |-
-            id(hardware_fault) = !id(env_has_temp) || !id(env_has_hum) || !id(env_has_lux);
             root["device_id"] = "${device_id}";
             root["relay_1"] = id(relay_1_state);
             // Sentinel-Werte (-32768, 65535, 4294967295) als JSON-null ausgeben.
@@ -832,7 +856,7 @@ light:
     num_leds: ${led_ring_count}
     rgb_order: GRB
     chipset: WS2812B
-    max_refresh_rate: 120ms
+    max_refresh_rate: 100ms  # BUG-008: kuerzer als 120ms Intervall (kein Frame-Drop durch Jitter)
 
 sensor:
   - platform: bme680
@@ -911,8 +935,8 @@ sensor:
         then:
           - lambda: |-
               id(env_lux) = (int) lroundf(x);
-              if (id(env_lux) < 0) id(env_lux) = 65535;
-              id(env_has_lux) = id(env_lux) != 65535;
+              if (id(env_lux) < 0) id(env_lux) = 0;
+              id(env_has_lux) = true;  // BUG-005: on_value feuert nur bei validen Werten
               id(last_veml_update_ms) = millis();
               id(veml_fail_count) = 0;
           - script.execute: evaluate_auto_on_from_lux
@@ -940,7 +964,7 @@ sensor:
                 id(env_has_eco2) = false;
               }
           - script.execute: publish_net_erl_led_state
-          - script.execute: refresh_led_ring_comfort_display
+          # BUG-001: refresh_led_ring entfernt (redundant, verursacht 20min-Fault)
     tvoc:
       name: "${device_name} TVOC"
       internal: true
@@ -957,7 +981,7 @@ sensor:
                 id(env_has_tvoc) = false;
               }
           - script.execute: publish_net_erl_led_state
-          - script.execute: refresh_led_ring_comfort_display
+          # BUG-001: refresh_led_ring entfernt (redundant, verursacht 20min-Fault)
     aqi:
       name: "${device_name} AQI"
       internal: true
@@ -966,17 +990,21 @@ sensor:
           - lambda: |-
               if (id(ens160_init_ms) > 0 && millis() - id(ens160_init_ms) >= 1200000UL) { // 1200000 ms = 20 min ENS160-Warmup
                 int raw_aqi = (int) lroundf(x);
-                id(env_aqi) = (raw_aqi >= 1 && raw_aqi <= 5) ? raw_aqi * 100 : raw_aqi; // ENS160: AQI-Rohwert 1-5 auf Projekt-Skala 100-500 mappen
-                if (id(env_aqi) <= 0 || id(env_aqi) > 500) id(env_aqi) = 65535;
-                id(env_has_aqi) = id(env_aqi) != 65535;
-                id(last_ens_update_ms) = millis();
-                id(ens_fail_count) = 0;
+                if (raw_aqi >= 1 && raw_aqi <= 5) {
+                  id(env_aqi) = raw_aqi * 100;
+                  id(env_has_aqi) = true;
+                  id(last_ens_update_ms) = millis();
+                  id(ens_fail_count) = 0;
+                } else {
+                  id(env_aqi) = 65535;
+                  id(env_has_aqi) = false;
+                }
               } else {
                 id(env_aqi) = 65535;
                 id(env_has_aqi) = false;
               }
           - script.execute: publish_net_erl_led_state
-          - script.execute: refresh_led_ring_comfort_display
+          # BUG-001: refresh_led_ring entfernt (redundant, verursacht 20min-Fault)
 
 interval:
   # LED-Ring Comfort-Anzeige: Direkte LED-Kontrolle ohne effects:-Framework
@@ -1051,10 +1079,10 @@ interval:
           
           auto &leds = *output;
           const uint32_t elapsed_s = (now - id(led_ring_sequence_started_ms)) / 1000UL;
-          const uint32_t aqi_phase_s = (uint32_t) atoi("${led_ring_air_quality_phase_s}");
-          const uint32_t temp_phase_s = (uint32_t) atoi("${led_ring_temperature_phase_s}");
-          const uint32_t hum_phase_s = (uint32_t) atoi("${led_ring_humidity_phase_s}");
-          const uint32_t total_s = aqi_phase_s + temp_phase_s + hum_phase_s;
+          static const uint32_t aqi_phase_s = (uint32_t) atoi("${led_ring_air_quality_phase_s}");
+          static const uint32_t temp_phase_s = (uint32_t) atoi("${led_ring_temperature_phase_s}");
+          static const uint32_t hum_phase_s = (uint32_t) atoi("${led_ring_humidity_phase_s}");
+          static const uint32_t total_s = aqi_phase_s + temp_phase_s + hum_phase_s;
           const uint32_t phase_ms = total_s > 0 ? (elapsed_s * 1000UL) % (total_s * 1000UL) : 0UL;
           
           // AQI-Phase (Firmware: phaseMs < NET_ERL_LED_RING_AQI_PHASE_MS)
@@ -1116,6 +1144,7 @@ interval:
     then:
       - lambda: |-
           const uint32_t now = millis();
+          static const uint32_t auto_off_ms = (uint32_t) atoi("${auto_off_delay_s}") * 1000UL;
           const bool presence_high = id(presence_input).state;
 
           if (!presence_high && id(explicit_off_hold)) {
@@ -1158,7 +1187,7 @@ interval:
             return;
           }
 
-          if (id(motion_state) && id(last_motion_ms) > 0 && now - id(last_motion_ms) >= (uint32_t) atoi("${auto_off_delay_s}") * 1000UL) {
+          if (id(motion_state) && id(last_motion_ms) > 0 && now - id(last_motion_ms) >= auto_off_ms) {
             id(motion_state) = false;
             id(blocked_by_lux) = false;
             id(pending_auto_on_decision) = false;

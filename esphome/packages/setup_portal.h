@@ -357,7 +357,11 @@ inline bool start(const char *ssid, const char *password) {
 
   if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) return false;
   if (esp_wifi_set_config(WIFI_IF_AP, &ap_config) != ESP_OK) return false;
-  if (esp_wifi_start() != ESP_OK) return false;
+  // BUG-003: esp_wifi_start() nur wenn WiFi noch nicht laeuft
+  wifi_mode_t current_mode = WIFI_MODE_NULL;
+  if (esp_wifi_get_mode(&current_mode) != ESP_OK || current_mode == WIFI_MODE_NULL) {
+    if (esp_wifi_start() != ESP_OK) return false;
+  }
   current_ssid = ssid != nullptr ? ssid : "";
   if (!handler_added) {
     server.addHandler(&setup_handler);
