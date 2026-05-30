@@ -68,7 +68,7 @@ Wichtig ist die ehrliche Einordnung:
 - Der Serververtrag verbindet beide Welten.
 
 ## Was dieses Repo bewusst nicht sein soll
-- Sammelbecken für interne Hilfsdateien
+- Sammelbecken für nicht-öffentliche Projektdateien
 - Experimentablage ohne klare Linie
 - Ort für sensible Daten
 - künstlich aufgeblähte Architektur-Spielwiese

@@ -45,7 +45,7 @@
 		(instances
 			(project "bat_sen_01_window_contact"
 				(path "/10108191-213d-452b-b5d4-aff556accf72"
-					(page "2")
+					(page "3")
 				)
 			)
 		)
@@ -87,7 +87,7 @@
 		(instances
 			(project "bat_sen_01_window_contact"
 				(path "/10108191-213d-452b-b5d4-aff556accf72"
-					(page "3")
+					(page "2")
 				)
 			)
 		)

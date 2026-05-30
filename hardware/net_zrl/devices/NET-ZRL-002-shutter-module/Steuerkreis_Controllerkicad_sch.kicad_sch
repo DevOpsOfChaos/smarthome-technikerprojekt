@@ -4,6 +4,11 @@
 	(generator_version "9.0")
 	(uuid "08c8f5f8-84a3-46cc-a82c-c49cb335a404")
 	(paper "A4")
+	(title_block
+		(title "Steuerkreis_Controller")
+		(date "2026-05-29")
+		(comment 1 "Modularer Steuerkreis")
+	)
 	(lib_symbols
 		(symbol "Connector:Conn_01x03_Pin"
 			(pin_names
@@ -1971,25 +1976,15 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "27.05.2026"
+	(text "optionale Pull up \nWiderstände für I²C"
 		(exclude_from_sim no)
-		(at 212.344 193.548 0)
+		(at 161.036 62.23 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 		)
-		(uuid "15871887-e4e9-4ca2-a305-da633f05430a")
-	)
-	(text "Steuerkreis_Controller"
-		(exclude_from_sim no)
-		(at 199.39 189.738 0)
-		(effects
-			(font
-				(size 1.524 1.524)
-			)
-		)
-		(uuid "ee103233-15f2-428a-b28b-ec165dbcd673")
+		(uuid "7ef7d947-1215-464c-8de3-f065d6e750e7")
 	)
 	(junction
 		(at 223.52 83.82)
@@ -3562,7 +3557,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "003da018-fb9b-4e13-a9cc-d18ccbbe2348")
-		(property "Reference" "R?"
+		(property "Reference" "R2"
 			(at 167.64 107.9499 0)
 			(effects
 				(font
@@ -3616,7 +3611,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "R?")
+					(reference "R2")
 					(unit 1)
 				)
 			)
@@ -3802,7 +3797,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "326462b3-f86f-4f7a-8773-1d58dd56437f")
-		(property "Reference" "TP5_TRIG?"
+		(property "Reference" "TP5_TRIG"
 			(at 244.094 127 90)
 			(effects
 				(font
@@ -3854,7 +3849,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "TP5_TRIG?")
+					(reference "TP5_TRIG")
 					(unit 1)
 				)
 			)
@@ -3875,7 +3870,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "34c1f0b7-3ba8-422f-a829-6d2c61211306")
-		(property "Reference" "TP1_GND?"
+		(property "Reference" "TP1_GND"
 			(at 244.602 138.684 90)
 			(effects
 				(font
@@ -3927,7 +3922,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "TP1_GND?")
+					(reference "TP1_GND")
 					(unit 1)
 				)
 			)
@@ -3948,7 +3943,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "376ea744-6603-40e2-9295-701cbc54fa5d")
-		(property "Reference" "TP2_5V?"
+		(property "Reference" "TP2_5V"
 			(at 244.348 134.62 90)
 			(effects
 				(font
@@ -4000,7 +3995,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "TP2_5V?")
+					(reference "TP2_5V")
 					(unit 1)
 				)
 			)
@@ -4027,6 +4022,7 @@
 				(font
 					(size 1.27 1.27)
 				)
+				(hide yes)
 			)
 		)
 		(property "Value" "Bridge_I2C_SCL"
@@ -4100,6 +4096,7 @@
 				(font
 					(size 1.27 1.27)
 				)
+				(hide yes)
 			)
 		)
 		(property "Value" "Bridge_I2C_SDA"
@@ -4167,7 +4164,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "7b1a78c9-b0ce-4e10-837d-363be42e897a")
-		(property "Reference" "TP4_TRIG?"
+		(property "Reference" "TP4_TRIG"
 			(at 244.094 123.19 90)
 			(effects
 				(font
@@ -4219,7 +4216,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "TP4_TRIG?")
+					(reference "TP4_TRIG")
 					(unit 1)
 				)
 			)
@@ -4325,7 +4322,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "b9aaacdb-9844-4dc8-8951-6ea6f854e5aa")
-		(property "Reference" "TP3_3V?"
+		(property "Reference" "TP3_3V"
 			(at 244.094 130.81 90)
 			(effects
 				(font
@@ -4377,7 +4374,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "TP3_3V?")
+					(reference "TP3_3V")
 					(unit 1)
 				)
 			)
@@ -4481,7 +4478,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "ddcdde34-8dce-4c81-974d-3d2177a1345c")
-		(property "Reference" "R?"
+		(property "Reference" "R1"
 			(at 151.384 107.696 0)
 			(effects
 				(font
@@ -4535,7 +4532,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "R?")
+					(reference "R1")
 					(unit 1)
 				)
 			)
@@ -4557,7 +4554,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "feb83a3a-d734-4549-9522-8665a9fe134f")
-		(property "Reference" "U?"
+		(property "Reference" "U1"
 			(at 91.44 67.31 0)
 			(effects
 				(font
@@ -4772,7 +4769,7 @@
 		(instances
 			(project "NET-ERL-001-hall-module"
 				(path "/08b3ce9e-6d39-416d-8082-65cb5f635528/d5b3e638-d147-42f1-9b4c-13afd73dd6cd"
-					(reference "U?")
+					(reference "U1")
 					(unit 1)
 				)
 			)

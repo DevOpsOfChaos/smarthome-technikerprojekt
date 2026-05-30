@@ -1,3 +1,4 @@
+
 # smarthome-technikerprojekt
 
 Smart-Home-Grundsystem – Technikerarbeit 2026
@@ -32,13 +33,25 @@ Geräte (ESP32-C3) ──ESP-NOW──▶ Master ──MQTT──▶ Server (Ras
 
 | Verzeichnis | Inhalt |
 |-------------|--------|
-| `firmware/` | PlatformIO-Projekt (Basistypen + Geräteinstanzen) |
+| `firmware/` | **Hauptbestandteil** – PlatformIO-Projekt mit Basistypen und konkreten Geräteinstanzen |
 | `hardware/` | KiCAD-Schaltpläne, Platinenlayouts, 3D-Modelle |
 | `server/` | Docker-Compose-Stack (Mosquitto, Node-RED, SQLite) |
 | `docs/` | Technische Dokumentation und Referenz |
 | `tests/` | Testskripte und Checklisten |
-| `PROTOKOLL/` | Entwicklungs- und Testprotokolle |
-| `esphome/` | ESPHome-Alternativlinie (nicht Teil der Technikerarbeit) |
+| `PROTOKOLL/` | Entwicklungs- und Testprotokolle (Nachweise) |
+| `esphome/` | ESPHome-Alternativlinie (nicht Bestandteil der Technikerarbeit) |
+
+## Zwei Firmware-Linien
+
+### Eigene Firmware (Hauptlinie)
+Die eigene C++-Firmware unter `firmware/` ist der Kern des Technikerprojekts. Sie nutzt:
+- **Basistyp-Architektur** – wiederverwendbare Runtime-Klassen (`NetErlRuntime`, `NetSenRuntime`, etc.)
+- **ESP-NOW** – direkte Funkkommunikation zwischen Geräten und Master
+- **Master-Bridge** – Übersetzung zwischen ESP-NOW und MQTT
+- **Vollständige Kontrolle** – Timing, Provisionierung, Fehlerbehandlung in eigenem Code
+
+### ESPHome-Alternative
+Unter `esphome/` liegt eine alternative MQTT-Linie für Nutzer, die ESPHome oder Home Assistant bevorzugen. Diese Geräte sprechen direkt MQTT mit demselben Serververtrag. Die ESPHome-Linie ist nicht Bestandteil der Technikerarbeit, sondern eine praktische Erweiterung für Anwender.
 
 ## Quick Start
 

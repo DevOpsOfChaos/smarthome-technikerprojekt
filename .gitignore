@@ -41,3 +41,4 @@ server/sqlite/*.db-journal
 *.zip
 logs/
 firmware/src/basetypes/master_compat/config.h
+AGENTS.md

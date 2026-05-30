@@ -414,12 +414,12 @@
       "Root"
     ],
     [
-      "25d7b4fa-577d-4dec-b1c0-3ffdf80ff8a0",
-      "Externe_Beschaltung"
-    ],
-    [
       "ff54d03a-2679-429b-8b06-60e279c7ae61",
       "Steuerkreis_Controller"
+    ],
+    [
+      "25d7b4fa-577d-4dec-b1c0-3ffdf80ff8a0",
+      "Externe_Beschaltung"
     ]
   ],
   "text_variables": {}

@@ -2032,10 +2032,6 @@
 		(at 109.22 90.17)
 		(uuid "bf0b22f7-2212-46c9-8a27-ce5c0d1ba9a1")
 	)
-	(no_connect
-		(at 109.22 82.55)
-		(uuid "e40a7728-7bde-426e-9142-fb11af070169")
-	)
 	(wire
 		(pts
 			(xy 214.63 50.8) (xy 214.63 49.53)
@@ -2078,6 +2074,16 @@
 	)
 	(wire
 		(pts
+			(xy 110.49 85.09) (xy 109.22 85.09)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "0bc3cb7f-59d4-4de6-9901-93d8c8f86782")
+	)
+	(wire
+		(pts
 			(xy 25.4 21.59) (xy 73.66 21.59)
 		)
 		(stroke
@@ -2115,6 +2121,16 @@
 			(type default)
 		)
 		(uuid "0efc45b8-5651-46fb-be47-40c9220b41a1")
+	)
+	(wire
+		(pts
+			(xy 109.22 82.55) (xy 111.76 82.55)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "124ff26a-3d5c-46e1-93bd-65eac67686f4")
 	)
 	(wire
 		(pts
@@ -2398,7 +2414,7 @@
 	)
 	(wire
 		(pts
-			(xy 109.22 85.09) (xy 111.76 85.09)
+			(xy 110.49 86.36) (xy 111.76 86.36)
 		)
 		(stroke
 			(width 0)
@@ -2418,7 +2434,7 @@
 	)
 	(wire
 		(pts
-			(xy 109.22 80.01) (xy 111.76 80.01)
+			(xy 110.49 78.74) (xy 111.76 78.74)
 		)
 		(stroke
 			(width 0)
@@ -2618,6 +2634,26 @@
 	)
 	(wire
 		(pts
+			(xy 110.49 78.74) (xy 110.49 80.01)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "b667d4b8-e8a7-44e6-8725-e1df058c73c2")
+	)
+	(wire
+		(pts
+			(xy 110.49 86.36) (xy 110.49 85.09)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "bb19ec8a-a3cb-4929-a57b-9865e864d4d7")
+	)
+	(wire
+		(pts
 			(xy 109.22 92.71) (xy 111.76 92.71)
 		)
 		(stroke
@@ -2755,6 +2791,16 @@
 			(type default)
 		)
 		(uuid "f09ede1f-a8b1-4634-86bf-79a9fe543faa")
+	)
+	(wire
+		(pts
+			(xy 110.49 80.01) (xy 109.22 80.01)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f8b2eee4-ece8-4d0d-b8fa-e68340c6670d")
 	)
 	(wire
 		(pts
@@ -2945,6 +2991,28 @@
 			)
 		)
 	)
+	(global_label "Trigger_PIN2"
+		(shape output)
+		(at 111.76 82.55 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "1f542f58-e97d-4bef-853f-a91bc6d2875e")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 126.659 82.55 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "PIN_BUTTON_1"
 		(shape input)
 		(at 213.36 62.23 180)
@@ -2968,7 +3036,7 @@
 		)
 	)
 	(global_label "Trigger_PIN1"
-		(shape output)
+		(shape bidirectional)
 		(at 213.36 127 180)
 		(fields_autoplaced yes)
 		(effects
@@ -2979,7 +3047,7 @@
 		)
 		(uuid "2d9136e5-3d1e-4dbb-8271-676d27abb002")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 198.461 127 0)
+			(at 197.3497 127 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2991,7 +3059,7 @@
 	)
 	(global_label "PIN_BUTTON_1"
 		(shape input)
-		(at 111.76 80.01 0)
+		(at 111.76 78.74 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -3001,7 +3069,7 @@
 		)
 		(uuid "30fffb7a-7154-4226-94b8-f206f46ef1af")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 128.2919 80.01 0)
+			(at 128.2919 78.74 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3079,7 +3147,7 @@
 		)
 	)
 	(global_label "5V0"
-		(shape output)
+		(shape bidirectional)
 		(at 213.36 134.62 180)
 		(fields_autoplaced yes)
 		(effects
@@ -3090,7 +3158,7 @@
 		)
 		(uuid "54b9debb-35f3-4c79-9bb0-068e1c56b2ad")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.8672 134.62 0)
+			(at 205.7559 134.62 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3101,7 +3169,7 @@
 		)
 	)
 	(global_label "Trigger_PIN2"
-		(shape output)
+		(shape bidirectional)
 		(at 213.36 123.19 180)
 		(fields_autoplaced yes)
 		(effects
@@ -3112,7 +3180,7 @@
 		)
 		(uuid "55bf1e54-9ba4-43dc-8e29-2e180843f8fc")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 198.461 123.19 0)
+			(at 197.3497 123.19 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3303,7 +3371,7 @@
 		)
 	)
 	(global_label "5V0"
-		(shape output)
+		(shape input)
 		(at 213.36 106.68 180)
 		(fields_autoplaced yes)
 		(effects
@@ -3326,7 +3394,7 @@
 	)
 	(global_label "PIN_LED_RING"
 		(shape input)
-		(at 111.76 85.09 0)
+		(at 111.76 86.36 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -3336,7 +3404,7 @@
 		)
 		(uuid "7adc77de-c121-43d5-9df4-9b9797c724c8")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 127.8081 85.09 0)
+			(at 127.8081 86.36 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3391,7 +3459,7 @@
 		)
 	)
 	(global_label "GND"
-		(shape output)
+		(shape bidirectional)
 		(at 213.36 102.87 180)
 		(fields_autoplaced yes)
 		(effects
@@ -3402,7 +3470,7 @@
 		)
 		(uuid "8aa1c09e-f28e-4d7f-bbe9-d1369a3d043e")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.5043 102.87 0)
+			(at 205.393 102.87 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3501,7 +3569,7 @@
 		)
 	)
 	(global_label "GND"
-		(shape output)
+		(shape bidirectional)
 		(at 213.36 138.43 180)
 		(fields_autoplaced yes)
 		(effects
@@ -3512,7 +3580,7 @@
 		)
 		(uuid "cf0dc712-1e95-41bf-809e-08d065607d58")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.5043 138.43 0)
+			(at 205.393 138.43 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3568,7 +3636,7 @@
 		)
 	)
 	(global_label "3V3"
-		(shape output)
+		(shape bidirectional)
 		(at 213.36 130.81 180)
 		(fields_autoplaced yes)
 		(effects
@@ -3579,7 +3647,7 @@
 		)
 		(uuid "fe58188c-113f-4baf-b3dc-7f016cf8ecbd")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 206.8672 130.81 0)
+			(at 205.7559 130.81 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4064,6 +4132,7 @@
 				(font
 					(size 1.27 1.27)
 				)
+				(hide yes)
 			)
 		)
 		(property "Value" "Bridge_I2C_SCL"
@@ -4137,6 +4206,7 @@
 				(font
 					(size 1.27 1.27)
 				)
+				(hide yes)
 			)
 		)
 		(property "Value" "Bridge_I2C_SDA"

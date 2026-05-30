@@ -4,6 +4,10 @@
 	(generator_version "9.0")
 	(uuid "08c8f5f8-84a3-46cc-a82c-c49cb335a404")
 	(paper "A4")
+	(title_block
+		(title "Steuerkreis / Controller")
+		(date "2026-05-30")
+	)
 	(lib_symbols
 		(symbol "Connector:Conn_01x01_Pin"
 			(pin_names
@@ -1695,25 +1699,15 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "27.05.2026"
+	(text "Optionale I²C Pull up Widerstände"
 		(exclude_from_sim no)
-		(at 212.344 193.548 0)
+		(at 159.766 46.482 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 		)
-		(uuid "15871887-e4e9-4ca2-a305-da633f05430a")
-	)
-	(text "Steuerkreis_Controller"
-		(exclude_from_sim no)
-		(at 199.39 189.738 0)
-		(effects
-			(font
-				(size 1.524 1.524)
-			)
-		)
-		(uuid "ee103233-15f2-428a-b28b-ec165dbcd673")
+		(uuid "063b87a5-04c4-46b5-a412-3b8ef5dfc4bc")
 	)
 	(junction
 		(at 66.04 158.75)

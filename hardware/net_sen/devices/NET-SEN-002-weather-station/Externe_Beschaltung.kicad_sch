@@ -4,6 +4,10 @@
 	(generator_version "9.0")
 	(uuid "438bfcc4-07c1-4d8b-b446-319295cb0d69")
 	(paper "A4")
+	(title_block
+		(title "Sensorik & externe Beschaltung")
+		(date "2026-05-30")
+	)
 	(lib_symbols
 		(symbol "Device:LED"
 			(pin_numbers
@@ -913,25 +917,29 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "Sensorik & externe Beschaltung"
+	(text "hold = setup mode"
 		(exclude_from_sim no)
-		(at 205.232 189.738 0)
-		(effects
-			(font
-				(size 1.524 1.524)
-			)
-		)
-		(uuid "8c4fd6d0-02fc-401d-9fe1-5b46ad21a8ab")
-	)
-	(text "27.05.2026"
-		(exclude_from_sim no)
-		(at 212.09 193.548 0)
+		(at 163.576 156.21 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 		)
-		(uuid "f3aa4d46-c25a-4e61-8ca9-5bdfb08af3d6")
+		(uuid "67d6b75b-373b-498c-a418-bc4df823c2f9")
+	)
+	(text "blinkt um setup mode\nleuchtet bei Fehlern"
+		(exclude_from_sim no)
+		(at 164.338 34.798 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "f933c551-82cb-4f47-843f-689ec740b937")
+	)
+	(no_connect
+		(at 135.89 64.77)
+		(uuid "d9170367-9026-4882-82b4-21158f8068d6")
 	)
 	(wire
 		(pts
@@ -1593,7 +1601,7 @@
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
-		(on_board yes)
+		(on_board no)
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "51ff976f-bc34-481c-bbfb-28b00a04624c")
@@ -1906,7 +1914,7 @@
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
-		(on_board yes)
+		(on_board no)
 		(dnp no)
 		(uuid "fd6c2ba9-0fa3-449a-80f9-f97c47d0c876")
 		(property "Reference" "SW1"
@@ -1975,7 +1983,7 @@
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
-		(on_board yes)
+		(on_board no)
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "febfda07-cdfd-495c-ae8e-36a3bafa5ee4")

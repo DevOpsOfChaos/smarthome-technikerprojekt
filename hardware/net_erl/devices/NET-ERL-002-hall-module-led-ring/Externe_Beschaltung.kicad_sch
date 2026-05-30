@@ -7,6 +7,7 @@
 	(title_block
 		(title "Sensorik & externe Beschaltung")
 		(date "2026-05-28")
+		(comment 1 "Externe Beschaltung des Modularen Steuerkreises")
 	)
 	(lib_symbols
 		(symbol "Eigene:BME_680"
@@ -1154,6 +1155,16 @@
 			(embedded_fonts no)
 		)
 	)
+	(text "RX und TX wurden zwar angeschlossen, \nwerden aber Code seitig nicht verwendet"
+		(exclude_from_sim no)
+		(at 209.042 133.604 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "2ff8b615-bbe0-4527-a2e9-ab4e46be4257")
+	)
 	(text "Symbolisch nur 3x WS2812 Pixel\ndargestellt\nInsgesamt hat der LED Ring \n17 Pixel"
 		(exclude_from_sim no)
 		(at 38.862 66.802 0)
@@ -1163,6 +1174,26 @@
 			)
 		)
 		(uuid "88ba0142-3447-4864-a9fd-5010f3cda698")
+	)
+	(text "Bei dem VEML7700 Modul wurden die bestückten Pull up\n Widerstände entfernt umd den I²C Bus zu optimieren"
+		(exclude_from_sim no)
+		(at 210.312 103.378 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "a419572e-7386-45f8-9710-753e6ccf10ca")
+	)
+	(text "toggle und setup button\npush für toggle \nhold für setup > 5 sec"
+		(exclude_from_sim no)
+		(at 68.072 167.64 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "b4e0c050-a2a3-47f5-b2ee-b6ce4da01eb9")
 	)
 	(text "... D17"
 		(exclude_from_sim no)
@@ -1251,13 +1282,13 @@
 	)
 	(wire
 		(pts
-			(xy 143.51 137.16) (xy 165.1 137.16)
+			(xy 143.51 139.7) (xy 165.1 139.7)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "14ba66d2-1278-4cd8-a474-1acc7e020e29")
+		(uuid "18c84baf-929e-44fb-8e4f-1367c393ba71")
 	)
 	(wire
 		(pts
@@ -1268,16 +1299,6 @@
 			(type default)
 		)
 		(uuid "1b2be9aa-00c3-4949-a07e-ab44eceffbf0")
-	)
-	(wire
-		(pts
-			(xy 143.51 138.43) (xy 143.51 137.16)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "237fa0e4-96ec-49cf-b005-a9775e438b07")
 	)
 	(wire
 		(pts
@@ -1361,6 +1382,16 @@
 	)
 	(wire
 		(pts
+			(xy 143.51 137.16) (xy 165.1 137.16)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "3dff7115-09c1-431f-ae9e-44238de105fd")
+	)
+	(wire
+		(pts
 			(xy 142.24 104.14) (xy 143.51 104.14)
 		)
 		(stroke
@@ -1411,16 +1442,6 @@
 	)
 	(wire
 		(pts
-			(xy 143.51 142.24) (xy 143.51 139.7)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "5599d9b9-e285-44ea-9644-396f38accf89")
-	)
-	(wire
-		(pts
 			(xy 81.28 111.76) (xy 81.28 109.22)
 		)
 		(stroke
@@ -1441,6 +1462,16 @@
 	)
 	(wire
 		(pts
+			(xy 143.51 142.24) (xy 143.51 139.7)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "60968c6f-27fe-40da-8be0-68201dffb1d4")
+	)
+	(wire
+		(pts
 			(xy 165.1 78.74) (xy 156.21 78.74)
 		)
 		(stroke
@@ -1448,6 +1479,16 @@
 			(type default)
 		)
 		(uuid "63999984-fcf7-463e-b121-f9901de6677d")
+	)
+	(wire
+		(pts
+			(xy 142.24 142.24) (xy 143.51 142.24)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "63c47435-f953-4c95-9e70-e9f3fa1d5f25")
 	)
 	(wire
 		(pts
@@ -1541,6 +1582,16 @@
 	)
 	(wire
 		(pts
+			(xy 143.51 138.43) (xy 143.51 137.16)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "809ee259-dc7b-4e41-bbba-92d9a90d18cd")
+	)
+	(wire
+		(pts
 			(xy 143.51 33.02) (xy 143.51 35.56)
 		)
 		(stroke
@@ -1571,6 +1622,16 @@
 	)
 	(wire
 		(pts
+			(xy 142.24 138.43) (xy 143.51 138.43)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8de3cb5a-6741-4082-bca5-7b282593f02a")
+	)
+	(wire
+		(pts
 			(xy 142.24 67.31) (xy 143.51 67.31)
 		)
 		(stroke
@@ -1581,7 +1642,7 @@
 	)
 	(wire
 		(pts
-			(xy 58.42 120.65) (xy 85.09 120.65)
+			(xy 58.42 134.62) (xy 85.09 134.62)
 		)
 		(stroke
 			(width 0)
@@ -1608,16 +1669,6 @@
 			(type default)
 		)
 		(uuid "92a92f0d-b1f6-4982-9c7e-388400593823")
-	)
-	(wire
-		(pts
-			(xy 143.51 139.7) (xy 165.1 139.7)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "9553e412-d017-4d73-8b4c-cbac579f3364")
 	)
 	(wire
 		(pts
@@ -1651,7 +1702,7 @@
 	)
 	(wire
 		(pts
-			(xy 85.09 143.51) (xy 85.09 138.43)
+			(xy 85.09 157.48) (xy 85.09 152.4)
 		)
 		(stroke
 			(width 0)
@@ -1678,16 +1729,6 @@
 			(type default)
 		)
 		(uuid "ae9d0902-9e68-4a20-9cd2-0ff1a46454fe")
-	)
-	(wire
-		(pts
-			(xy 142.24 138.43) (xy 143.51 138.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "afb4751b-5c14-4eb7-817b-d589c469e6c5")
 	)
 	(wire
 		(pts
@@ -1718,16 +1759,6 @@
 			(type default)
 		)
 		(uuid "bbaca17b-d3eb-4b96-a152-ea0e9f5a7fea")
-	)
-	(wire
-		(pts
-			(xy 142.24 142.24) (xy 143.51 142.24)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "bbf4d10e-d518-41a2-b134-8447a188bed8")
 	)
 	(wire
 		(pts
@@ -1831,7 +1862,7 @@
 	)
 	(wire
 		(pts
-			(xy 58.42 143.51) (xy 85.09 143.51)
+			(xy 58.42 157.48) (xy 85.09 157.48)
 		)
 		(stroke
 			(width 0)
@@ -1861,7 +1892,7 @@
 	)
 	(wire
 		(pts
-			(xy 85.09 120.65) (xy 85.09 128.27)
+			(xy 85.09 134.62) (xy 85.09 142.24)
 		)
 		(stroke
 			(width 0)
@@ -2073,7 +2104,7 @@
 	)
 	(global_label "PIN_LD2410_UART_TX"
 		(shape bidirectional)
-		(at 142.24 142.24 180)
+		(at 142.24 138.43 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -2083,7 +2114,7 @@
 		)
 		(uuid "3f8e96ac-0468-418c-8ec6-978b7050d6a1")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 118.0655 142.24 0)
+			(at 118.0655 138.43 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2139,7 +2170,7 @@
 	)
 	(global_label "PIN_LD2410_UART_RX"
 		(shape bidirectional)
-		(at 142.24 138.43 180)
+		(at 142.24 142.24 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -2149,7 +2180,7 @@
 		)
 		(uuid "593c20ab-3d70-4574-bb9f-959f3dba1368")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 117.7631 138.43 0)
+			(at 117.7631 142.24 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2252,7 +2283,7 @@
 	)
 	(global_label "GND"
 		(shape output)
-		(at 58.42 120.65 180)
+		(at 58.42 134.62 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -2262,7 +2293,7 @@
 		)
 		(uuid "8d9c2a59-fa36-48a6-a41c-09c20a10d59a")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 51.5643 120.65 0)
+			(at 51.5643 134.62 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2386,7 +2417,7 @@
 	)
 	(global_label "PIN_BUTTON_1"
 		(shape input)
-		(at 58.42 143.51 180)
+		(at 58.42 157.48 180)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -2396,7 +2427,7 @@
 		)
 		(uuid "b1fa3a43-66f9-4da3-9f2f-ccb0c15ee1c7")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 41.8881 143.51 0)
+			(at 41.8881 157.48 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2885,7 +2916,7 @@
 	)
 	(symbol
 		(lib_id "Switch:SW_Push")
-		(at 85.09 133.35 90)
+		(at 85.09 147.32 90)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -2893,7 +2924,7 @@
 		(dnp no)
 		(uuid "a6c4339a-2c2b-464e-9fc1-3fb1cade8740")
 		(property "Reference" "SW1"
-			(at 88.392 132.08 90)
+			(at 88.392 146.05 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2902,7 +2933,7 @@
 			)
 		)
 		(property "Value" "SW_Push"
-			(at 86.36 134.6199 90)
+			(at 86.36 148.5899 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2911,7 +2942,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 80.01 133.35 0)
+			(at 80.01 147.32 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2920,7 +2951,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 80.01 133.35 0)
+			(at 80.01 147.32 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2929,7 +2960,7 @@
 			)
 		)
 		(property "Description" "Push button switch, generic, two pins"
-			(at 85.09 133.35 0)
+			(at 85.09 147.32 0)
 			(effects
 				(font
 					(size 1.27 1.27)

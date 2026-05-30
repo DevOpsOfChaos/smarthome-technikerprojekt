@@ -22,8 +22,8 @@ Es gibt zwei nutzbare Firmware-Linien:
 
 | Linie | Kurzbeschreibung | Geeignet fuer |
 |---|---|---|
-| Eigene Firmware | ESP-NOW zwischen Geraeten und Master, MQTT nur zwischen Master und Server | maximale Kontrolle, eigener Funkpfad, saubere Technikerarbeits-Architektur |
-| ESPHome-Alternative | Geraete sprechen direkt per MQTT mit demselben Serververtrag | Nutzer, die lieber mit ESPHome, Home Assistant und YAML arbeiten |
+| Eigene Firmware (Hauptlinie) | ESP-NOW zwischen Geraeten und Master, MQTT nur zwischen Master und Server | maximale Kontrolle, eigener Funkpfad, Kern der Technikerarbeit |
+| ESPHome-Alternative (nicht Bestandteil der Technikerarbeit) | Geraete sprechen direkt per MQTT mit demselben Serververtrag | Nutzer, die lieber mit ESPHome, Home Assistant und YAML arbeiten |
 
 Der gemeinsame Punkt ist der Serververtrag. Node-RED soll moeglichst denselben Geraetezustand sehen, egal ob ein Geraet ueber die eigene Firmware-Linie oder ueber ESPHome angebunden wird.
 

@@ -22,7 +22,7 @@ Das öffentliche Repo enthält:
 Nicht öffentlich ins Repo gehören:
 - sensible Zugangsdaten
 - private Arbeitsmaterialien
-- interne Hilfsmittel oder interne Arbeitsprozesse
+- nicht-öffentliche Entwicklungshilfsmittel oder -prozesse
 
 ## Einstieg
 1. `01_projektueberblick.md`

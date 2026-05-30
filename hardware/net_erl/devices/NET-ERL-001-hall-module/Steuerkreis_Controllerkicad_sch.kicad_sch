@@ -2040,10 +2040,6 @@
 		(at 73.66 85.09)
 		(uuid "ca4486b4-1c2c-4bce-a6b5-68025bb0d699")
 	)
-	(no_connect
-		(at 109.22 82.55)
-		(uuid "e40a7728-7bde-426e-9142-fb11af070169")
-	)
 	(wire
 		(pts
 			(xy 157.48 119.38) (xy 165.1 119.38)
@@ -2186,7 +2182,7 @@
 	)
 	(wire
 		(pts
-			(xy 109.22 80.01) (xy 111.76 80.01)
+			(xy 110.49 78.74) (xy 111.76 78.74)
 		)
 		(stroke
 			(width 0)
@@ -2243,6 +2239,16 @@
 			(type default)
 		)
 		(uuid "34c17cc8-f233-4492-a4f1-dd110acbb1cc")
+	)
+	(wire
+		(pts
+			(xy 110.49 78.74) (xy 110.49 80.01)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "3c3bbf81-f62f-41b5-805f-b606bf3234a7")
 	)
 	(wire
 		(pts
@@ -2333,6 +2339,16 @@
 			(type default)
 		)
 		(uuid "69d88d88-82ea-4720-b6a9-22addabcbacb")
+	)
+	(wire
+		(pts
+			(xy 109.22 82.55) (xy 111.76 82.55)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "6b8db7a5-6df0-48c3-b7c2-ca4afe86fbc0")
 	)
 	(wire
 		(pts
@@ -2656,6 +2672,16 @@
 	)
 	(wire
 		(pts
+			(xy 110.49 80.01) (xy 109.22 80.01)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "efb3a32b-5174-43ce-baf2-4dd0bc0dac08")
+	)
+	(wire
+		(pts
 			(xy 223.52 100.33) (xy 232.41 100.33)
 		)
 		(stroke
@@ -2843,7 +2869,7 @@
 	)
 	(global_label "SETUP_INDICATOR_LED_PIN"
 		(shape input)
-		(at 111.76 80.01 0)
+		(at 111.76 78.74 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -2853,7 +2879,7 @@
 		)
 		(uuid "1deaa32a-73a1-4ddb-9563-c8a4f9593961")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 139.9638 80.01 0)
+			(at 139.9638 78.74 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2881,6 +2907,28 @@
 					(size 1.27 1.27)
 				)
 				(justify right)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "Trigger_PIN2"
+		(shape output)
+		(at 111.76 82.55 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "3a459778-9d5c-40ce-bcaf-d725fa151056")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 126.659 82.55 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
 				(hide yes)
 			)
 		)
@@ -3441,7 +3489,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "4K7"
+		(property "Value" "10K"
 			(at 167.64 110.4899 0)
 			(effects
 				(font
@@ -3897,6 +3945,7 @@
 				(font
 					(size 1.27 1.27)
 				)
+				(hide yes)
 			)
 		)
 		(property "Value" "Bridge_I2C_SCL"
@@ -3970,6 +4019,7 @@
 				(font
 					(size 1.27 1.27)
 				)
+				(hide yes)
 			)
 		)
 		(property "Value" "Bridge_I2C_SDA"
@@ -4360,7 +4410,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "4K7"
+		(property "Value" "10K"
 			(at 151.384 109.982 0)
 			(effects
 				(font

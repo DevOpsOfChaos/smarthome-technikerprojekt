@@ -74,7 +74,7 @@ Vorbereitete ESPHome-Geräte:
 | `devices/bat_sen_window_contact.yaml` | `bat_sen_010` | Batterie-Fensterkontakt |
 | `devices/bat_sen_rain_sensor.yaml` | `bat_sen_020` | Batterie-Regensensor |
 
-Der Preis dieser Linie: kein ESP-NOW, kein Masterpfad, weniger eigene Kontrolle über die unteren Abläufe. Dafür ist der Einstieg pragmatischer und für ESPHome-Nutzer deutlich näher an ihrer gewohnten Arbeitsweise.
+Der Preis dieser Linie: kein ESP-NOW, kein Masterpfad, weniger eigene Kontrolle über die unteren Abläufe. Dafür ist der Einstieg pragmatischer und für ESPHome-Nutzer deutlich näher an ihrer gewohnten Entwicklungsumgebung.
 
 ## Entscheidungshilfe
 
