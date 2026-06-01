@@ -49,7 +49,7 @@
 
 // Setup-Button: GPIO2, active-LOW, 5000 Millisekunden Haltezeit fuer Setup.
 #define SETUP_BUTTON_PIN 2
-#define SETUP_BUTTON_ACTIVE_LOW 0
+#define SETUP_BUTTON_ACTIVE_LOW 1
 #define SETUP_BUTTON_HOLD_MS 5000UL
 
 // Setup-Indikator-LED: GPIO7, active-HIGH, blinkt alle 500 Millisekunden.

@@ -12,8 +12,8 @@
  Beschreibung: Liest den Reed-Kontakt ein, entprellt Pegelwechsel und meldet
  Statuswechsel als Fenster-Events. Der Basistyp uebernimmt ESP-NOW, MQTT-
  Weitergabe, Batteriespannung, Setup-Modus und Deep-Sleep. Das Geraet wacht
- bei GPIO-Aenderung und zusaetzlich per Timer auf; 15 Minuten bedeuten
- 900 s = 15 min Wake-Intervall.
+ bei GPIO-Aenderung in beide Richtungen und zusaetzlich per Timer auf;
+ 15 Minuten bedeuten 900 s = 15 min Wake-Intervall.
 
  Hardware:
  - ESP32-C3
@@ -41,6 +41,7 @@
 #include "PinConfig.h"
 
 #define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 1
+#define BAT_SEN_DEVICE_HAS_DYNAMIC_WAKE_LEVEL 1
 #include "../../basetypes/bat_sen/BatSenRuntime.h"
 
 // =============================================================================
@@ -187,4 +188,11 @@ uint64_t device_wake_candidates() {
         return 0ULL;
     }
     return (1ULL << (uint8_t)BAT_SEN_WINDOW_CONTACT_PIN);
+}
+
+// Aufgabe: Waehlt vor dem Deep-Sleep den naechsten Wake-Pegel passend zum
+// aktuellen Reed-Zustand. So weckt geschlossen->offen und offen->geschlossen
+// jeweils sofort, obwohl ESP32-C3 GPIO-Wake level-basiert ist.
+bool device_wake_level_high() {
+    return stable_level == LOW;
 }

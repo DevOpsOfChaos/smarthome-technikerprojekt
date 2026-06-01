@@ -20,5 +20,13 @@ Erstes konkretes Device auf dem neutralen `bat_sen`-Basistyp.
 
 - GPIO-Wakeup ist auf RTC-faehige C3-Pins begrenzt (GPIO0..GPIO5).
 - Das Device nutzt deshalb bewusst `GPIO3` statt Boot-Button-Pin `GPIO9`.
-- Wake ist level-basiert (HIGH bei `BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH=1`).
-- Ein Flankenwechsel in die Gegenrichtung weckt nicht sofort, sondern spaetestens im Timer-Wake-Fenster.
+- Wake ist level-basiert, die Firmware setzt den Zielpegel aber vor jedem
+  Deep-Sleep passend zum aktuellen Kontaktzustand.
+- Geschlossen -> offen und offen -> geschlossen wecken dadurch jeweils sofort.
+
+## Setup-Taster
+
+- Kurzer Druck toggelt Stay-awake: aktiv bedeutet, das Geraet geht nicht in
+  Deep-Sleep.
+- Erneuter kurzer Druck erlaubt Deep-Sleep wieder.
+- 5 Sekunden halten startet den Setup-Modus.

@@ -87,6 +87,10 @@ RTC_DATA_ATTR uint32_t RTC_BOOT_COUNTER = 0U;
 #define BAT_SEN_GPIO_WAKE_LEVEL_HIGH 1  // Default: Wake bei HIGH-Pegel
 #endif
 
+#ifndef BAT_SEN_DEVICE_HAS_DYNAMIC_WAKE_LEVEL
+#define BAT_SEN_DEVICE_HAS_DYNAMIC_WAKE_LEVEL 0
+#endif
+
 // =============================================================================
 // STRUKTUREN – GenericStateChannels, GenericEventData, NodeState
 // =============================================================================
@@ -113,12 +117,16 @@ struct NodeState {
     bool provisioning_bereit;       // NodeProvisioning initialisiert
     bool setup_mode;                // Setup-Modus aktiv
     bool setup_ap_aktiv;            // Setup-AP laeuft
+    bool stay_awake;                // true = Deep-Sleep per kurzem Tastendruck gesperrt
+    bool stay_button_last_active;   // Letzter Tasterzustand fuer Short-Press
+    bool stay_button_hold_consumed; // true = langer Druck wurde als Setup-Hold verbraucht
     bool restart_pending;           // Neustart angefordert
     bool master_bekannt;            // HELLO_ACK empfangen
     bool master_mac_gueltig;        // Master-MAC provisioniert
     bool state_report_offen;        // STATE muss gesendet werden
     bool event_report_offen;        // EVENT muss gesendet werden
     unsigned long boot_ms;          // Zeitstempel Boot (millis)
+    unsigned long stay_button_pressed_at_ms; // Zeitstempel Setup-Taster gedrueckt
     unsigned long letztes_hello_ms; // Zeitstempel letztes HELLO
     unsigned long letzter_state_ms; // Zeitstempel letzter STATE
     unsigned long letzte_batterie_probe_ms; // Zeitstempel letzte ADC-Messung
@@ -158,6 +166,9 @@ bool device_map_event(
     uint8_t* param1,
     uint16_t* param2);
 uint64_t device_wake_candidates();
+#if BAT_SEN_DEVICE_HAS_DYNAMIC_WAKE_LEVEL
+bool device_wake_level_high();
+#endif
 #else
 void device_init_io() {}
 bool device_poll_inputs() { return false; }
@@ -189,6 +200,14 @@ bool device_map_event(
 
 uint64_t device_wake_candidates() { return 0ULL; }
 #endif
+
+bool deviceWakeLevelHigh() {
+#if BAT_SEN_DEVICE_HAS_DYNAMIC_WAKE_LEVEL
+    return device_wake_level_high();
+#else
+    return BAT_SEN_GPIO_WAKE_LEVEL_HIGH != 0;
+#endif
+}
 
 // =============================================================================
 // HILFSFUNKTIONEN – Logging, Strings, Delta, Broadcast, MAC, Wake-Reason
@@ -913,6 +932,7 @@ void pollLokaleHooks() {
 // darfInDeepSleep – Prueft ob Geraet in Deep-Sleep gehen darf
 bool darfInDeepSleep(unsigned long jetzt) {
     if (!DEEP_SLEEP_AKTIV) return false;
+    if (nodeStatus.stay_awake) return false;
     if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode || !nodeStatus.master_mac_gueltig) return false;
 
     // Nicht schlafen wenn Nachrichten gesendet werden muessen
@@ -927,6 +947,54 @@ bool darfInDeepSleep(unsigned long jetzt) {
 
     // RX-Fenster abgelaufen?
     return istZeitErreicht(jetzt, nodeStatus.schlaf_ab_ms);
+}
+
+bool setupButtonIstAktiv() {
+#if SETUP_BUTTON_PIN >= 0
+    return SETUP_BUTTON_ACTIVE_LOW != 0
+               ? (digitalRead(SETUP_BUTTON_PIN) == LOW)
+               : (digitalRead(SETUP_BUTTON_PIN) == HIGH);
+#else
+    return false;
+#endif
+}
+
+// Kurzer Setup-Tasterdruck toggelt Deep-Sleep-Sperre. Langer Druck bleibt Setup-Modus.
+void aktualisiereStayAwakeToggle(unsigned long jetzt) {
+    if (!STAY_AWAKE_TOGGLE_AKTIV) return;
+#if SETUP_BUTTON_PIN >= 0
+    const bool active = setupButtonIstAktiv();
+    const unsigned long holdMs = SETUP_BUTTON_HOLD_MS > 0UL ? SETUP_BUTTON_HOLD_MS : 5000UL;
+
+    if (active && !nodeStatus.stay_button_last_active) {
+        nodeStatus.stay_button_pressed_at_ms = jetzt;
+        nodeStatus.stay_button_hold_consumed = false;
+    }
+
+    if (active && !nodeStatus.stay_button_hold_consumed &&
+        (jetzt - nodeStatus.stay_button_pressed_at_ms) >= holdMs) {
+        nodeStatus.stay_button_hold_consumed = true;
+    }
+
+    if (!active && nodeStatus.stay_button_last_active) {
+        const unsigned long pressedAt = nodeStatus.stay_button_pressed_at_ms;
+        const unsigned long pressMs = pressedAt > 0UL ? (jetzt - pressedAt) : 0UL;
+        if (!nodeStatus.stay_button_hold_consumed &&
+            pressMs > 30UL &&
+            pressMs < holdMs &&
+            !nodeStatus.setup_mode) {
+            nodeStatus.stay_awake = !nodeStatus.stay_awake;
+            logf("INFO", "Stay-awake %s", nodeStatus.stay_awake ? "aktiv" : "inaktiv");
+            if (!nodeStatus.stay_awake) {
+                aktualisiereSchlafFenster(nodeStatus.rx_window_ms);
+            }
+        }
+        nodeStatus.stay_button_pressed_at_ms = 0UL;
+        nodeStatus.stay_button_hold_consumed = false;
+    }
+
+    nodeStatus.stay_button_last_active = active;
+#endif
 }
 
 // Plattform-Helfer fuer GPIO-Wake (vermeidet #if-Labyrinth in aktiviereWakeQuellen).
@@ -961,13 +1029,14 @@ void aktiviereWakeQuellen() {
 
     // GPIO-Wake von Device-Hooks
 #if BAT_SEN_ENABLE_GPIO_WAKE
-    if (BAT_SEN_GPIO_WAKE_LEVEL_HIGH) {
+    const bool wakeHigh = deviceWakeLevelHigh();
+    if (wakeHigh) {
         wakeHighMask |= device_wake_candidates();
     } else {
         wakeLowMask |= device_wake_candidates();
     }
     if (PIN_WAKE_INPUT >= 0 && PIN_WAKE_INPUT < 64) {
-        fuegeWakePinHinzu(&wakeHighMask, &wakeLowMask, PIN_WAKE_INPUT, BAT_SEN_GPIO_WAKE_LEVEL_HIGH != 0);
+        fuegeWakePinHinzu(&wakeHighMask, &wakeLowMask, PIN_WAKE_INPUT, wakeHigh);
     }
 #endif
 
@@ -1145,6 +1214,7 @@ void loop() {
     const unsigned long jetzt = millis();
 
     nodeProvisioning.update();
+    aktualisiereStayAwakeToggle(jetzt);
     if (!nodeStatus.provisioning_bereit || nodeStatus.setup_mode) {
         delay(LOOP_INTERVAL_MS);
         return;

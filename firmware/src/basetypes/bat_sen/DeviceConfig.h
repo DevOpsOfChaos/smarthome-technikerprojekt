@@ -190,6 +190,10 @@
 #define BAT_SEN_ENABLE_GPIO_WAKE 0
 #endif
 
+#ifndef BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE
+#define BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE 1
+#endif
+
 // =============================================================================
 // ABGELEITETE KONSTANTEN – constexpr-Werte aus #defines
 // =============================================================================
@@ -252,6 +256,7 @@ constexpr uint8_t BATTERY_ADC_SAMPLE_COUNT = BAT_SEN_BATTERY_ADC_SAMPLE_COUNT;
 constexpr bool DEEP_SLEEP_AKTIV = BAT_SEN_ENABLE_DEEP_SLEEP != 0;
 constexpr bool BATTERY_ADC_AKTIV = BAT_SEN_ENABLE_ADC_BATTERY != 0;
 constexpr bool GPIO_WAKE_AKTIV = BAT_SEN_ENABLE_GPIO_WAKE != 0;
+constexpr bool STAY_AWAKE_TOGGLE_AKTIV = BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE != 0;
 
 // =============================================================================
 // COMPILEZEIT-VALIDIERUNG – static_asserts fuer Profile und Grenzen
