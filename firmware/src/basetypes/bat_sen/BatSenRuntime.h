@@ -117,8 +117,8 @@ struct NodeState {
     bool provisioning_bereit;       // NodeProvisioning initialisiert
     bool setup_mode;                // Setup-Modus aktiv
     bool setup_ap_aktiv;            // Setup-AP laeuft
-    bool stay_awake;                // true = Deep-Sleep per kurzem Tastendruck gesperrt
-    bool stay_button_last_active;   // Letzter Tasterzustand fuer Short-Press
+    bool stay_awake;                // true = Deep-Sleep bis zum naechsten Kurzdruck gesperrt
+    bool stay_button_last_active;   // Letzter Setup-Tasterzustand fuer Short-Press
     bool stay_button_hold_consumed; // true = langer Druck wurde als Setup-Hold verbraucht
     bool restart_pending;           // Neustart angefordert
     bool master_bekannt;            // HELLO_ACK empfangen
@@ -949,6 +949,7 @@ bool darfInDeepSleep(unsigned long jetzt) {
     return istZeitErreicht(jetzt, nodeStatus.schlaf_ab_ms);
 }
 
+// setupButtonIstAktiv – Liest den Setup-Taster mit konfigurierter Polaritaet.
 bool setupButtonIstAktiv() {
 #if SETUP_BUTTON_PIN >= 0
     return SETUP_BUTTON_ACTIVE_LOW != 0
@@ -959,7 +960,9 @@ bool setupButtonIstAktiv() {
 #endif
 }
 
-// Kurzer Setup-Tasterdruck toggelt Deep-Sleep-Sperre. Langer Druck bleibt Setup-Modus.
+// aktualisiereStayAwakeToggle – Kurzer Setup-Tasterdruck toggelt die
+// Deep-Sleep-Sperre. Langer Druck wird nur markiert, damit der Provisioning-
+// Controller exklusiv den Setup-Modus starten kann.
 void aktualisiereStayAwakeToggle(unsigned long jetzt) {
     if (!STAY_AWAKE_TOGGLE_AKTIV) return;
 #if SETUP_BUTTON_PIN >= 0

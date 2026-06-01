@@ -13,7 +13,9 @@
  Statuswechsel als Fenster-Events. Der Basistyp uebernimmt ESP-NOW, MQTT-
  Weitergabe, Batteriespannung, Setup-Modus und Deep-Sleep. Das Geraet wacht
  bei GPIO-Aenderung in beide Richtungen und zusaetzlich per Timer auf;
- 15 Minuten bedeuten 900 s = 15 min Wake-Intervall.
+ 15 Minuten bedeuten 900 s = 15 min Wake-Intervall. Der letzte Kontaktzustand
+ bleibt im RTC-Speicher, damit auch ein Wake aus Deep-Sleep als Event gemeldet
+ werden kann.
 
  Hardware:
  - ESP32-C3
@@ -56,6 +58,9 @@ int last_raw_level = LOW;           // Letzter Rohwert (entprellt)
 int stable_level = LOW;             // Stabiler Pegel nach Entprellung
 unsigned long letzte_flanke_ms = 0UL;   // Zeitstempel letzter Flankenwechsel
 
+RTC_DATA_ATTR bool rtc_kontakt_known = false;  // true = letzter Kontaktzustand ist gueltig
+RTC_DATA_ATTR bool rtc_kontakt_offen = false;  // letzter Kontaktzustand vor Deep-Sleep
+
 // Aufgabe: Prueft, ob ein gelesener GPIO-Pegel als "Fenster offen" gilt.
 // Eingabewert: level ist das Ergebnis von digitalRead(), also HIGH oder LOW.
 // Ausgabewert: true bedeutet "offen", false bedeutet "geschlossen".
@@ -88,12 +93,15 @@ void device_init_io() {
     last_raw_level = stable_level;
     letzte_flanke_ms = millis();
     kontakt_offen = levelIstOffen(stable_level);
-    event_pending = false;
+    event_pending = rtc_kontakt_known && rtc_kontakt_offen != kontakt_offen;
+    rtc_kontakt_known = true;
+    rtc_kontakt_offen = kontakt_offen;
     kontakt_init_ok = true;
 
-    logf("INFO", "Window-Kontakt init: pin=%d status=%s",
+    logf("INFO", "Window-Kontakt init: pin=%d status=%s event=%s",
          BAT_SEN_WINDOW_CONTACT_PIN,
-         kontakt_offen ? "open" : "closed");
+         kontakt_offen ? "open" : "closed",
+         event_pending ? "pending" : "none");
 }
 
 // Aufgabe: Liest den Reed-Kontakt entprellt und erkennt echte Statuswechsel.
@@ -133,6 +141,8 @@ bool device_poll_inputs() {
     }
 
     kontakt_offen = neu_offen;
+    rtc_kontakt_known = true;
+    rtc_kontakt_offen = kontakt_offen;
     event_pending = true;
     logf("INFO", "Fensterstatus geaendert: %s",
          kontakt_offen ? "open" : "closed");
@@ -190,9 +200,9 @@ uint64_t device_wake_candidates() {
     return (1ULL << (uint8_t)BAT_SEN_WINDOW_CONTACT_PIN);
 }
 
-// Aufgabe: Waehlt vor dem Deep-Sleep den naechsten Wake-Pegel passend zum
-// aktuellen Reed-Zustand. So weckt geschlossen->offen und offen->geschlossen
-// jeweils sofort, obwohl ESP32-C3 GPIO-Wake level-basiert ist.
+// Aufgabe: Waehlt vor dem Deep-Sleep den Gegenpegel zum aktuellen Reed-Rohwert.
+// So weckt geschlossen->offen und offen->geschlossen jeweils sofort, obwohl
+// ESP32-C3 GPIO-Wake level-basiert ist.
 bool device_wake_level_high() {
     return stable_level == LOW;
 }

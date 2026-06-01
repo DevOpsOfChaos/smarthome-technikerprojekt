@@ -9,6 +9,7 @@ Erstes konkretes Device auf dem neutralen `bat_sen`-Basistyp.
 - einfache Kontaktsemantik: `open` oder `closed`
 - Event-Mapping auf `SH_EVENT_WINDOW_OPENED` und `SH_EVENT_WINDOW_CLOSED`
 - C3-GPIO-Deep-Sleep-Wakeup ueber den Device-Pin
+- RTC-Statusspeicher fuer Fenster-Events nach Deep-Sleep-Wakeup
 
 ## Enthaelt bewusst nicht
 
@@ -23,10 +24,13 @@ Erstes konkretes Device auf dem neutralen `bat_sen`-Basistyp.
 - Wake ist level-basiert, die Firmware setzt den Zielpegel aber vor jedem
   Deep-Sleep passend zum aktuellen Kontaktzustand.
 - Geschlossen -> offen und offen -> geschlossen wecken dadurch jeweils sofort.
+- Der letzte Kontaktzustand bleibt im RTC-Speicher, damit der Wake auch als
+  Fenster-Event gemeldet werden kann.
 
 ## Setup-Taster
 
-- Kurzer Druck toggelt Stay-awake: aktiv bedeutet, das Geraet geht nicht in
-  Deep-Sleep.
-- Erneuter kurzer Druck erlaubt Deep-Sleep wieder.
+- Kurzer Druck toggelt Stay-awake im Normalbetrieb: aktiv bedeutet, das Geraet
+  geht nicht in Deep-Sleep.
+- Erneuter kurzer Druck erlaubt Deep-Sleep wieder; nach Ablauf des RX-Fensters
+  darf das Geraet dann wieder schlafen.
 - 5 Sekunden halten startet den Setup-Modus.

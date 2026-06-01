@@ -47,7 +47,9 @@
 
 // GPIO-Wake aktiv: wird bei Pegelwechsel am Kontakt-Pin aufgeweckt
 #define BAT_SEN_ENABLE_GPIO_WAKE 1
-// Wake-Bedingung: offen = HIGH (= gleicher Pegel wie Kontakt offen)
+// Kurzer Setup-Tasterdruck sperrt/erlaubt Deep-Sleep fuer Tests am Geraet.
+#define BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE 1
+// Fallback-Wake-Level; die Fensterkontakt-Firmware nutzt dynamischen Wake-Level.
 #define BAT_SEN_GPIO_WAKE_LEVEL_HIGH BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH
 
 // Kontakt-Parameter

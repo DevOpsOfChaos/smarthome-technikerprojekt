@@ -175,7 +175,7 @@
 #endif
 
 // =============================================================================
-// FEATURE-FLAGS – Deep Sleep, ADC, GPIO-Wake
+// FEATURE-FLAGS – Deep Sleep, ADC, GPIO-Wake, Stay-awake-Testmodus
 // =============================================================================
 
 #ifndef BAT_SEN_ENABLE_DEEP_SLEEP
@@ -190,8 +190,10 @@
 #define BAT_SEN_ENABLE_GPIO_WAKE 0
 #endif
 
+// Standardmaessig aus, damit ein Basistyp-Update keine neue Tastersemantik
+// in bestehende BAT-SEN-Geraete einschleust. Konkrete Devices aktivieren es.
 #ifndef BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE
-#define BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE 1
+#define BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE 0
 #endif
 
 // =============================================================================
