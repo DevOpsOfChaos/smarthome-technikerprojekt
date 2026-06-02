@@ -30,7 +30,7 @@ Die Firmware steuert einen netzbetriebenen Rollladen/Jalousie-Motor über zwei p
 | LED Auf             | 7    | Active HIGH   |
 | LED Ab              | 6    | Active HIGH   |
 
-- `BUTTON_ACTIVE_LOW = 0` → Taster schalten auf GND (INPUT_PULLUP)
+- `BUTTON_ACTIVE_LOW = 0` → Touch-Taster liefern HIGH bei Beruehrung (INPUT_PULLDOWN)
 - Alle Relais- und Taster-Pins sind mittels `static_assert` auf Kollisionen geprüft (kein Pin doppelt belegt).
 ### Setup-Modus (DOWN-Taster lang drücken)
 
