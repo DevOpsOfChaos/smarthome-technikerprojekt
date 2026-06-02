@@ -143,6 +143,7 @@ function buildDeviceUpsert(device) {
     input_mask:          device.meta.input_mask || null,
     mac_address:         device.meta.mac_address || null,
     meta_schema_version: device.meta.meta_schema_version || null,
+    contact_type:        device.meta.contact_type || null,
     created_at:          device.created_at,
     updated_at:          device.updated_at
   };
@@ -164,6 +165,7 @@ function buildDeviceUpsert(device) {
       "input_mask",
       "mac_address",
       "meta_schema_version",
+      "contact_type",
       "updated_at"
     ]
   );

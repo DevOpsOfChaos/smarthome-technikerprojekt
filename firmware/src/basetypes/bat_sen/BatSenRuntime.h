@@ -120,6 +120,7 @@ struct NodeState {
     bool stay_awake;                // true = Deep-Sleep bis zum naechsten Kurzdruck gesperrt
     bool stay_button_last_active;   // Letzter Setup-Tasterzustand fuer Short-Press
     bool stay_button_hold_consumed; // true = langer Druck wurde als Setup-Hold verbraucht
+    bool stay_button_short_consumed; // true = Kurzdruck hat bereits Stay-awake aktiviert
     bool restart_pending;           // Neustart angefordert
     bool master_bekannt;            // HELLO_ACK empfangen
     bool master_mac_gueltig;        // Master-MAC provisioniert
@@ -892,8 +893,38 @@ void initialisiereFunk() {
     }
 }
 
+// setzeBoardLedAus – Erzwingt AUS auf dem ungenutzten GPIO8-Board-LED/WS2812-Pin.
+// Wichtig fuer BAT-SEN: ein undefinierter Pegel auf der blauen Board-LED kostet
+// dauerhaft Batteriestrom.
+void setzeBoardLedAus() {
+    if (PIN_BOARD_LED_NEOPIXEL < 0) return;
+
+    const int offLevel = BOARD_LED_AKTIV_HIGH ? LOW : HIGH;
+    digitalWrite(PIN_BOARD_LED_NEOPIXEL, offLevel);
+    pinMode(PIN_BOARD_LED_NEOPIXEL, OUTPUT);
+    digitalWrite(PIN_BOARD_LED_NEOPIXEL, offLevel);
+}
+
+// testeSetupLedKurz – Sichtbarer GPIO7-Selbsttest fuer Hardware-Bring-up.
+// Der Test laeuft nur, wenn das konkrete BAT-SEN-Device ihn aktiviert.
+void testeSetupLedKurz() {
+    if (!SETUP_LED_BOOT_TEST_AKTIV || SETUP_INDICATOR_LED_PIN < 0) return;
+
+    const int onLevel = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0 ? HIGH : LOW;
+    const int offLevel = SETUP_INDICATOR_LED_ACTIVE_HIGH != 0 ? LOW : HIGH;
+    pinMode(SETUP_INDICATOR_LED_PIN, OUTPUT);
+    for (uint8_t i = 0; i < 3U; ++i) {
+        digitalWrite(SETUP_INDICATOR_LED_PIN, onLevel);
+        delay(80);
+        digitalWrite(SETUP_INDICATOR_LED_PIN, offLevel);
+        delay(80);
+    }
+}
+
 // initialisiereIO – Initialisiert GPIOs (LED, ADC, Wake-Input, Custom-Hooks)
 void initialisiereIO() {
+    setzeBoardLedAus();
+
     if (PIN_STATUS_LED >= 0) {
         pinMode(PIN_STATUS_LED, OUTPUT);
         digitalWrite(PIN_STATUS_LED, LOW);
@@ -961,8 +992,10 @@ bool setupButtonIstAktiv() {
 }
 
 // aktualisiereStayAwakeToggle – Kurzer Setup-Tasterdruck toggelt die
-// Deep-Sleep-Sperre. Langer Druck wird nur markiert, damit der Provisioning-
-// Controller exklusiv den Setup-Modus starten kann.
+// Deep-Sleep-Sperre. Beim ersten Tastendruck wird sofort wach gehalten, damit
+// ein sehr kurzer Wake-Tastendruck nicht zwischen Boot und Loop verloren geht.
+// Langer Druck wird nur markiert, damit der Provisioning-Controller exklusiv
+// den Setup-Modus starten kann.
 void aktualisiereStayAwakeToggle(unsigned long jetzt) {
     if (!STAY_AWAKE_TOGGLE_AKTIV) return;
 #if SETUP_BUTTON_PIN >= 0
@@ -972,6 +1005,12 @@ void aktualisiereStayAwakeToggle(unsigned long jetzt) {
     if (active && !nodeStatus.stay_button_last_active) {
         nodeStatus.stay_button_pressed_at_ms = jetzt;
         nodeStatus.stay_button_hold_consumed = false;
+        nodeStatus.stay_button_short_consumed = false;
+        if (!nodeStatus.stay_awake && !nodeStatus.setup_mode) {
+            nodeStatus.stay_awake = true;
+            nodeStatus.stay_button_short_consumed = true;
+            logf("INFO", "Stay-awake aktiv");
+        }
     }
 
     if (active && !nodeStatus.stay_button_hold_consumed &&
@@ -983,6 +1022,7 @@ void aktualisiereStayAwakeToggle(unsigned long jetzt) {
         const unsigned long pressedAt = nodeStatus.stay_button_pressed_at_ms;
         const unsigned long pressMs = pressedAt > 0UL ? (jetzt - pressedAt) : 0UL;
         if (!nodeStatus.stay_button_hold_consumed &&
+            !nodeStatus.stay_button_short_consumed &&
             pressMs > 30UL &&
             pressMs < holdMs &&
             !nodeStatus.setup_mode) {
@@ -994,6 +1034,7 @@ void aktualisiereStayAwakeToggle(unsigned long jetzt) {
         }
         nodeStatus.stay_button_pressed_at_ms = 0UL;
         nodeStatus.stay_button_hold_consumed = false;
+        nodeStatus.stay_button_short_consumed = false;
     }
 
     nodeStatus.stay_button_last_active = active;
@@ -1071,6 +1112,7 @@ void aktiviereWakeQuellen() {
 // starteDeepSleep – Aktiviert Wake-Quellen und geht in Deep-Sleep
 void starteDeepSleep() {
     if (!DEEP_SLEEP_AKTIV) return;
+    setzeBoardLedAus();
     aktiviereWakeQuellen();
     logf("INFO", "Deep-Sleep fuer %lus", nodeStatus.wake_interval_s);
     if (DEBUG_LOKAL_AKTIV) {
@@ -1178,6 +1220,9 @@ static void setupBootLog(const NodeState& ns) {
 // =============================================================================
 
 void setup() {
+    setzeBoardLedAus();
+    testeSetupLedKurz();
+
     if (DEBUG_LOKAL_AKTIV) {
         Serial.begin(115200);
         delay(150);

@@ -102,6 +102,7 @@ const DEVICE_META_FIELDS = [
   "input_mask",
   "mac_address",
   "meta_schema_version",
+  "contact_type",
   "source"
 ];
 
@@ -513,7 +514,11 @@ function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
 
     // Bekanntes Zustandsfeld → normalisieren und in state schreiben.
     if (Object.prototype.hasOwnProperty.call(DEVICE_STATE_NORMALIZERS, fieldName)) {
-      device.state[fieldName] = DEVICE_STATE_NORMALIZERS[fieldName](fieldValue);
+      const normalizedValue = DEVICE_STATE_NORMALIZERS[fieldName](fieldValue);
+      if (fieldName === "rain" && normalizedValue === null && Object.prototype.hasOwnProperty.call(device.state, "rain")) {
+        return;
+      }
+      device.state[fieldName] = normalizedValue;
       return;
     }
 
@@ -539,6 +544,11 @@ function applyState(device, payload, receivedAt = timeHelpers.nowIso()) {
   if (!timeHelpers.isPlainObject(device.availability)) {
     device.availability = { availability: "unknown", online: false, last_seen_at: null };
   }
+  // Ein empfangener STATE ist ein echter Kontakt. Ein altes "offline" darf
+  // sonst im Snapshot kleben bleiben und das Dashboard trotz frischer Werte
+  // falsch rot anzeigen.
+  device.availability.availability = "online";
+  device.availability.online = true;
   device.availability.last_seen_at = receivedAt;
 
   touchDevice(device, receivedAt);

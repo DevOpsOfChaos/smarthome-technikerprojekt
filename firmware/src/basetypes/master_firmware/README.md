@@ -25,3 +25,5 @@ Hinweis:
 - Der Master speichert keine feste Node-Liste; Nodes melden sich dynamisch per HELLO.
 - `HELLO` ist die einzige Quelle fuer `device_class`, `power_type`, `caps` und Profile.
 - Wenn zuerst nur `HEARTBEAT` oder `STATE` einer unbekannten Node eintrifft, legt der Master nur einen provisorischen Slot fuer `device_id` und MAC an, sendet `HELLO_REQUEST` und wartet. Er leitet keine Geraeteklasse aus ID-Praefixen oder Payload-Laengen ab; Availability meldet den Versorgungstyp bis zum HELLO als `unknown`.
+- Batterie-Nodes duerfen laenger schlafen als Netz-Nodes. Der Master nutzt fuer BAT-SEN das gemeldete `report_interval_s`; ohne diesen Wert gilt ein konservativer Mindest-Timeout von 25min.
+- NET-SEN-Regenereignisse werden zusaetzlich in den retained `state` gespiegelt (`rain`), damit ein trocken/nass-Wechsel nicht nur als fluechtiges Event sichtbar ist.

@@ -12,15 +12,16 @@ Der **bat_sen_01** ist ein batteriebetriebener Fenster- und Türkontakt. Er verw
 |-----------|--------|
 | **Platine** | [README.md](README.md) — Sensor_Batteriebetrieb |
 | **Sensor** | Reed-Schalter (magnetischer Näherungsschalter) |
-| **Batterie** | CR2032 (225 mAh, ~3.0V) |
+| **Batterie** | 2x AAA in Serie (~3.0V nominal) |
 | **Betrieb** | Deep-Sleep mit Wake-Up bei Reed-Änderung |
 
 ## GPIO-Belegung
 
 | GPIO | Funktion |
 |------|----------|
-| GPIO2 | V-Mess (Batterie-ADC) |
+| GPIO2 | Setup-Button |
 | GPIO3 | Reed-Schalter (Digital In, Wake-Up fähig) |
+| GPIO4 | V-Mess (Batterie-ADC) |
 | GPIO20/21 | UART (nur Debug) |
 
 ## Fähigkeiten (Capabilities)
@@ -33,7 +34,7 @@ Der **bat_sen_01** ist ein batteriebetriebener Fenster- und Türkontakt. Er verw
 ## Betriebsmodi
 
 - **Control Mode:** `SH_CONTROL_MODE_NONE`
-- **Battery Profile:** `BAT_PROFILE_CR2032`
+- **Battery Profile:** `BAT_PROFILE_2X_AAA`
 - **Reporting:** `SH_REPORTING_SLEEP_EVENT` — Sendet nur bei Zustandsänderung
 
 ## Wake-Up-Verhalten

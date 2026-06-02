@@ -11,5 +11,5 @@
 ## Anpassungen für bat_sen_01
 
 - [ ] Reed-Schalter an GPIO3 (Wake-Up-fähig)
-- [ ] CR2032-Batteriehalter (BAT_PROFILE_CR2032)
+- [ ] 2x-AAA-Batteriehalter (BAT_PROFILE_2X_AAA)
 - [ ] Keine I²C-Sensoren (JP1/JP2 offen)

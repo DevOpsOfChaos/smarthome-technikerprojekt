@@ -18,3 +18,4 @@ Konkretes BAT-SEN-Geraet mit einfachem ADC-Regenpfad.
 - Deshalb signalisiert `param1` den Zielzustand des Wechsels.
 - Schwelle ist als vorlaeufiger V1-Default gesetzt und muss mit echter Hardware validiert werden.
 - V1 bleibt timer-basiert (kein GPIO-Wake).
+- GPIO8-Board-LED/WS2812 bleibt ungenutzt und wird vom BAT-SEN-Basistyp ausgeschaltet.

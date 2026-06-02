@@ -10,6 +10,8 @@ Erstes konkretes Device auf dem neutralen `bat_sen`-Basistyp.
 - Event-Mapping auf `SH_EVENT_WINDOW_OPENED` und `SH_EVENT_WINDOW_CLOSED`
 - C3-GPIO-Deep-Sleep-Wakeup ueber den Device-Pin
 - RTC-Statusspeicher fuer Fenster-Events nach Deep-Sleep-Wakeup
+- GPIO8-Board-LED/WS2812 bleibt ungenutzt und wird vom BAT-SEN-Basistyp ausgeschaltet
+- Batterieprofil: 2x AAA in Reihe (`BAT_PROFILE_2X_AAA`, 2000 bis 3200 mV)
 
 ## Enthaelt bewusst nicht
 
@@ -24,6 +26,8 @@ Erstes konkretes Device auf dem neutralen `bat_sen`-Basistyp.
 - Wake ist level-basiert, die Firmware setzt den Zielpegel aber vor jedem
   Deep-Sleep passend zum aktuellen Kontaktzustand.
 - Geschlossen -> offen und offen -> geschlossen wecken dadurch jeweils sofort.
+- Das periodische Timer-Wake-Intervall liegt bei 12 Stunden. Es dient nur
+  Batterie-/Alive-Meldungen, nicht der Kontakterkennung.
 - Der letzte Kontaktzustand bleibt im RTC-Speicher, damit der Wake auch als
   Fenster-Event gemeldet werden kann.
 

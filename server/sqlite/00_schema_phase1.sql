@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS devices (
     input_mask             TEXT,
     mac_address            TEXT,
     meta_schema_version    TEXT,
+    contact_type           TEXT,
+    dashboard_contact_type TEXT,
     created_at             TEXT NOT NULL,
     updated_at             TEXT NOT NULL
 );

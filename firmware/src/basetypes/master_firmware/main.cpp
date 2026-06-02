@@ -175,6 +175,7 @@ constexpr uint8_t BATTERY_PCT_UNGUELTIG = 0xFFU;
 // 0U waere ein gueltiger Messwert (entladene Batterie) und darf nicht als Ungueltig erscheinen.
 constexpr uint16_t BATTERY_MV_UNGUELTIG = 0xFFFFU;
 constexpr uint8_t WINDOW_STATE_UNGUELTIG = 0xFFU;
+constexpr uint8_t RAIN_STATE_UNGUELTIG = 0xFFU;
 constexpr uint16_t RAIN_RAW_UNGUELTIG = 0xFFFFU;
 constexpr uint8_t COVER_POSITION_UNBEKANNT = 0xFFU;
 
@@ -262,11 +263,13 @@ struct NodeRuntime {
     uint16_t tvoc_ppb;                   // TVOC in ppb
     uint16_t eco2_ppm;                   // eCO2 in ppm
     bool motion;                         // Bewegung erkannt
+    uint8_t rain_state;                  // Regenstatus (0=trocken, 1=nass, 255=unbekannt)
     uint8_t battery_pct;                 // Batteriestand in Prozent
     uint16_t battery_mv;                 // Batteriespannung in mV
     uint8_t window_open;                 // Fensterkontakt (0/1, 255=unbekannt)
     uint16_t rain_raw;                   // Regen-ADC-Rohwert
     uint8_t button_flags;                // Tastenflags
+    uint16_t report_interval_s;          // Meldeintervall fuer Batterie-/Config-States
     uint32_t uptime_s;                   // Uptime der Node in Sekunden
     uint16_t caps;                       // Faehigkeiten (Bitmaske)
     uint16_t fw_version;                 // Firmware-Version
@@ -569,6 +572,18 @@ unsigned long offlineTimeoutMsForPowerType(uint8_t powerType) {
     return powerType == SH_POWER_BATTERY ? BATTERY_NODE_OFFLINE_TIMEOUT_MS : NODE_OFFLINE_TIMEOUT_MS;
 }
 
+// Aufgabe: Liefert den Offline-Timeout fuer eine konkrete Node.
+// Batterieknoten schlafen planmaessig. Wenn sie report_interval_s melden,
+// gilt erst nach zwei verpassten Wake-Zyklen als "late/offline"-Kandidat.
+unsigned long offlineTimeoutMsForNode(size_t nodeIndex) {
+    if (nodeIndex >= MAX_DYNAMIC_NODES) return NODE_OFFLINE_TIMEOUT_MS;
+    if (nodeStates[nodeIndex].power_type != SH_POWER_BATTERY) return NODE_OFFLINE_TIMEOUT_MS;
+    const unsigned long intervalS = nodeStates[nodeIndex].report_interval_s;
+    if (intervalS == 0UL) return BATTERY_NODE_OFFLINE_TIMEOUT_MS;
+    const unsigned long derivedTimeout = intervalS * 2000UL;
+    return derivedTimeout > BATTERY_NODE_OFFLINE_TIMEOUT_MS ? derivedTimeout : BATTERY_NODE_OFFLINE_TIMEOUT_MS;
+}
+
 // =============================================================================
 // NODE-REGISTRY - Initialisierung, Suche (per ID/MAC/frei), Cap-Pruefung
 // =============================================================================
@@ -588,6 +603,7 @@ void initialisiereNodeSlot(NodeRuntime& node) {
     node.aqi = NET_SEN_AIR_METRIC_UNGUELTIG;
     node.tvoc_ppb = NET_SEN_AIR_METRIC_UNGUELTIG;
     node.eco2_ppm = NET_SEN_AIR_METRIC_UNGUELTIG;
+    node.rain_state = RAIN_STATE_UNGUELTIG;
     node.battery_pct = BATTERY_PCT_UNGUELTIG;
     node.battery_mv = BATTERY_MV_UNGUELTIG;
     node.window_open = WINDOW_STATE_UNGUELTIG;
@@ -858,7 +874,10 @@ void sanitisiereNodeStateNachCapabilities(size_t nodeIndex) {
     }
     if (!nodeHasCap(nodeIndex, SH_CAP_MOTION)) nodeStates[nodeIndex].motion = false;
     if (!nodeHasCap(nodeIndex, SH_CAP_WINDOW)) nodeStates[nodeIndex].window_open = WINDOW_STATE_UNGUELTIG;
-    if (!nodeHasCap(nodeIndex, SH_CAP_RAIN)) nodeStates[nodeIndex].rain_raw = RAIN_RAW_UNGUELTIG;
+    if (!nodeHasCap(nodeIndex, SH_CAP_RAIN)) {
+        nodeStates[nodeIndex].rain_state = RAIN_STATE_UNGUELTIG;
+        nodeStates[nodeIndex].rain_raw = RAIN_RAW_UNGUELTIG;
+    }
     if (!nodeHasCap(nodeIndex, SH_CAP_BATTERY)) {
         nodeStates[nodeIndex].battery_pct = BATTERY_PCT_UNGUELTIG;
         nodeStates[nodeIndex].battery_mv = BATTERY_MV_UNGUELTIG;
@@ -888,7 +907,7 @@ const char* availabilityStateText(size_t nodeIndex) {
     const unsigned long letzterKontakt = nodeStates[nodeIndex].letzter_kontakt_ms;
     if (letzterKontakt == 0UL) return "offline";
     const unsigned long delta = millis() - letzterKontakt;
-    const unsigned long timeout = offlineTimeoutMsForPowerType(nodeStates[nodeIndex].power_type);
+    const unsigned long timeout = offlineTimeoutMsForNode(nodeIndex);
     if (nodeStates[nodeIndex].power_type == SH_POWER_BATTERY) {
         // Batterie-Nodes schlafen planmaessig. "asleep" ist deshalb kein Fehler,
         // sondern der erwartete Zustand innerhalb des normalen Meldefensters.
@@ -1190,6 +1209,7 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
     char batteryMvText[16] = {0};
     char windowText[16] = {0};
     char rainText[16] = {0};
+    char rainStateText[16] = {0};
     char coverPositionText[16] = {0};
 
     switch (nodeStates[nodeIndex].device_class) {
@@ -1258,10 +1278,15 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             schreibeUIntOrNull(aqiText, sizeof(aqiText), nodeStates[nodeIndex].aqi, NET_SEN_AIR_METRIC_UNGUELTIG);
             schreibeUIntOrNull(tvocText, sizeof(tvocText), nodeStates[nodeIndex].tvoc_ppb, NET_SEN_AIR_METRIC_UNGUELTIG);
             schreibeUIntOrNull(eco2Text, sizeof(eco2Text), nodeStates[nodeIndex].eco2_ppm, NET_SEN_AIR_METRIC_UNGUELTIG);
+            if (nodeHasCap(nodeIndex, SH_CAP_RAIN) && nodeStates[nodeIndex].rain_state != RAIN_STATE_UNGUELTIG) {
+                copyText(rainStateText, sizeof(rainStateText), boolStr(nodeStates[nodeIndex].rain_state != 0U));
+            } else {
+                copyText(rainStateText, sizeof(rainStateText), "null");
+            }
             snprintf(
                 buffer,
                 bufferSize,
-                "{\"device_id\":\"%s\",\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"fault\":%s}",
+                "{\"device_id\":\"%s\",\"temp_01c\":%s,\"hum_01pct\":%s,\"lux\":%s,\"pressure_pa\":%s,\"gas_ohm\":%s,\"aqi\":%s,\"tvoc_ppb\":%s,\"eco2_ppm\":%s,\"motion\":%s,\"rain\":%s,\"fault\":%s}",
                 nodeStates[nodeIndex].device_id,
                 tempText,
                 humText,
@@ -1272,6 +1297,7 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
                 tvocText,
                 eco2Text,
                 boolStr(nodeStates[nodeIndex].motion),
+                rainStateText,
                 boolStr(nodeStates[nodeIndex].fault));
             return;
 
@@ -1285,13 +1311,14 @@ void baueNodeStateJson(size_t nodeIndex, char* buffer, size_t bufferSize) {
             snprintf(
                 buffer,
                 bufferSize,
-                "{\"device_id\":\"%s\",\"battery_pct\":%s,\"battery_mv\":%s,\"window_open\":%s,\"rain_raw\":%s,\"button_flags\":%u,\"fault\":%s}",
+                "{\"device_id\":\"%s\",\"battery_pct\":%s,\"battery_mv\":%s,\"window_open\":%s,\"rain_raw\":%s,\"button_flags\":%u,\"report_interval_s\":%u,\"fault\":%s}",
                 nodeStates[nodeIndex].device_id,
                 batteryPctText,
                 batteryMvText,
                 windowText,
                 rainText,
                 (unsigned)nodeStates[nodeIndex].button_flags,
+                (unsigned)nodeStates[nodeIndex].report_interval_s,
                 boolStr(nodeStates[nodeIndex].fault));
             return;
 
@@ -1956,7 +1983,8 @@ static bool parseBatSenState(size_t nodeIndex, const uint8_t* payload, uint16_t 
     }
     if (payloadLen == sizeof(SmartHome::BatteryConfigStateReportPayload)) {
         // Config-State enthaelt dieselben Live-Zustandsfelder plus report_interval_s.
-        // Der Master nutzt hier nur den Live-Zustand; daher bleibt der Kopierblock gleich.
+        // Der Master reicht das Intervall bis zum Server durch, damit schlafende
+        // Batterieknoten nicht zu frueh als offline angezeigt werden.
         const SmartHome::BatteryConfigStateReportPayload& state = *reinterpret_cast<const SmartHome::BatteryConfigStateReportPayload*>(payload);
         nodeStates[nodeIndex].battery_pct = state.battery_pct;
         nodeStates[nodeIndex].battery_mv = state.battery_mv;
@@ -1964,6 +1992,7 @@ static bool parseBatSenState(size_t nodeIndex, const uint8_t* payload, uint16_t 
         nodeStates[nodeIndex].rain_raw = state.rain_raw;
         nodeStates[nodeIndex].button_flags = state.button_flags;
         nodeStates[nodeIndex].fault = (state.fault != 0U);
+        nodeStates[nodeIndex].report_interval_s = state.report_interval_s;
         return true;
     }
     logf("WARN", "STATE_REPORT Laenge ungueltig fuer %s", nodeStates[nodeIndex].device_id);
@@ -2067,6 +2096,12 @@ void verarbeiteEventReport(const uint8_t* senderMac, const SmartHome::EventRepor
     }
 
     aktualisiereNodeKontakt((size_t)nodeIndex, senderMac);
+    if (nodeStates[nodeIndex].device_class == SH_CLASS_NET_SEN &&
+        payload.event_type == SH_EVENT_RAIN_DETECTED &&
+        nodeHasCap((size_t)nodeIndex, SH_CAP_RAIN)) {
+        nodeStates[nodeIndex].rain_state = payload.param1 ? 1U : 0U;
+        if (nodeStates[nodeIndex].state_bekannt) publishNodeState((size_t)nodeIndex);
+    }
     publishNodeEvent((size_t)nodeIndex, payload);
     publishNodeAvailability((size_t)nodeIndex);
     logf("INFO", "EVENT von %s: type=%u", payload.node_id, (unsigned)payload.event_type);
@@ -3154,8 +3189,8 @@ void pruefeOfflineTimeout() {
     for (size_t i = 0; i < MAX_DYNAMIC_NODES; ++i) {
         if (!nodeStates[i].belegt || !nodeStates[i].online) continue;
         // Batteriegeraete duerfen laenger still sein als Netzgeraete. Die
-        // Entscheidung liegt zentral in offlineTimeoutMsForPowerType().
-        if ((millis() - nodeStates[i].letzter_kontakt_ms) > offlineTimeoutMsForPowerType(nodeStates[i].power_type)) {
+        // Entscheidung liegt zentral in offlineTimeoutMsForNode().
+        if ((millis() - nodeStates[i].letzter_kontakt_ms) > offlineTimeoutMsForNode(i)) {
             nodeStates[i].online = false;
             publishNodeAvailability(i);
             logf("WARN", "Node %s nicht mehr online (availability=%s)", nodeStates[i].device_id, availabilityStateText(i));

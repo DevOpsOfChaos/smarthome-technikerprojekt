@@ -196,6 +196,13 @@
 #define BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE 0
 #endif
 
+// Kurzer LED-Selbsttest beim Boot. Hilft beim Hardware-Bring-up, bleibt aber
+// standardmaessig aus, damit produktive Batterie-Nodes keinen Zusatzverbrauch
+// pro Wake-Zyklus haben.
+#ifndef BAT_SEN_ENABLE_SETUP_LED_BOOT_TEST
+#define BAT_SEN_ENABLE_SETUP_LED_BOOT_TEST 0
+#endif
+
 // =============================================================================
 // ABGELEITETE KONSTANTEN – constexpr-Werte aus #defines
 // =============================================================================
@@ -259,6 +266,7 @@ constexpr bool DEEP_SLEEP_AKTIV = BAT_SEN_ENABLE_DEEP_SLEEP != 0;
 constexpr bool BATTERY_ADC_AKTIV = BAT_SEN_ENABLE_ADC_BATTERY != 0;
 constexpr bool GPIO_WAKE_AKTIV = BAT_SEN_ENABLE_GPIO_WAKE != 0;
 constexpr bool STAY_AWAKE_TOGGLE_AKTIV = BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE != 0;
+constexpr bool SETUP_LED_BOOT_TEST_AKTIV = BAT_SEN_ENABLE_SETUP_LED_BOOT_TEST != 0;
 
 // =============================================================================
 // COMPILEZEIT-VALIDIERUNG – static_asserts fuer Profile und Grenzen

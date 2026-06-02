@@ -1,0 +1,90 @@
+[
+  {
+    "id": "comment_43_contact_type_update",
+    "type": "comment",
+    "z": "tab_40_command_minimal",
+    "name": "Dashboard Kontakt-Typ",
+    "info": "Schreibpfad fuer die Dashboard-Semantik von BAT-SEN-Kontakten. Speichert nur die UI-Einstellung dashboard_contact_type; Firmware-Meta contact_type bleibt separat erhalten.",
+    "x": 190,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "httpin_43_contact_type_update",
+    "type": "http in",
+    "z": "tab_40_command_minimal",
+    "name": "POST dashboard contact type",
+    "url": "/api/phase1/dashboard/contact-type",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 680,
+    "wires": [["json_43_contact_type_update"]]
+  },
+  {
+    "id": "json_43_contact_type_update",
+    "type": "json",
+    "z": "tab_40_command_minimal",
+    "name": "Contact Type JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 420,
+    "y": 680,
+    "wires": [["func_43_contact_type_update"]]
+  },
+  {
+    "id": "func_43_contact_type_update",
+    "type": "function",
+    "z": "tab_40_command_minimal",
+    "name": "Kontakt-Typ validieren & parametrisieren",
+    "func": "const flowHelpers = global.get(\"flowHelpers\");\nif (!flowHelpers) {\n    msg.statusCode = 500;\n    msg.payload = { error: \"flow_helpers_unavailable\", message: \"Boot-Flow pruefen\" };\n    return [null, msg];\n}\n\nconst payload = flowHelpers.readPayloadObject(msg.payload);\nconst deviceId = typeof payload.device_id === \"string\" ? payload.device_id.trim() : \"\";\nif (!deviceId) {\n    msg.statusCode = 400;\n    msg.payload = { error: \"device_id_required\", message: \"device_id ist ein Pflichtfeld\" };\n    return [null, msg];\n}\n\nconst rawType = typeof payload.contact_type === \"string\" ? payload.contact_type.trim().toLowerCase() : \"\";\nconst normalizedType = rawType === \"door\" || rawType === \"tuer\" || rawType === \"tür\"\n    ? \"door\"\n    : rawType === \"window\" || rawType === \"fenster\"\n        ? \"window\"\n        : \"\";\n\nif (!normalizedType) {\n    msg.statusCode = 400;\n    msg.payload = { error: \"contact_type_invalid\", message: \"contact_type muss window oder door sein\" };\n    return [null, msg];\n}\n\nconst updatedAt = new Date().toISOString();\nmsg.dashboardContactTypeUpdate = { device_id: deviceId, contact_type: normalizedType, updated_at: updatedAt };\nmsg.params = [normalizedType, updatedAt, deviceId];\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 690,
+    "y": 680,
+    "wires": [["sqlite_43_contact_type_update"], ["httpresp_43_contact_type_update"]]
+  },
+  {
+    "id": "sqlite_43_contact_type_update",
+    "type": "sqlite",
+    "z": "tab_40_command_minimal",
+    "mydb": "sqlitedb_30_phase1",
+    "sqlquery": "prepared",
+    "sql": "UPDATE devices SET dashboard_contact_type = ?, updated_at = ? WHERE device_id = ? RETURNING device_id, dashboard_contact_type, updated_at;",
+    "name": "Write contact type (prepared)",
+    "x": 970,
+    "y": 660,
+    "wires": [["func_43_contact_type_response"]]
+  },
+  {
+    "id": "func_43_contact_type_response",
+    "type": "function",
+    "z": "tab_40_command_minimal",
+    "name": "Kontakt-Typ-Antwort bauen",
+    "func": "const update = msg.dashboardContactTypeUpdate || {};\nconst rows = Array.isArray(msg.payload) ? msg.payload : [];\nconst row = rows.length > 0 ? rows[0] : null;\nif (!row) {\n    msg.statusCode = 404;\n    msg.payload = { error: \"device_not_found\", message: \"Geraet nicht in der Datenbank gefunden\", device_id: update.device_id || null };\n    return msg;\n}\nmsg.statusCode = 200;\nmsg.payload = {\n    device_id: row.device_id || update.device_id || null,\n    contact_type: row.dashboard_contact_type || update.contact_type || null,\n    updated_at: row.updated_at || update.updated_at || new Date().toISOString()\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1230,
+    "y": 660,
+    "wires": [["httpresp_43_contact_type_update"]]
+  },
+  {
+    "id": "httpresp_43_contact_type_update",
+    "type": "http response",
+    "z": "tab_40_command_minimal",
+    "name": "HTTP response",
+    "statusCode": "",
+    "headers": {},
+    "x": 1220,
+    "y": 720,
+    "wires": []
+  }
+]

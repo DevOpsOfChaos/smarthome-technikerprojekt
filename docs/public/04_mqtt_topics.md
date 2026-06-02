@@ -199,7 +199,7 @@ da diese Doku den MQTT-Vertrag der ESPHome-Linie beschreibt.
   "tvoc_ppb": null,
   "eco2_ppm": null,
   "motion": false,
-  "rain_raw": 0,
+  "rain": false,
   "fault": false
 }
 ```
@@ -214,11 +214,14 @@ da diese Doku den MQTT-Vertrag der ESPHome-Linie beschreibt.
   "window_open": 0,
   "rain_raw": null,
   "button_flags": 0,
+  "report_interval_s": 43200,
   "fault": false
 }
 ```
 
 **`window_open`:** `0` = geschlossen, `1` = offen, `null` = nicht zutreffend (z.B. Regensensor).
+
+**`report_interval_s`:** Meldeintervall des Batteriegeräts. Der Server nutzt diesen Wert für die Anzeige von schlafenden BAT-SEN-Geräten.
 
 **Null-Werte:** Felder die für das jeweilige Gerät nicht zutreffen sind `null` (z.B. `rain_raw` beim Fensterkontakt, `window_open` beim Regensensor).
 

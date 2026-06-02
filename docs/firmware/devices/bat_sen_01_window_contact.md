@@ -1,4 +1,4 @@
-# BAT-SEN-01 — Fensterkontakt (Tiefschlaf, CR2032)
+# BAT-SEN-01 — Fensterkontakt (Tiefschlaf, 2x AAA)
 
 ## Geräteidentifikation
 
@@ -9,8 +9,8 @@
 | **FW_VARIANT** | `bat_sen_window_contact` |
 | **CAPS** | `BATTERY \| WINDOW` |
 | **REPORTING_MODE** | `SLEEP_EVENT` |
-| **BATTERY_PROFILE** | `BAT_PROFILE_CR2032` (2200–3000 mV) |
-| **DEFAULT_WAKE_INTERVAL_S** | 900 (15 min) |
+| **BATTERY_PROFILE** | `BAT_PROFILE_2X_AAA` (2000–3200 mV) |
+| **DEFAULT_WAKE_INTERVAL_S** | 43200 (12 h) |
 | **DEFAULT_RX_WINDOW_MS** | 5000 |
 | **GPIO_WAKE** | Aktiviert (`WAKE_LEVEL_HIGH = OPEN_LEVEL_HIGH`) |
 | **DEBOUNCE_MS** | 35 |
@@ -44,15 +44,15 @@
 
 | Parameter | Wert | Beschreibung |
 |---|---|---|
-| `DEFAULT_WAKE_INTERVAL_S` | 900 s (15 min) | Timer-basiertes Aufwachen für Batteriereport |
+| `DEFAULT_WAKE_INTERVAL_S` | 43200 s (12 h) | Timer-basiertes Aufwachen für Batterie-/Alive-Report |
 | `DEFAULT_RX_WINDOW_MS` | 5000 ms | Empfangsfenster nach Aufwachen |
 | `DEBOUNCE_MS` | 35 ms | Entprellzeit für Fensterkontakt |
 
-### Batterieprofil: CR2032
+### Batterieprofil: 2x AAA
 
 | Parameter | Wert |
 |---|---|
-| Batterietyp | CR2032 (Lithium Knopfzelle) |
+| Batterietyp | 2x AAA in Reihe |
 | Spannungsbereich | 2200–3000 mV |
 | Spannungsbereich (roh) | entspricht ADC-Werten lt. Hardware |
 
@@ -183,14 +183,14 @@ Raw-Change erkannt?
 ### SLEEP_EVENT Mode
 
 Das Gerät verbringt die meiste Zeit im Tiefschlaf (Deep Sleep). Es wacht auf:
-- **Periodisch** alle 15 Minuten (`DEFAULT_WAKE_INTERVAL_S`) für einen Batteriestatus-Report
+- **Periodisch** alle 12 Stunden (`DEFAULT_WAKE_INTERVAL_S`) für einen Batterie-/Alive-Report
 - **Eventgesteuert** über GPIO3-Wake bei Fensteröffnung (steigende Flanke auf HIGH)
 
 Nach dem Senden eines Events oder Reports geht das Gerät sofort wieder in den Tiefschlaf.
 
-### CR2032 als Batterieprofil
+### 2x AAA als Batterieprofil
 
-CR2032-Knopfzellen liefern 2200–3000 mV unter Last. Der `BAT_PROFILE_CR2032` definiert die ADC-Umrechnung und die Schwellwerte für Batterie-warnungen (niedrig/kritisch). Der Bereich ist für den ESP32 ausreichend, um ohne Spannungswandler direkt betrieben zu werden.
+Zwei AAA-Zellen in Reihe liefern im Projektvertrag 2000–3200 mV. `BAT_PROFILE_2X_AAA` definiert die Prozentberechnung für diese Spannungsgrenzen; die ADC-Umrechnung selbst bleibt durch Spannungsteiler und Kalibrierfaktor bestimmt.
 
 ### Entprellzeit 35 ms
 
@@ -260,7 +260,7 @@ Der interne Pullup-Widerstand des ESP32 wird verwendet. Dies spart einen externe
       +----------+----------+
       |                     |
   Timer Wake           GPIO Wake
-  (900 s)              (steigende Flanke GPIO3)
+  (43200 s)            (steigende Flanke GPIO3)
       |                     |
       v                     v
 +-----------+        +-----------+

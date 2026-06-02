@@ -118,9 +118,11 @@
 #define MASTER_NODE_OFFLINE_TIMEOUT_MS 75000UL
 #endif
 
-// Offline-Timeout fuer Batterie-Nodes (ms, 10min)
+// Minimaler Offline-Timeout fuer Batterie-Nodes (ms, 25min).
+// Der tatsaechliche Timeout wird fuer BAT-SEN aus report_interval_s abgeleitet,
+// sobald der erste Config-State angekommen ist.
 #ifndef MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS
-#define MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS 600000UL
+#define MASTER_BATTERY_NODE_OFFLINE_TIMEOUT_MS 1500000UL
 #endif
 
 // Maximale Anzahl dynamischer Nodes in der Registry

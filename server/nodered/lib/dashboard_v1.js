@@ -170,6 +170,25 @@ function hasCapability(meta, capability) {
     return caps.includes(capability);
 }
 
+function normalizeContactType(value) {
+    const text = normalizeString(value).toLowerCase();
+    if (["door", "tuer", "tür"].includes(text)) return "door";
+    if (["window", "fenster"].includes(text)) return "window";
+    return "";
+}
+
+function resolveContactType(device, meta) {
+    return normalizeContactType(device && device.dashboard_contact_type)
+        || normalizeContactType(meta && meta.contact_type)
+        || (hasCapability(meta, "window") ? "window" : "");
+}
+
+function contactLabelForType(contactType) {
+    if (contactType === "door") return "Tür";
+    if (contactType === "window") return "Fenster";
+    return "Kontakt";
+}
+
 // ===========================================================================
 // VERFÜGBARKEIT
 // ===========================================================================
@@ -419,6 +438,27 @@ function toBooleanOrNull(value) {
     return Boolean(value);
 }
 
+function booleanFromEventValue(value) {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
+    if (typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "number") {
+        return value !== 0;
+    }
+
+    const text = String(value).trim().toLowerCase();
+    if (["1", "true", "yes", "on", "wet", "nass"].includes(text)) {
+        return true;
+    }
+    if (["0", "false", "no", "off", "dry", "trocken"].includes(text)) {
+        return false;
+    }
+    return null;
+}
+
 function assignIfPresent(target, key, value) {
     if (value !== null && value !== undefined && value !== "") {
         target[key] = value;
@@ -449,6 +489,7 @@ function buildMetaFromRow(row) {
     assignIfPresent(meta, "input_mask", row.input_mask);
     assignIfPresent(meta, "mac_address", row.mac_address);
     assignIfPresent(meta, "meta_schema_version", row.meta_schema_version);
+    assignIfPresent(meta, "contact_type", row.contact_type);
     const caps = parseJson(row.caps);
     if (Array.isArray(caps)) {
         meta.caps = caps;
@@ -518,6 +559,20 @@ function buildStateFromRow(row) {
 
     if (state.window_open !== undefined) {
         state.contact_open = state.window_open;
+    }
+
+    const eventLabel = normalizeString(row.last_event_label).toLowerCase();
+    if (state.contact_open === undefined && ["window_opened", "window_closed"].includes(eventLabel)) {
+        state.contact_open = eventLabel === "window_opened";
+    }
+    if (state.rain === undefined && eventLabel === "rain_detected") {
+        const eventRainValue = row.last_event_param1 !== null && row.last_event_param1 !== undefined
+            ? row.last_event_param1
+            : row.last_event_param2;
+        const rainFromEvent = booleanFromEventValue(eventRainValue);
+        if (rainFromEvent !== null) {
+            state.rain = rainFromEvent;
+        }
     }
 
     const coverState = normalizeString(row.cover_state).toLowerCase();
@@ -659,13 +714,17 @@ function suppressDisplayOnlyStateNoise(device, state, meta) {
  *
  * Priorisierung: Cover-Richtung → Relay-Status → Sensoren (Temp, Feuchte, Lux…) → Batterie.
  * relay_1 wird bei net_erl unterdrückt, da der große Lampen-Button es bereits zeigt.
- * rain wird bei net_sen immer ergänzt, auch ohne Wert (zeigt dann "unbekannt").
+ * rain wird bei net_sen ergänzt, bis zum ersten belastbaren Wert als "unbekannt".
  *
  * @returns {Array<{ key, label, value_text, wide }>}
  */
 function pickHighlights(device, state, meta) {
     const keys = [];
     const baseType = normalizeBaseType(device.base_type || device.device_class || device.device_id);
+    const contactType = resolveContactType(device, meta);
+    if (contactType && (Object.prototype.hasOwnProperty.call(state, "contact_open") || Object.prototype.hasOwnProperty.call(state, "window_open"))) {
+        keys.push("contact_open", "window_open");
+    }
     if (isCoverDevice(device, state, meta)) {
         keys.push("cover_direction");
     } else if (isRelayDevice(device, state, meta)) {
@@ -686,9 +745,12 @@ function pickHighlights(device, state, meta) {
     }
     return highlightKeys.map((key) => {
         const hasValue = Object.prototype.hasOwnProperty.call(state, key);
+        const label = ["contact_open", "window_open"].includes(key)
+            ? contactLabelForType(contactType)
+            : labelForStateKey(key);
         return {
             key,
-            label: labelForStateKey(key),
+            label,
             value_text: hasValue ? formatStateValue(key, state[key]) : "unbekannt",
             wide: baseType === "net_sen" && key === "rain"
         };
@@ -829,6 +891,8 @@ function describeDevice(row) {
         display_name: customName || metaName || row.device_id,
         custom_name: customName,
         has_custom_name: Boolean(customName),
+        contact_type: resolveContactType({ dashboard_contact_type: row.dashboard_contact_type }, meta),
+        dashboard_contact_type: normalizeContactType(row.dashboard_contact_type),
         meta,
         availability,
         state,
@@ -908,6 +972,8 @@ function buildOverviewQuery() {
         "    d.input_mask,",
         "    d.mac_address,",
         "    d.meta_schema_version,",
+        "    d.contact_type,",
+        "    d.dashboard_contact_type,",
         "    d.updated_at AS device_updated_at,",
         "    l.availability,",
         "    l.online,",
@@ -1037,6 +1103,8 @@ function buildDeviceDetailQuery(deviceId) {
         "    d.input_mask,",
         "    d.mac_address,",
         "    d.meta_schema_version,",
+        "    d.contact_type,",
+        "    d.dashboard_contact_type,",
         "    d.updated_at AS device_updated_at,",
         "    l.availability,",
         "    l.online,",
@@ -1124,6 +1192,7 @@ function buildDeviceDetailPayload(rows) {
             { label: "Meta-Schema", value_text: normalizeString(meta.meta_schema_version) || "-" },
             { label: "Control-Mode", value_text: normalizeString(meta.control_mode) || "-" },
             { label: "Config-Profil", value_text: normalizeString(meta.config_profile) || "-" },
+            { label: "Kontakt-Typ", value_text: contactLabelForType(device.contact_type) },
             { label: "Reporting-Mode", value_text: normalizeString(meta.reporting_mode) || "-" },
             { label: "Sensor-Maske", value_text: normalizeString(meta.sensor_mask) || "-" },
             { label: "Input-Maske", value_text: normalizeString(meta.input_mask) || "-" },
@@ -1133,11 +1202,14 @@ function buildDeviceDetailPayload(rows) {
             { label: "Letztes Event", value_text: formatTimestamp(device.last_event_at) },
             { label: "Letztes Ack", value_text: formatTimestamp(device.last_ack_at) }
         ],
-        state_rows: Object.keys(device.state || {}).sort().map((key) => ({
-            key,
-            label: labelForStateKey(key),
-            value_text: formatStateValue(key, device.state[key])
-        })),
+        state_rows: Object.keys(device.state || {}).sort().map((key) => {
+            const contactType = resolveContactType(device, meta);
+            return {
+                key,
+                label: ["contact_open", "window_open"].includes(key) ? contactLabelForType(contactType) : labelForStateKey(key),
+                value_text: formatStateValue(key, device.state[key])
+            };
+        }),
         raw_sections: [
             { key: "availability", label: "Availability JSON", value_text: JSON.stringify(device.availability || {}, null, 2) },
             { key: "state", label: "State JSON", value_text: JSON.stringify(device.state || {}, null, 2) },

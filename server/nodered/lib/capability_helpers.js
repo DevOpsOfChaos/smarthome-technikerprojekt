@@ -182,6 +182,10 @@ function deriveCapabilities(meta = {}) {
     caps.add("battery");
   }
 
+  if (["window", "fenster", "door", "tuer", "tür"].includes(String(meta.contact_type || "").trim().toLowerCase())) {
+    caps.add("window");
+  }
+
   for (const capability of ALWAYS_PRESENT_CAPABILITIES) {
     caps.add(capability);
   }

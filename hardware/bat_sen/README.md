@@ -31,7 +31,7 @@ BAT-SEN ist der Basetype für **batteriebetriebene Sensor-Knoten** mit Deep-Slee
 
 - **Power-Gating:** P-MOSFET (IRF9530, SOT-23) schaltet Sensoren im Deep-Sleep ab
 - **Zener-Diode:** BZX55C3V3 (DO-35) — Überspannungsschutz
-- **Spannungsteiler:** R2+R5 (100K+100K) an GPIO2 — Batterieüberwachung
+- **Spannungsteiler:** R2+R5 (100K+100K) an GPIO4 — Batterieüberwachung
 - **Deep-Sleep:** ~0.5–0.8 mA Board-Gesamtstrom
 - **Wake-Up:** Timer (RTC) oder externer Interrupt
 
@@ -41,7 +41,8 @@ BAT-SEN ist der Basetype für **batteriebetriebene Sensor-Knoten** mit Deep-Slee
 |------|----------|-----------|
 | GPIO0 | I²C SDA | Optional |
 | GPIO1 | I²C SCL | Optional |
-| GPIO2 | V-Mess (ADC) | Batteriespannung via Spannungsteiler |
+| GPIO2 | Setup-Button | Lokaler Setup-/Bring-up-Taster |
+| GPIO4 | V-Mess (ADC) | Batteriespannung via Spannungsteiler |
 | GPIO3–10 | frei | Pinheader |
 | GPIO20/21 | UART | Debug |
 
@@ -57,5 +58,5 @@ BAT-SEN ist der Basetype für **batteriebetriebene Sensor-Knoten** mit Deep-Slee
 
 | Gerät | ID | Sensoren | Batterie |
 |-------|-----|----------|----------|
-| 👉 [bat_sen_01](devices/bat_sen_01_window_contact/) | Fensterkontakt | Reed-Schalter | CR2032 |
+| 👉 [bat_sen_01](devices/bat_sen_01_window_contact/) | Fensterkontakt | Reed-Schalter | 2x AAA in Serie |
 | 👉 [bat_sen_02](devices/bat_sen_02_rain_sensor/) | Regensensor | ADC-Regensensor | 2× AA |

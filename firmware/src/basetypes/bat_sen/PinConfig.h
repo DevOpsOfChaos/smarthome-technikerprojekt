@@ -7,7 +7,8 @@
 // Datei-Funktion:
 //   Pin-Konfiguration fuer den BAT-SEN-Basistyp (Batterie-Sensoren).
 //   Definiert GPIOs fuer Batterie-ADC (Spannungsmessung), Wake-Eingang
-//   (GPIO-Wake bei Ereignis), Status-LED und Setup-Button/LED.
+//   (GPIO-Wake bei Ereignis), Status-LED, Board-LED/NeoPixel-Pin und
+//   Setup-Button/LED.
 //
 // Autor:           DevOpsOfChaos
 // Erstelldatum:    2026-05-14
@@ -24,6 +25,19 @@
 // Status-LED (optional, -1 = deaktiviert)
 #ifndef BAT_SEN_PIN_STATUS_LED
 #define BAT_SEN_PIN_STATUS_LED -1
+#endif
+
+// Board-LED/WS2812-Datenpin auf ESP32-C3-Boards.
+// BAT-SEN nutzt diese LED nicht; der Pin wird aktiv AUS gesetzt, damit keine
+// blaue Board-LED dauerhaft Batterie verbraucht.
+#ifndef BAT_SEN_PIN_BOARD_LED_NEOPIXEL
+#define BAT_SEN_PIN_BOARD_LED_NEOPIXEL SmartHome::HardwarePinStandard::GPIO_INTERNAL_NEOPIXEL
+#endif
+
+// 1 = LED aus bei LOW. Falls ein konkretes Board active-LOW verdrahtet ist,
+// muss das Device diesen Wert auf 0 ueberschreiben.
+#ifndef BAT_SEN_BOARD_LED_ACTIVE_HIGH
+#define BAT_SEN_BOARD_LED_ACTIVE_HIGH 1
 #endif
 
 // GPIO fuer Batterie-ADC (Spannungsteiler-Eingang)
@@ -71,5 +85,7 @@
 // =============================================================================
 
 constexpr int PIN_STATUS_LED = BAT_SEN_PIN_STATUS_LED;
+constexpr int PIN_BOARD_LED_NEOPIXEL = BAT_SEN_PIN_BOARD_LED_NEOPIXEL;
 constexpr int PIN_BATTERY_ADC = BAT_SEN_PIN_BATTERY_ADC;
 constexpr int PIN_WAKE_INPUT = BAT_SEN_PIN_WAKE_INPUT;
+constexpr bool BOARD_LED_AKTIV_HIGH = BAT_SEN_BOARD_LED_ACTIVE_HIGH != 0;

@@ -377,7 +377,7 @@ Wird bei jeder STATE-Nachricht eines NET-SEN gesendet.
   "tvoc_ppb": null,
   "eco2_ppm": null,
   "motion": false,
-  "rain_raw": 0,
+  "rain": false,
   "fault": false
 }
 ```
@@ -394,7 +394,7 @@ Wird bei jeder STATE-Nachricht eines NET-SEN gesendet.
 | `tvoc_ppb` | uint16 \| null | TVOC-Konzentration in ppb (optional) |
 | `eco2_ppm` | uint16 \| null | eCO2-Konzentration in ppm (optional) |
 | `motion` | bool | Präsenz erkannt |
-| `rain_raw` | uint16 | Regen-Rohwert (0 = kein Regen) |
+| `rain` | bool \| null | Regenstatus, aus `rain_detected`-Events retained in den State übernommen |
 | `fault` | bool | Fehlerstatus (true = Fehler) |
 
 ### 5.7 `smarthome/device/{device_id}/state` – BAT-SEN State Payload (Fensterkontakt)
@@ -409,6 +409,7 @@ Wird bei jeder STATE-Nachricht eines BAT-SEN im Fensterkontakt-Modus gesendet.
   "window_open": 0,
   "rain_raw": null,
   "button_flags": 0,
+  "report_interval_s": 43200,
   "fault": false
 }
 ```
@@ -421,6 +422,7 @@ Wird bei jeder STATE-Nachricht eines BAT-SEN im Fensterkontakt-Modus gesendet.
 | `window_open` | uint8 | Fensterstatus (0 = geschlossen, >0 = geöffnet) |
 | `rain_raw` | uint16 \| null | Regen-Rohwert (null wenn kein Regensensor) |
 | `button_flags` | uint8 | Taster-Bitmaske |
+| `report_interval_s` | uint16 | Meldeintervall in Sekunden |
 | `fault` | bool | Fehlerstatus (true = Fehler) |
 
 ### 5.8 `smarthome/device/{device_id}/state` – BAT-SEN State Payload (Regensensor)
@@ -435,6 +437,7 @@ Wird bei jeder STATE-Nachricht eines BAT-SEN im Regensensor-Modus gesendet.
   "window_open": null,
   "rain_raw": 1845,
   "button_flags": 0,
+  "report_interval_s": 900,
   "fault": false
 }
 ```
@@ -447,6 +450,7 @@ Wird bei jeder STATE-Nachricht eines BAT-SEN im Regensensor-Modus gesendet.
 | `window_open` | uint8 \| null | Fensterstatus (null wenn kein Fensterkontakt) |
 | `rain_raw` | uint16 | Regen-Rohwert (0 = kein Regen) |
 | `button_flags` | uint8 | Taster-Bitmaske |
+| `report_interval_s` | uint16 | Meldeintervall in Sekunden |
 | `fault` | bool | Fehlerstatus (true = Fehler) |
 
 ### 5.9 Sensor-Offset (Temperatur/Feuchte)

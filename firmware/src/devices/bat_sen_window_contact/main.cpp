@@ -12,15 +12,16 @@
  Beschreibung: Liest den Reed-Kontakt ein, entprellt Pegelwechsel und meldet
  Statuswechsel als Fenster-Events. Der Basistyp uebernimmt ESP-NOW, MQTT-
  Weitergabe, Batteriespannung, Setup-Modus und Deep-Sleep. Das Geraet wacht
- bei GPIO-Aenderung in beide Richtungen und zusaetzlich per Timer auf;
- 15 Minuten bedeuten 900 s = 15 min Wake-Intervall. Der letzte Kontaktzustand
- bleibt im RTC-Speicher, damit auch ein Wake aus Deep-Sleep als Event gemeldet
- werden kann.
+ bei GPIO-Aenderung in beide Richtungen und zusaetzlich per Timer auf.
+ Der Timer-Wake ist bewusst lang, weil Kontaktwechsel per GPIO sofort wecken;
+ periodische Wakes dienen nur Batterie- und Alive-Meldungen. Der letzte
+ Kontaktzustand bleibt im RTC-Speicher, damit auch ein Wake aus Deep-Sleep als
+ Event gemeldet werden kann.
 
  Hardware:
  - ESP32-C3
  - Reed-Kontakt an GPIO3
- - CR2032-Batterie, erwarteter Bereich etwa 2200 bis 3000 mV
+ - 2x AAA in Reihe, erwarteter Bereich etwa 2000 bis 3200 mV
  - Setup-Button an GPIO2, active-LOW
  - Setup-LED an GPIO7, active-HIGH
 
@@ -118,6 +119,9 @@ bool device_poll_inputs() {
 
     // Rohwert geaendert: Entprell-Timer neu starten.
     if (raw_level != last_raw_level) {
+        logf("INFO", "Reed raw edge: %s -> %s",
+             last_raw_level == HIGH ? "HIGH" : "LOW",
+             raw_level == HIGH ? "HIGH" : "LOW");
         last_raw_level = raw_level;
         letzte_flanke_ms = jetzt;
         return false;

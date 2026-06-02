@@ -17,7 +17,7 @@
  - DeviceTypes.h: eigene Protokollbibliothek mit Capability-Flags und Batterieprofilen.
 
  Wichtige Werte:
- - 900 Sekunden Wake-Intervall entsprechen 15 Minuten.
+ - 43200 Sekunden Wake-Intervall entsprechen 12 Stunden.
  - 5000 Millisekunden RX-Fenster entsprechen 5 Sekunden Empfangszeit nach Wake.
  - 35 Millisekunden Entprellzeit verhindern falsche Kontaktwechsel.
 
@@ -40,15 +40,17 @@
 // (anders als NET_ERL_DEVICE_* und NET_SEN_DEVICE_*).
 #define BAT_SEN_REPORTING_MODE SH_REPORTING_SLEEP_EVENT
 
-// Batterie: CR2032 (2200mV leer, 3000mV voll)
-#define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_CR2032
-#define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 900U     // 900 Sekunden = 15 Minuten.
+// Batterie: 2x AAA in Reihe (2000mV leer, 3200mV voll)
+#define BAT_SEN_BATTERY_PROFILE BAT_PROFILE_2X_AAA
+#define BAT_SEN_DEFAULT_WAKE_INTERVAL_S 43200U   // 43200 Sekunden = 12 Stunden.
 #define BAT_SEN_DEFAULT_RX_WINDOW_MS 5000U       // 5000 Millisekunden = 5 Sekunden.
 
 // GPIO-Wake aktiv: wird bei Pegelwechsel am Kontakt-Pin aufgeweckt
 #define BAT_SEN_ENABLE_GPIO_WAKE 1
 // Kurzer Setup-Tasterdruck sperrt/erlaubt Deep-Sleep fuer Tests am Geraet.
 #define BAT_SEN_ENABLE_STAY_AWAKE_TOGGLE 1
+// Bring-up-Diagnose: GPIO7 blinkt beim Boot dreimal kurz.
+#define BAT_SEN_ENABLE_SETUP_LED_BOOT_TEST 1
 // Fallback-Wake-Level; die Fensterkontakt-Firmware nutzt dynamischen Wake-Level.
 #define BAT_SEN_GPIO_WAKE_LEVEL_HIGH BAT_SEN_WINDOW_CONTACT_OPEN_LEVEL_HIGH
 
