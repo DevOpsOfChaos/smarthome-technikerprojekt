@@ -114,8 +114,8 @@ namespace {
     // -- I2C-Bus-Zustand ---------------------------------------------------
     uint8_t  i2c_recovery_count = 0;
     unsigned long last_i2c_recovery_ms = 0;
-    constexpr uint32_t I2C_RECOVERY_COOLDOWN_MS = 30000UL;               // 30 s zwischen I2C-Recoveries.
-    constexpr uint8_t  SENSOR_MAX_FAIL_BEFORE_RECOVERY = 3;              // Nach 3 Fehlern → I2C-Recovery.
+    constexpr uint32_t I2C_RECOVERY_COOLDOWN_MS = 30000UL;               // constexpr liegt im Flash/Compile-Time-Kontext; spart RAM gegenueber veraenderbaren Variablen.
+    constexpr uint8_t  SENSOR_MAX_FAIL_BEFORE_RECOVERY = 3;              // Nach 3 Fehlern I2C-Recovery, damit einzelne Messausreisser nicht sofort den Bus resetten.
 
     // Sensor-Messwerte
     int16_t temp_01c = INT16_MIN;                                       // INT16_MIN = Sentinel "kein gueltiger Messwert" (Temperatur).
@@ -139,7 +139,7 @@ namespace {
     bool initBme280() {
         const uint8_t addrs[] = {(uint8_t)NET_ERL_BME280_ADDRESS};
         for (uint8_t a : addrs) {
-            if (!bme280.begin(a, &Wire)) continue;
+            if (!bme280.begin(a, &Wire)) continue; // begin() spricht den Sensor per I2C an; false bedeutet Adresse antwortet nicht.
             return true;
         }
         return false;
@@ -150,8 +150,8 @@ namespace {
     // Ausgabewert: keiner; die Adafruit_VEML7700-Instanz wird intern konfiguriert.
     // 100 ms Integrationszeit bedeuten, dass eine einzelne Messung etwa 0,1 Sekunden Licht sammelt.
     void konfVeml7700() {
-        veml7700.setGain(VEML7700_GAIN_1);
-        veml7700.setIntegrationTime(VEML7700_IT_100MS);
+        veml7700.setGain(VEML7700_GAIN_1);              // Bibliotheksfunktion: Verstaerkung x1, damit helle Bereiche nicht so schnell saettigen.
+        veml7700.setIntegrationTime(VEML7700_IT_100MS); // Laengere Integration = stabilerer Luxwert, aber langsamere Reaktion.
     }
 
     // Aufgabe: Initialisiert den VEML7700 und merkt den Bereit-Zeitpunkt.
@@ -193,13 +193,13 @@ namespace {
         i2c_recovery_count++;
         logMsg("WARN", "I2C recovery #%u reason=%s", i2c_recovery_count, reason ? reason : "?");
 
-        Wire.end();
+        Wire.end(); // I2C-Treiber kurz abschalten, damit die folgenden GPIO-Pulse den Bus manuell freiziehen koennen.
         delay(50);
         i2cBusRecoveryPulse();
         delay(10);
-        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
-        Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
-        Wire.setTimeOut(NET_ERL_I2C_TIMEOUT_MS);
+        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL); // Wire neu starten, weil Wire.end() den I2C-Treiber beendet hat.
+        Wire.setClock(NET_ERL_I2C_CLOCK_HZ);        // Niedriger Takt ist robuster bei langen Leitungen/stoeranfaelligem Bus.
+        Wire.setTimeOut(NET_ERL_I2C_TIMEOUT_MS);    // Timeout verhindert, dass ein blockierter Sensor die Firmware dauerhaft festhaelt.
         delay(10);
         return true;
     }
@@ -309,7 +309,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     letztes_env_sample_ms = nowMs;
 
     // WDT zuruecksetzen vor potenziell blockierenden I2C-Operationen
-    esp_task_wdt_reset();
+    esp_task_wdt_reset(); // Watchdog fuettern: Sensor-I2C kann kurz blockieren, soll aber keinen Reset ausloesen.
 
     // --- Hilfs-Lambda fuer Recovery-Pruefungen ---
     auto recoveryNeeded = [&](bool ok, uint8_t failCount) -> bool {
@@ -354,11 +354,11 @@ void netErlDevicePollSensors(unsigned long nowMs) {
 
     // BME280 lesen: Temperatur wird spaeter als Zehntelgrad, Feuchte als 0,1 Prozent gemeldet.
     if (bme280_ok) {
-        float t = bme280.readTemperature();
-        float h = bme280.readHumidity();
+        float t = bme280.readTemperature(); // Adafruit-Bibliothek liest intern I2C-Register und gibt Grad Celsius als float zurueck.
+        float h = bme280.readHumidity();    // Float wird spaeter in Zehntelprozent umgerechnet, weil das Funkprotokoll Integer nutzt.
         if (!isnan(t) && !isnan(h) && h >= 0 && h <= 100) {
-            temp_01c = (int16_t)lroundf(t * 10.0f);
-            hum_01pct = SmartHome::clampHum01pct((long)lroundf(h * 10.0f));
+            temp_01c = (int16_t)lroundf(t * 10.0f); // 23.4 Grad C wird zu 234; Integer spart Payload-Speicher und vermeidet float im Protokoll.
+            hum_01pct = SmartHome::clampHum01pct((long)lroundf(h * 10.0f)); // clamp schuetzt vor Werten ausserhalb 0..1000.
 
             // Exponentiell gleitender Mittelwert (EMA) zur Rauschunterdrueckung.
             // Erste Messung initialisiert den Filter ohne Glaettung.
@@ -380,7 +380,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
 
     // VEML7700 lesen: Lux wird auf uint16_t begrenzt, damit der Protokoll-Payload passt.
     if (veml7700_ok) {
-        float l = veml7700.readLux();
+        float l = veml7700.readLux(); // Bibliotheksfunktion rechnet Rohdaten bereits in Lux um.
         if (!isnan(l) && l >= 0) {
             lux = SmartHome::clampToU16((long)lroundf(l));
             markSensorOk(veml7700_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700");
@@ -409,8 +409,8 @@ void netErlDevicePollSensors(unsigned long nowMs) {
 
     // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Aenderung.
     {
-        static int16_t  last_temp = INT16_MIN;
-        static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU;
+        static int16_t  last_temp = INT16_MIN; // static merkt den letzten Wert zwischen Funktionsaufrufen, ohne globale Variable.
+        static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU; // 0xFFFF ist Sentinel "ungueltig"; echte Messwerte bleiben darunter.
 
         bool changed = false;
         if (temp_01c != last_temp) { last_temp = temp_01c; changed = true; }
@@ -428,7 +428,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
 // Ausgabewert: keiner; der Payload enthaelt danach Relais, Sensorwerte, Auto-Flags und Fehlerstatus.
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     SmartHome::RelayComfortConfigStateReportPayload* p =
-        static_cast<SmartHome::RelayComfortConfigStateReportPayload*>(payload);
+        static_cast<SmartHome::RelayComfortConfigStateReportPayload*>(payload); // void* wird erst nach Groessenpruefung als konkreter Payload beschrieben.
     if (p != nullptr && size && *size >= sizeof(*p)) {
         safeStrCopy(p->node_id, sizeof(p->node_id), DEVICE_ID);
         p->relay_1 = runtime.relay_1 ? 1U : 0U;

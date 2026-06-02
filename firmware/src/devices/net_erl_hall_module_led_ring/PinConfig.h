@@ -38,14 +38,14 @@
 // LD2410 OUT liefert ein digitales Praesenzsignal; UART-Pins sind fuer optionale
 // Konfiguration/Diagnose des Radars reserviert.
 #define PIN_LD2410_OUT 7
-#define PIN_LED_RING 4
+#define PIN_LED_RING 4 // NeoPixel-Datenpin; Timing ist empfindlich, daher nicht beliebig mit anderen Funktionen teilen.
 #define PIN_RELAY_1 10
 #define PIN_LD2410_UART_RX 20
 #define PIN_LD2410_UART_TX 21
 
 // LED_RING_COUNT muss zur realen Anzahl NeoPixel passen, sonst bleiben LEDs aus
 // oder nicht vorhandene Pixel werden im Puffer beschrieben.
-#define LED_RING_COUNT 17
+#define LED_RING_COUNT 17 // Bestimmt auch die Groesse des LED-Puffers im RAM.
 #define BUTTON_1_ACTIVE_LOW 1
 #define RELAY_1_ACTIVE_HIGH 1
 // Keine separate Status-LED; der NeoPixel-Ring ist die lokale Anzeige.

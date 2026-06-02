@@ -112,8 +112,8 @@ Adafruit_BME680 bme680;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();                          // Adafruit_VEML7700-Instanz (Kurzform "veml" wegen Lesbarkeit, entspricht "veml7700" in anderen Geraeten).
 ScioSense_ENS160 ens160Addr52(NET_ERL_ENS160_PRIMARY_ADDRESS);          // ENS160 an primaerer Adresse 0x52.
 ScioSense_ENS160 ens160Addr53(NET_ERL_ENS160_FALLBACK_ADDRESS);         // ENS160 an Fallback-Adresse 0x53.
-ScioSense_ENS160* ens160 = nullptr;                                     // Zeigt nach erfolgreicher Init auf die tatsaechlich gefundene ENS160-Instanz.
-Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800); // LED-Puffer + Datenpin fuer den NeoPixel-Ring.
+ScioSense_ENS160* ens160 = nullptr;                                     // Pointer bleibt nullptr, bis 0x52 oder 0x53 wirklich gefunden wurde.
+Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800); // Legt LED-Puffer im RAM an; LED_RING_COUNT muss deshalb zur Hardware passen.
 
 // =============================================================================
 // DIAGNOSTIC-MODUS (compile-time sensor isolation for bring-up/debug)
@@ -125,7 +125,7 @@ Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800); /
 // 4 = ENS_ONLY  – Nur ENS160
 // 5 = ALL_STAGGERED – Alle, versetzte Lesezeitpunkte (0/300/600 ms)
 #ifndef SENSOR_DIAG_MODE
-#define SENSOR_DIAG_MODE 0
+#define SENSOR_DIAG_MODE 0 // Compile-Time-Schalter: nicht im Setup aenderbar, sondern beim Bauen der Firmware.
 #endif
 
 // =============================================================================
@@ -197,16 +197,16 @@ namespace {
             NET_ERL_LED_RING_BRIGHTNESS > NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS
                 ? NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS
                 : NET_ERL_LED_RING_BRIGHTNESS;
-        return (uint8_t)(((uint16_t)value * brightness) / 255U);
+        return (uint8_t)(((uint16_t)value * brightness) / 255U); // uint16_t verhindert Ueberlauf bei 255 * brightness.
     }
 
     uint32_t ringColor(uint8_t red, uint8_t green, uint8_t blue) {
-        return ledRing.Color(ringScale(red), ringScale(green), ringScale(blue));
+        return ledRing.Color(ringScale(red), ringScale(green), ringScale(blue)); // Bibliothek packt RGB in das interne 32-bit-Farbformat.
     }
 
     void ringSetAll(uint32_t color) {
         for (uint16_t i = 0; i < ledRing.numPixels(); ++i) {
-            ledRing.setPixelColor(i, color);
+            ledRing.setPixelColor(i, color); // Schreibt nur in den RAM-Puffer; sichtbar wird es erst mit ledRing.show().
         }
     }
 
@@ -221,8 +221,8 @@ namespace {
     }
 
     uint32_t ringDimColor(uint32_t color, float factor) {
-        uint8_t red = (uint8_t)((color >> 16) & 0xFFU);
-        uint8_t green = (uint8_t)((color >> 8) & 0xFFU);
+        uint8_t red = (uint8_t)((color >> 16) & 0xFFU);   // Bitshift holt das rote Byte aus dem 32-bit-Farbwert.
+        uint8_t green = (uint8_t)((color >> 8) & 0xFFU);  // Maske 0xFFU entfernt alle anderen Farbanteile.
         uint8_t blue = (uint8_t)(color & 0xFFU);
         return ledRing.Color(
             (uint8_t)((float)red * factor),
@@ -233,10 +233,10 @@ namespace {
 
     void ensureRingInitialized() {
         if (ring_initialized) return;
-        ledRing.begin();
-        ledRing.setBrightness(255);
-        ledRing.clear();
-        ledRing.show();
+        ledRing.begin();          // Initialisiert den NeoPixel-Treiber und den Datenpin.
+        ledRing.setBrightness(255); // Globale Bibliothekshelligkeit bleibt voll; eigene Begrenzung passiert in ringScale().
+        ledRing.clear();          // Puffer auf schwarz setzen.
+        ledRing.show();           // Erst show() sendet den Puffer seriell an den LED-Ring.
         logMsg("INFO", "LED ring init pin=%d count=%u brightness=%u", PIN_LED_RING, (unsigned)LED_RING_COUNT, (unsigned)NET_ERL_LED_RING_BRIGHTNESS);
 
         // Kurztest beim Boot: Wenn dieser Test dunkel bleibt, liegt das Problem
@@ -380,9 +380,9 @@ namespace {
     // - h: relative Feuchte in Prozent.
     // Ausgabewert: I2C-Fehlercode von Wire.endTransmission(); 0 bedeutet erfolgreich.
     int writeEnsEnv(uint8_t a, float t, float h) {
-        uint8_t b[4]; uint16_t te = encT(t), he = encH(h);
-        b[0] = te & 0xFF; b[1] = (te >> 8) & 0xFF; b[2] = he & 0xFF; b[3] = (he >> 8) & 0xFF;
-        Wire.beginTransmission(a); Wire.write(ENS160_REG_TEMP_IN); Wire.write(b, 4); return Wire.endTransmission();
+        uint8_t b[4]; uint16_t te = encT(t), he = encH(h); // Kleiner Stack-Puffer; kein dynamisches new/malloc noetig.
+        b[0] = te & 0xFF; b[1] = (te >> 8) & 0xFF; b[2] = he & 0xFF; b[3] = (he >> 8) & 0xFF; // ENS160 erwartet Little-Endian-Bytes.
+        Wire.beginTransmission(a); Wire.write(ENS160_REG_TEMP_IN); Wire.write(b, 4); return Wire.endTransmission(); // Rueckgabe 0 = I2C-Schreiben erfolgreich.
     }
 
     // Aufgabe: Konfiguriert den VEML7700 fuer Luxmessungen.
@@ -576,9 +576,9 @@ namespace {
 // Ausgabewert: keiner; lokale OK-Flags zeigen danach die verfuegbaren Sensoren.
 // Aufrufer: NetErlRuntime ruft diesen Hook einmal beim Boot auf.
 void netErlDeviceInit() {
-    Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
-    Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
-    Wire.setTimeOut(I2C_TIMEOUT_MS);
+    Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL); // Startet I2C auf den frei waehlbaren ESP32-C3-Pins aus PinConfig.h.
+    Wire.setClock(NET_ERL_I2C_CLOCK_HZ);        // Langsamer I2C-Takt ist absichtlich robuster als 100/400 kHz bei Bring-up-Leitungen.
+    Wire.setTimeOut(I2C_TIMEOUT_MS);            // Timeout verhindert, dass ein defekter Sensor die Hauptschleife festhaelt.
 
     // I2C-Scan nur im Scan-Only-Diag-Mode ausfuehren.
     // Im Normalbetrieb wuerden 126 Adress-Durchlaeufe den Boot verzoegern
@@ -692,7 +692,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     letztes_env_sample_ms = nowMs;
 
     // WDT zuruecksetzen vor potenziell blockierenden I2C-Operationen
-    esp_task_wdt_reset();
+    esp_task_wdt_reset(); // Watchdog vor Sensorzugriffen fuettern; BME/VEML/ENS koennen auf I2C kurz blockieren.
 
     // Scan-Only-Modus: keine Sensor-Polls.
     if (diagScanOnly()) return;
@@ -773,12 +773,12 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     if (diagBmeEnabled() && bme_ok) {
         if ((nowMs - bme_last_read_ms) >= (NET_ERL_ENV_SAMPLE_INTERVAL_MS + staggerOffsetBme())) {
             bme_last_read_ms = nowMs;
-            if (bme680.performReading()) {
+            if (bme680.performReading()) { // Bibliotheksaufruf startet/holt eine komplette BME680-Messung inklusive Gasprofil.
                 float t = bme680.temperature, h = bme680.humidity, p = bme680.pressure;
                 uint32_t g = bme680.gas_resistance;
                 if (isfinite(t) && isfinite(h) && isfinite(p) && h >= 0 && h <= 100 && p >= 30000 && p <= 110000) {
-                    temp_01c = (int16_t)(lroundf(t * 10.0f) + NET_ERL_TEMP_OFFSET_01C);
-                    hum_01pct = SmartHome::clampHum01pct((long)(lroundf(h * 10.0f) + NET_ERL_HUM_OFFSET_01PCT));
+                    temp_01c = (int16_t)(lroundf(t * 10.0f) + NET_ERL_TEMP_OFFSET_01C); // Zehntelgrad als Integer: kleiner und stabiler fuer Funkpayloads.
+                    hum_01pct = SmartHome::clampHum01pct((long)(lroundf(h * 10.0f) + NET_ERL_HUM_OFFSET_01PCT)); // clamp begrenzt auf 0..1000.
                     pressure_pa = (uint32_t)lroundf(p);
                     if (bme680_gueltige_messungen < 255) bme680_gueltige_messungen++;
                     gas_ohm = (gasWarmupOk(nowMs) && g > 0) ? g : GAS_OHM_UNGUELTIG;
@@ -803,7 +803,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     if (diagVemlEnabled() && lux_ok) {
         if ((nowMs - veml_last_read_ms) >= (NET_ERL_ENV_SAMPLE_INTERVAL_MS + staggerOffsetVeml())) {
             veml_last_read_ms = nowMs;
-            float l = veml.readLux();
+            float l = veml.readLux(); // Adafruit-Funktion liefert Lux als float; danach wird auf uint16_t-Protokollfeld begrenzt.
             if (!isnan(l) && l >= 0) {
                 lux = SmartHome::clampToU16((long)lroundf(l));
                 markSensorOk(lux_ok, veml_fail_count, veml_last_ok_ms, nowMs, "VEML7700");
@@ -818,7 +818,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     // Der Zugriff auf bme680.temperature/humidity ist sicher, weil bme_read_valid
     // garantiert, dass performReading() erfolgreich war und die Werte gueltig sind.
     if (diagEnsEnabled() && ens_ok && ens160 && bme_read_valid) {
-        int r = writeEnsEnv(ens160_adresse, bme680.temperature, bme680.humidity);
+        int r = writeEnsEnv(ens160_adresse, bme680.temperature, bme680.humidity); // ENS160 braucht Temp/Feuchte zur Kompensation seiner Luftqualitaetswerte.
         if (r != 0) {
             markSensorFailed(ens_ok, ens_fail_count, "ENS160", "comp");
             resetEnsValues();
@@ -829,9 +829,9 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     if (diagEnsEnabled() && ens_ok && ens160) {
         if ((nowMs - ens_last_read_ms) >= (NET_ERL_ENV_SAMPLE_INTERVAL_MS + staggerOffsetEns())) {
             ens_last_read_ms = nowMs;
-            if (ens160->measure(false)) {
+            if (ens160->measure(false)) { // false bedeutet: keine blockierende Warteschleife auf neue Daten.
                 uint16_t aq5 = ens160->getAQI500(), aq = ens160->getAQI();
-                uint16_t maq = (aq5 > 0 && aq5 <= 500) ? aq5 : mapAqi500(aq);
+                uint16_t maq = (aq5 > 0 && aq5 <= 500) ? aq5 : mapAqi500(aq); // Manche Bibliotheken liefern AQI500, andere nur AQI 1..5.
                 if (maq > 0 && ensWarmupOk(nowMs)) {
                     aqi = maq; tvoc_ppb = ens160->getTVOC();
                     eco2_ppm = ens160->geteCO2(); letzter_ens_gueltig_ms = nowMs;
@@ -878,7 +878,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
     // Delta-Detection: STATE-Trigger nur bei signifikanter Sensorwert-Aenderung.
     // Spart ESP-NOW/MQTT-Bandbreite bei gleichbleibenden Messwerten
     {
-        static int16_t  last_temp = INT16_MIN;
+        static int16_t  last_temp = INT16_MIN; // static behaelt den Vergleichswert zwischen Poll-Aufrufen im RAM.
         static uint16_t last_hum = 0xFFFFU, last_lux = 0xFFFFU;
         static uint32_t last_press = 0xFFFFFFFFUL;
         static uint16_t last_aqi = 0xFFFFU;
@@ -901,7 +901,7 @@ void netErlDevicePollSensors(unsigned long nowMs) {
 // Ausgabewert: keiner; der Payload enthaelt Relais, Sensorwerte, Auto-Flags und Fehlerstatus.
 void netErlDeviceFillStatePayload(void* payload, size_t* size) {
     SmartHome::ExtendedRelayComfortGasConfigStateReportPayload* p =
-        static_cast<SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload);
+        static_cast<SmartHome::ExtendedRelayComfortGasConfigStateReportPayload*>(payload); // void* aus dem Basistyp wird hier als konkreter STATE-Payload beschrieben.
     if (p != nullptr && size && *size >= sizeof(*p)) {
         safeStrCopy(p->node_id, sizeof(p->node_id), DEVICE_ID);
         p->relay_1 = runtime.relay_1 ? 1U : 0U;

@@ -54,11 +54,11 @@
 #include "DeviceConfig.h"
 #include "NetZrlProvisioning.h"
 #if __has_include(<esp_arduino_version.h>)
-  #include <esp_arduino_version.h>
+  #include <esp_arduino_version.h> // Bibliotheksversion entscheidet spaeter, welche ESP-NOW-Callback-Signatur gilt.
 #endif
 
 #ifndef ESP_ARDUINO_VERSION_MAJOR
-  #define ESP_ARDUINO_VERSION_MAJOR 2
+  #define ESP_ARDUINO_VERSION_MAJOR 2 // Fallback fuer alte Cores ohne Versionsheader.
 #endif
 
 // Projektweite Defaults, Version und das gemeinsame SmartHome-Protokoll.
@@ -225,9 +225,9 @@ constexpr uint32_t MAX_SEND_INTERVAL_S = 65535UL;
 constexpr uint8_t CALIBRATION_SUCCESS_BLINK_PULSES = 3U;
 constexpr uint8_t SETUP_CONFIRM_BLINK_PULSES = 3U;
 constexpr uint8_t RESET_CONFIRM_BLINK_PULSES = 10U;
-constexpr uint32_t RELAY_DEAD_TIME_MS = 300UL;  // Mindestpause zwischen Richtungswechsel
-constexpr int NET_ZRL_WDT_TIMEOUT_S = 10;
-constexpr size_t SERIAL_BUFFER_SIZE = 128U;
+constexpr uint32_t RELAY_DEAD_TIME_MS = 300UL;  // Mindestpause zwischen Richtungswechsel; schuetzt Motor/Relais vor Gegenlauf.
+constexpr int NET_ZRL_WDT_TIMEOUT_S = 10;       // Watchdog-Reset, wenn loop() laenger als 10 s nicht mehr laeuft.
+constexpr size_t SERIAL_BUFFER_SIZE = 128U;     // Fester Puffer statt String, damit kein Heap fragmentiert.
 constexpr size_t MASTER_MAC_TEXT_LEN = SmartHome::ShNodeProvisioning::MASTER_MAC_TEXT_LEN;
 constexpr size_t SETUP_SSID_BUFFER_SIZE = 32U;
 constexpr const char* STORAGE_KEY_NET_ZRL_BLOB = "net_zrl_v1";
@@ -391,9 +391,9 @@ struct RuntimeState {
     uint8_t pendingActionBlinkToggleCount; // Verbleibende Blink-Wechsel
 
     // ---- Setup / Serielle Konsole ----
-    char setupApSsid[SETUP_SSID_BUFFER_SIZE];  // SSID Setup-AP
-    char serialBuffer[SERIAL_BUFFER_SIZE];      // Serieller Eingabepuffer
-    size_t serialLength;                        // Eingabelaenge
+    char setupApSsid[SETUP_SSID_BUFFER_SIZE];  // Fester char-Puffer; sizeof-Pruefungen verhindern Ueberlauf.
+    char serialBuffer[SERIAL_BUFFER_SIZE];      // Serieller Eingabepuffer ohne dynamischen Speicher.
+    size_t serialLength;                        // Aktuelle Laenge, damit immer Platz fuer '\0' bleibt.
 };
 
 RuntimeState runtime = {};
@@ -406,10 +406,10 @@ RuntimeState runtime = {};
 void logf(const char* level, const char* format, ...) {
     if (!DEBUG_AKTIV) return;
 
-    char message[240];
+    char message[240]; // Stack-Puffer fuer eine Logzeile; begrenzt RAM-Verbrauch pro Aufruf.
     va_list args;
     va_start(args, format);
-    vsnprintf(message, sizeof(message), format, args);
+    vsnprintf(message, sizeof(message), format, args); // snprintf-Variante begrenzt Schreiblaenge und verhindert Buffer-Overflow.
     va_end(args);
 
     Serial.print("[");
@@ -488,7 +488,7 @@ uint32_t sanitizeSensorSendInterval(uint32_t valueS) {
 
 void clearStoredMasterMac() {
     runtime.masterMacValid = false;
-    memset(runtime.masterMac, 0, sizeof(runtime.masterMac));
+    memset(runtime.masterMac, 0, sizeof(runtime.masterMac)); // Rohbytes loeschen; MAC ist kein C-String.
 }
 
 void setStoredMasterMac(const uint8_t masterMac[6]) {
@@ -497,7 +497,7 @@ void setStoredMasterMac(const uint8_t masterMac[6]) {
         return;
     }
     runtime.masterMacValid = true;
-    memcpy(runtime.masterMac, masterMac, sizeof(runtime.masterMac));
+    memcpy(runtime.masterMac, masterMac, sizeof(runtime.masterMac)); // Genau 6 MAC-Bytes kopieren, nicht bis zu einem Nullbyte.
 }
 
 void formatMacText(const uint8_t mac[6], bool isValid, char* buffer, size_t bufferSize) {
@@ -614,8 +614,8 @@ bool stellePeerSicher(const uint8_t* mac) {
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
     if (esp_now_is_peer_exist(mac)) return true;
 
-    esp_now_peer_info_t peerInfo = {};
-    memcpy(peerInfo.peer_addr, mac, 6);
+    esp_now_peer_info_t peerInfo = {}; // Nullinitialisierung verhindert ungesetzte Felder in der ESP-IDF-Struktur.
+    memcpy(peerInfo.peer_addr, mac, 6); // ESP-NOW erwartet die MAC als 6 Rohbytes.
     peerInfo.channel = (uint8_t)WLAN_KANAL;
     peerInfo.encrypt = false;
 
@@ -650,11 +650,11 @@ bool sendePaketMitOptionen(
 
     uint8_t* payloadBuffer = packet + SH_HEADER_SIZE;
     if (payloadLen > 0U && payload != nullptr) {
-        memcpy(payloadBuffer, payload, payloadLen);
+        memcpy(payloadBuffer, payload, payloadLen); // Payload ist Rohspeicher; Laenge wurde vorher gegen SH_MAX_PAYLOAD_BYTES begrenzt.
     }
 
     SmartHome::finalizePacketCrc(header, payloadBuffer);
-    memcpy(packet, &header, sizeof(header));
+    memcpy(packet, &header, sizeof(header)); // Header nach finalizePacketCrc kopieren, weil CRC erst dann final ist.
 
     const esp_err_t err = esp_now_send(zielMac, packet, SH_HEADER_SIZE + payloadLen);
     if (err != ESP_OK) {
@@ -984,8 +984,8 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
 
     bool loadDeviceSettings(Preferences& prefs) override {
         NetZrlPersistedSetupData data = {};
-        if (prefs.getBytesLength(STORAGE_KEY_NET_ZRL_BLOB) == sizeof(NetZrlPersistedSetupData) &&
-            prefs.getBytes(STORAGE_KEY_NET_ZRL_BLOB, &data, sizeof(data)) == sizeof(data) &&
+        if (prefs.getBytesLength(STORAGE_KEY_NET_ZRL_BLOB) == sizeof(NetZrlPersistedSetupData) && // Groessencheck schuetzt vor altem/inkompatiblem NVS-Layout.
+            prefs.getBytes(STORAGE_KEY_NET_ZRL_BLOB, &data, sizeof(data)) == sizeof(data) &&      // Preferences liest Rohbytes direkt in die Struktur.
             netZrlPersistenzdatenGueltig(data)) {
             wendeNetZrlPersistenzdatenAn(data);
             return true;
@@ -1003,11 +1003,11 @@ class NetZrlProvisioningHandler final : public SmartHome::ShNodeProvisioning::De
             return true;
         }
 
-        return prefs.putBytes(STORAGE_KEY_NET_ZRL_BLOB, &data, sizeof(data)) == sizeof(data);
+        return prefs.putBytes(STORAGE_KEY_NET_ZRL_BLOB, &data, sizeof(data)) == sizeof(data); // Speichert die kompakte Struktur als Binaerblock in NVS.
     }
 
     bool clearDeviceSettings(Preferences& prefs) override {
-        prefs.remove(STORAGE_KEY_NET_ZRL_BLOB);
+        prefs.remove(STORAGE_KEY_NET_ZRL_BLOB); // Nur Device-spezifische ZRL-Daten loeschen, nicht die gesamte Provisioning-Basis.
         return true;
     }
 
@@ -1392,10 +1392,10 @@ void setzeRelaisFuerRichtung(CoverDirection direction, const char* grund) {
     //   - Delta-Vergleich ist millis()-wrap-sicher
     const unsigned long jetzt = millis();
     const unsigned long seitLetztemWechsel = jetzt - runtime.letzteRelaisWechselMs;
-    if (runtime.letzteRelaisWechselMs > 0 && seitLetztemWechsel < RELAY_DEAD_TIME_MS) {
+    if (runtime.letzteRelaisWechselMs > 0 && seitLetztemWechsel < RELAY_DEAD_TIME_MS) { // unsigned millis()-Differenz funktioniert auch nach millis()-Ueberlauf.
         const unsigned long restMs = RELAY_DEAD_TIME_MS - seitLetztemWechsel;
         logf("WARN", "Relais-Dead-Time: %lu ms warten vor Richtungswechsel", restMs);
-        delay(restMs);
+        delay(restMs); // Absichtliche kurze Blockade: Relais darf erst nach sicherer Pause umschalten.
     }
 
     // Schritt 2: Break-Before-Make -- ZUERST beide Relais AUS
@@ -2157,10 +2157,10 @@ void verarbeiteSerielleBefehle() {
         if (ch == '\r') continue;
 
         if (ch == '\n') {
-            runtime.serialBuffer[runtime.serialLength] = '\0';
+    runtime.serialBuffer[runtime.serialLength] = '\0'; // C-String muss nullterminiert sein, bevor der Parser ihn liest.
             verarbeiteBefehl(runtime.serialBuffer);
             runtime.serialLength = 0U;
-            runtime.serialBuffer[0] = '\0';
+            runtime.serialBuffer[0] = '\0'; // Puffer leeren, damit kein halber alter Befehl weiterverarbeitet wird.
             continue;
         }
 
@@ -2638,25 +2638,25 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
         return;
     }
 
-    const SmartHome::MsgHeader* header = reinterpret_cast<const SmartHome::MsgHeader*>(data);
-    const uint8_t* payload = data + SH_HEADER_SIZE;
+    const SmartHome::MsgHeader* header = reinterpret_cast<const SmartHome::MsgHeader*>(data); // reinterpret_cast liest Rohbytes als Protokoll-Header; nur sicher nach CRC/Laengencheck.
+    const uint8_t* payload = data + SH_HEADER_SIZE; // Pointer-Arithmetik: Payload beginnt direkt hinter dem festen Header.
 
     switch (header->msg_type) {
         case SH_MSG_HELLO_ACK:
             if (header->payload_len == sizeof(SmartHome::HelloAckPayload)) {
-                verarbeiteHelloAck(senderMac, *reinterpret_cast<const SmartHome::HelloAckPayload*>(payload));
+                verarbeiteHelloAck(senderMac, *reinterpret_cast<const SmartHome::HelloAckPayload*>(payload)); // Cast ist erlaubt, weil payload_len exakt geprueft wurde.
             }
             break;
 
         case SH_MSG_CMD:
             if (header->payload_len == sizeof(SmartHome::CmdPayload)) {
-                verarbeiteCmd(senderMac, *header, *reinterpret_cast<const SmartHome::CmdPayload*>(payload));
+                verarbeiteCmd(senderMac, *header, *reinterpret_cast<const SmartHome::CmdPayload*>(payload)); // Rohpayload wird als CMD-Struktur gelesen.
             }
             break;
 
         case SH_MSG_CFG:
             if (header->payload_len == sizeof(SmartHome::CfgPayload)) {
-                verarbeiteCfg(senderMac, *header, *reinterpret_cast<const SmartHome::CfgPayload*>(payload));
+                verarbeiteCfg(senderMac, *header, *reinterpret_cast<const SmartHome::CfgPayload*>(payload)); // Rohpayload wird als CFG-Struktur gelesen.
             }
             break;
 
@@ -2698,12 +2698,12 @@ void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
 // und die Funkrolle sonst unklar waere.
 void initialisiereFunk() {
     if (runtime.funkBereit || runtime.setupMode) return;
-    static uint8_t espNowInitFails = 0;
+    static uint8_t espNowInitFails = 0; // static merkt Fehlversuche zwischen Aufrufen, ohne Teil des RuntimeState zu sein.
     constexpr uint8_t MAX_ESPNOW_INIT_FAILURES = 5;
 
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    WiFi.setSleep(false);
+    WiFi.mode(WIFI_STA);     // ESP-NOW laeuft hier im Station-Modus, auch ohne Verbindung zu einem WLAN.
+    WiFi.disconnect();       // Keine Router-Verbindung halten; der Funkkanal soll kontrolliert fuer ESP-NOW bleiben.
+    WiFi.setSleep(false);    // WLAN-Schlaf aus, damit ESP-NOW-Pakete nicht wegen Powersave verpasst werden.
 
     const esp_err_t kanalErr = esp_wifi_set_channel((uint8_t)WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
     if (kanalErr != ESP_OK) {
@@ -2721,8 +2721,8 @@ void initialisiereFunk() {
     }
     espNowInitFails = 0;  // Reset on success
 
-    esp_now_register_send_cb(onEspNowSend);
-    esp_now_register_recv_cb(onEspNowReceive);
+    esp_now_register_send_cb(onEspNowSend);       // Callback meldet nur Transport-Erfolg, nicht fachlichen ACK.
+    esp_now_register_recv_cb(onEspNowReceive);    // Empfangs-Callback laeuft ausserhalb der normalen loop()-Logik.
     stellePeerSicher(BROADCAST_MAC);
     if (runtime.masterMacValid) {
         stellePeerSicher(runtime.masterMac);
@@ -2802,14 +2802,14 @@ void setup() {
     runtime.letzteRelaisWechselMs = 0;
 
     // Watchdog initialisieren
-    esp_task_wdt_deinit();
+    esp_task_wdt_deinit(); // Vorherige WDT-Konfiguration entfernen, damit die folgende eigene Konfiguration eindeutig gilt.
     esp_task_wdt_config_t wdt_config = {
         .timeout_ms = (uint32_t)NET_ZRL_WDT_TIMEOUT_S * 1000,
         .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
         .trigger_panic = true
     };
-    esp_task_wdt_init(&wdt_config);
-    esp_task_wdt_add(NULL);
+    esp_task_wdt_init(&wdt_config); // ESP-IDF-Funktion aktiviert den Task-Watchdog mit obiger Konfiguration.
+    esp_task_wdt_add(NULL);         // NULL bedeutet: aktuellen loop()-Task ueberwachen.
     logf("INFO", "Watchdog aktiviert (%d s)", NET_ZRL_WDT_TIMEOUT_S);
 
     const uint8_t buttonInputMode = BUTTON_ACTIVE_LOW ? INPUT_PULLUP : INPUT_PULLDOWN;
@@ -2825,7 +2825,7 @@ void setup() {
             MIN_SEND_INTERVAL_S,
             MAX_SEND_INTERVAL_S);
 
-    if (!nodeProvisioning.begin(
+    if (!nodeProvisioning.begin( // Uebergibt Pointer auf Runtime-Felder; Provisioning schreibt Master-MAC/Intervalle direkt hinein.
             provisioningConfig,
             &runtime.masterMacValid,
             runtime.masterMac,
@@ -2874,7 +2874,7 @@ void setup() {
 }
 
 void loop() {
-    esp_task_wdt_reset();
+    esp_task_wdt_reset(); // Muss regelmaessig in loop() passieren, sonst loest der Watchdog absichtlich einen Reset aus.
     verarbeiteSerielleBefehle();
     pollButtons();
     verarbeiteBewegungsTimeouts();

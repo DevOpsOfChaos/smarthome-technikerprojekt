@@ -54,8 +54,8 @@
 #define NET_ERL_DEVICE_CONFIG_PROFILE SH_PROFILE_HALL_LIGHT
 #define NET_ERL_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
 
-#define NET_ERL_DEBUG_ENABLED 1
-#define NET_ERL_WLAN_CHANNEL 6
+#define NET_ERL_DEBUG_ENABLED 1 // Makro wird beim Kompilieren ausgewertet; 0 entfernt/unterdrueckt Debugpfade je nach Basistyp.
+#define NET_ERL_WLAN_CHANNEL 6  // ESP-NOW braucht denselben Funkkanal wie der Master.
 
 #define NET_ERL_HELLO_RETRY_INTERVAL_MS 5000UL  // 5000 Millisekunden = 5 Sekunden.
 #define NET_ERL_HEARTBEAT_INTERVAL_MS 20000UL   // 20000 Millisekunden = 20 Sekunden.
@@ -69,7 +69,7 @@
 
 // Defaultwerte nach Factory-Reset oder erstem Start.
 #define NET_ERL_DEFAULT_REPORT_INTERVAL_S 10U
-#define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U  // Lux unter diesem Wert = einschalten
+#define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U  // Lux unter diesem Wert = einschalten; U markiert unsigned Integer.
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U        // 15 Sekunden Nachlaufzeit.
 
 #define NET_ERL_SENSOR_POLL_INTERVAL_MS 250UL       // 250 Millisekunden PIR-Poll.
@@ -77,7 +77,7 @@
 #define NET_ERL_SENSOR_RECOVERY_RETRY_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 #define NET_ERL_SNAPSHOT_LOG_INTERVAL_MS 30000UL    // 30000 Millisekunden = 30 Sekunden.
 
-#define NET_ERL_BME280_ADDRESS 0x76
+#define NET_ERL_BME280_ADDRESS 0x76 // 7-bit-I2C-Adresse; haengt beim BME280 vom SDO-Pin ab.
 
 #define NET_ERL_I2C_CLOCK_HZ 5000UL  // 5 kHz I2C-Takt fuer langen/stoeranfaelligen Sensorbus.
 #define NET_ERL_I2C_TIMEOUT_MS 50U   // 50 ms I2C-Timeout (verhindert Bus-Blockade).

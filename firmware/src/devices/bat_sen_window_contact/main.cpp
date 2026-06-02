@@ -80,8 +80,8 @@ int last_raw_level = LOW;           // Letzter Rohwert (entprellt)
 int stable_level = LOW;             // Stabiler Pegel nach Entprellung
 unsigned long letzte_flanke_ms = 0UL;   // Zeitstempel letzter Flankenwechsel
 
-RTC_DATA_ATTR bool rtc_kontakt_known = false;  // true = letzter Kontaktzustand ist gueltig
-RTC_DATA_ATTR bool rtc_kontakt_offen = false;  // letzter Kontaktzustand vor Deep-Sleep
+RTC_DATA_ATTR bool rtc_kontakt_known = false;  // RTC_DATA_ATTR legt die Variable in RTC-Speicher; bleibt nach Deep-Sleep erhalten.
+RTC_DATA_ATTR bool rtc_kontakt_offen = false;  // Merkt den Zustand vor dem Schlafen, ohne ihn in langsamen Flash/NVS zu schreiben.
 
 // Aufgabe: Prueft, ob ein gelesener GPIO-Pegel als "Fenster offen" gilt.
 // Eingabewert: level ist das Ergebnis von digitalRead(), also HIGH oder LOW.
@@ -115,7 +115,7 @@ void device_init_io() {
     last_raw_level = stable_level;
     letzte_flanke_ms = millis();
     kontakt_offen = levelIstOffen(stable_level);
-    event_pending = rtc_kontakt_known && rtc_kontakt_offen != kontakt_offen;
+    event_pending = rtc_kontakt_known && rtc_kontakt_offen != kontakt_offen; // Wake aus Deep-Sleep kann so direkt als Kontaktwechsel gemeldet werden.
     rtc_kontakt_known = true;
     rtc_kontakt_offen = kontakt_offen;
     kontakt_init_ok = true;
@@ -131,7 +131,7 @@ void device_init_io() {
 // Ausgabewert: true bedeutet, der Fensterstatus hat sich geaendert und ein
 // STATE-Report ist sinnvoll. false bedeutet, es gibt nichts Neues.
 //
-// BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS = 50 ms Entprellzeit (verhindert falsche Events durch Kontaktprellen).
+// BAT_SEN_WINDOW_CONTACT_DEBOUNCE_MS = 35 ms Entprellzeit (verhindert falsche Events durch Kontaktprellen).
 bool device_poll_inputs() {
     if (!kontakt_init_ok) return false;
 
@@ -185,7 +185,7 @@ void device_build_state_channels(
     uint8_t* channelBool1, uint16_t* channelU16_1,
     uint8_t* channelMask1, bool* fault)
 {
-    if (channelBool1 != nullptr) *channelBool1 = kontakt_offen ? 1U : 0U;
+    if (channelBool1 != nullptr) *channelBool1 = kontakt_offen ? 1U : 0U; // nullptr-Pruefung verhindert Schreiben auf ungueltige Speicheradresse.
     if (channelU16_1 != nullptr) *channelU16_1 = 0U;
     if (channelMask1 != nullptr) *channelMask1 = 0U;
     if (fault != nullptr) *fault = !kontakt_init_ok;
@@ -211,7 +211,7 @@ bool device_map_event(
     }
     if (trigger != nullptr) *trigger = SH_TRIGGER_AUTO;
     if (param1 != nullptr) *param1 = kontakt_offen ? 1U : 0U;
-    if (param2 != nullptr) *param2 = (uint16_t)((stable_level == HIGH) ? 1U : 0U);
+    if (param2 != nullptr) *param2 = (uint16_t)((stable_level == HIGH) ? 1U : 0U); // uint16_t passt zum Protokollfeld param2.
     return true;
 }
 
@@ -222,7 +222,7 @@ uint64_t device_wake_candidates() {
     if (BAT_SEN_WINDOW_CONTACT_PIN < 0 || BAT_SEN_WINDOW_CONTACT_PIN >= 64) {
         return 0ULL;
     }
-    return (1ULL << (uint8_t)BAT_SEN_WINDOW_CONTACT_PIN);
+    return (1ULL << (uint8_t)BAT_SEN_WINDOW_CONTACT_PIN); // 1ULL macht daraus eine 64-bit-Bitmaske; noetig fuer GPIO-Nummern bis 63.
 }
 
 // Aufgabe: Waehlt vor dem Deep-Sleep den Gegenpegel zum aktuellen Reed-Rohwert.

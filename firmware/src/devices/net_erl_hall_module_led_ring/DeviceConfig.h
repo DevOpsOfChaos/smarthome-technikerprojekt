@@ -52,8 +52,8 @@
 #define NET_ERL_DEVICE_CONFIG_PROFILE SH_PROFILE_HALL_MODULE_LED_RING
 #define NET_ERL_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
 
-#define NET_ERL_DEBUG_ENABLED 1
-#define NET_ERL_WLAN_CHANNEL 6
+#define NET_ERL_DEBUG_ENABLED 1 // Compile-Time-Schalter fuer Debugausgaben.
+#define NET_ERL_WLAN_CHANNEL 6  // Muss zum ESP-NOW-Kanal des Masters passen.
 
 #define NET_ERL_HELLO_RETRY_INTERVAL_MS 5000UL  // 5000 Millisekunden = 5 Sekunden.
 #define NET_ERL_HEARTBEAT_INTERVAL_MS 20000UL   // 20000 Millisekunden = 20 Sekunden.
@@ -72,8 +72,8 @@
 // Teil der Technikerarbeit:
 // Grundparameter fuer die LED-Ring-Luftqualitaetsanzeige des Hall-Moduls.
 // Der Ring visualisiert den gemessenen ENS160-AQI lokal am Geraet.
-#define NET_ERL_LED_RING_BRIGHTNESS 24U
-#define NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS 96U
+#define NET_ERL_LED_RING_BRIGHTNESS 24U         // Niedrig halten: NeoPixel-Strom steigt direkt mit Helligkeit und LED-Anzahl.
+#define NET_ERL_LED_RING_MAX_CFG_BRIGHTNESS 96U // Harte Obergrenze, damit falsche Config den Ring nicht unnoetig hell/stromhungrig macht.
 #define NET_ERL_LED_RING_AQI_PHASE_MS 15000UL
 
 // Nicht Bestandteil der Technikerarbeit:
@@ -92,8 +92,8 @@
 #define NET_ERL_I2C_CLOCK_HZ 5000UL  // 5 kHz I2C-Takt fuer langen/stoeranfaelligen Sensorbus.
 
 // BME680: Primaer/Fallback wegen unterschiedlicher Breakout-Lotbruecken.
-#define NET_ERL_BME680_PRIMARY_ADDRESS 0x76
-#define NET_ERL_BME680_FALLBACK_ADDRESS 0x77
+#define NET_ERL_BME680_PRIMARY_ADDRESS 0x76   // 7-bit-I2C-Adresse bei SDO=GND.
+#define NET_ERL_BME680_FALLBACK_ADDRESS 0x77  // 7-bit-I2C-Adresse bei SDO=VCC.
 // Gaswerte werden erst nach Warmup und Mindestanzahl Messungen gemeldet, damit
 // der Startzustand nicht als reale Luftqualitaet erscheint.
 #define NET_ERL_BME680_GAS_WARMUP_MS 180000UL      // 180000 Millisekunden = 3 Minuten.
@@ -101,7 +101,7 @@
 
 // ENS160: Primaer/Fallback fuer 0x52/0x53. Warmup/Stale schuetzen den AQI-Wert
 // vor Startartefakten und alten Kompensationsdaten.
-#define NET_ERL_ENS160_PRIMARY_ADDRESS 0x52
+#define NET_ERL_ENS160_PRIMARY_ADDRESS 0x52   // 7-bit-I2C-Adresse; Breakouts unterscheiden sich hier.
 #define NET_ERL_ENS160_FALLBACK_ADDRESS 0x53
 #define NET_ERL_ENS160_WARMUP_MS 1200000UL         // 1200000 Millisekunden = 20 Minuten.
 #define NET_ERL_ENS160_STALE_TIMEOUT_MS 120000UL   // 120000 Millisekunden = 2 Minuten.

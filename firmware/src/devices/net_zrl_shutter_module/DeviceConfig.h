@@ -50,7 +50,7 @@
 #define NET_ZRL_DEVICE_REPORTING_MODE   SH_REPORTING_HYBRID
 
 // Debug-Ausgaben fuer Entwicklung und Inbetriebnahme.
-#define NET_ZRL_DEBUG_ENABLED       1
+#define NET_ZRL_DEBUG_ENABLED       1 // Compile-Time-Schalter fuer serielle Debugausgaben.
 
 // Relais-Pin-Mapping. Up/Down duerfen niemals gleichzeitig aktiv sein; main.cpp
 // erzwingt Dead-Time und gegenseitiges Abschalten.
@@ -71,8 +71,8 @@
 #define NET_ZRL_LED_ACTIVE_HIGH     1
 
 // Pegel-Logik der Taster. 0 bedeutet active-HIGH; gedrueckt = HIGH.
-#define NET_ZRL_BUTTON_ACTIVE_LOW   0
+#define NET_ZRL_BUTTON_ACTIVE_LOW   0 // 0 = gedrueckt bei HIGH; wichtig fuer Pullup/Pulldown-Auswahl in setup().
 
 // Fahrzeit-Fallback, bis reale Kalibrierwerte vorliegen. Damit sind nur
 // Endlagenfahrten sinnvoll; Zwischenpositionen brauchen Kalibrierung.
-#define NET_ZRL_DEFAULT_ESTIMATED_TRAVEL_TIME_MS 100000UL
+#define NET_ZRL_DEFAULT_ESTIMATED_TRAVEL_TIME_MS 100000UL // 100 s Fallback; UL haelt die Rechnung unsigned long wie millis().

@@ -48,7 +48,7 @@
 #define NET_SEN_DEVICE_CONTROL_MODE     SH_CONTROL_MODE_NONE
 #define NET_SEN_DEVICE_CONFIG_PROFILE   SH_PROFILE_NONE
 
-#define NET_SEN_ENABLE_I2C_BASE 1
+#define NET_SEN_ENABLE_I2C_BASE 1 // Aktiviert I2C-Unterstuetzung im NET-SEN-Basistyp zur Compile-Zeit.
 
 #define NET_SEN_HELLO_RETRY_INTERVAL_MS 5000UL  // 5000 Millisekunden = 5 Sekunden.
 #define NET_SEN_HEARTBEAT_INTERVAL_MS 20000UL   // 20000 Millisekunden = 20 Sekunden.
@@ -56,7 +56,7 @@
 // NET_SEN_DEFAULT_SENSOR_SEND_INTERVAL_S ist identisch mit DEFAULT_REPORT_INTERVAL_S.
 // Beide bleiben fuer Abwaertskompatibilitaet erhalten.
 #define NET_SEN_DEFAULT_SENSOR_SEND_INTERVAL_S 10U
-#define NET_SEN_STATE_INTERVAL_MS (NET_SEN_DEFAULT_REPORT_INTERVAL_S * 1000UL)
+#define NET_SEN_STATE_INTERVAL_MS (NET_SEN_DEFAULT_REPORT_INTERVAL_S * 1000UL) // Sekunden nach Millisekunden; 1000UL verhindert signed-int-Ueberlauf.
 #define NET_SEN_MIN_REPORT_INTERVAL_S 5U
 #define NET_SEN_MAX_REPORT_INTERVAL_S 600U
 #define NET_SEN_LOOP_INTERVAL_MS 50UL           // 50 Millisekunden Loop-Pause.
@@ -75,8 +75,8 @@
 #define NET_SEN_ENV_BME280_VEML_RAIN_PRESSURE_DELTA_PA 30UL
 
 // I2C-Adressen. BME280 kann je nach SDO-Pin 0x76 oder 0x77 haben.
-#define NET_SEN_ENV_BME280_PRIMARY_ADDRESS 0x76
-#define NET_SEN_ENV_BME280_FALLBACK_ADDRESS 0x77
+#define NET_SEN_ENV_BME280_PRIMARY_ADDRESS 0x76  // 7-bit-I2C-Adresse bei einer SDO-Verdrahtung.
+#define NET_SEN_ENV_BME280_FALLBACK_ADDRESS 0x77 // Alternative 7-bit-I2C-Adresse bei anderer SDO-Verdrahtung.
 // VEML7700 liefert direkt nach Init gerne Startartefakte; deshalb erste
 // Luxmessung erst nach kurzer Wartezeit.
 #define NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS 1050UL // 1050 Millisekunden = 1,05 Sekunden.

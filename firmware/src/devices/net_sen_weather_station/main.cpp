@@ -90,7 +90,7 @@ void netSenDeviceEventSendResult(bool, uint8_t, uint8_t, uint8_t, uint16_t);
 #include "../../basetypes/net_sen/NetSenRuntime.h"
 
 static_assert(NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN >= 0,
-    "net_sen_weather_station braucht einen gueltigen Regen-Pin.");
+    "net_sen_weather_station braucht einen gueltigen Regen-Pin."); // Compile-Time-Fehler statt spaeter pinMode(-1).
 
 // =============================================================================
 // KONSTANTEN + LOKALER ZUSTAND
@@ -101,15 +101,15 @@ constexpr uint32_t I2C_CLOCK_HZ = 100000UL; // 100 kHz I2C-Standardtakt.
 constexpr unsigned long SENSOR_RECOVERY_RETRY_INTERVAL_MS = 30000UL; // 30000 ms = 30 s Recovery-Retry-Abstand.
 
 struct ErweiterterState {
-    uint32_t pressure_pa;
-    uint32_t gas_ohm;
-    uint16_t aqi;
+    uint32_t pressure_pa; // 32-bit, weil Druck in Pascal nicht sicher in uint16_t passt.
+    uint32_t gas_ohm;    // Derzeit Sentinel; Feld bleibt fuer gemeinsamen Extended-State-Vertrag.
+    uint16_t aqi;        // 16-bit reicht fuer AQI/Sentinel und spart Payload-Speicher.
     uint16_t tvoc_ppb;
     uint16_t eco2_ppm;
 };
 
-Adafruit_BME280 sensorBme280;
-Adafruit_VEML7700 sensorVeml7700 = Adafruit_VEML7700();
+Adafruit_BME280 sensorBme280;                         // Globales Objekt bleibt dauerhaft im RAM; lokale Sensorobjekte waeren nach init zerstoert.
+Adafruit_VEML7700 sensorVeml7700 = Adafruit_VEML7700(); // Bibliotheksobjekt merkt Konfiguration wie Gain und Integrationszeit.
 
 bool bme280Bereit = false;
 bool veml7700Bereit = false;
@@ -126,8 +126,8 @@ unsigned long letzterBmeRecoveryMs = 0UL;
 unsigned long letzterVemlRecoveryMs = 0UL;
 unsigned long veml7700BereitSeitMs = 0UL;
 
-constexpr float NET_SEN_EMA_ALPHA = 0.2f;
-float net_sen_temp_ema = NAN, net_sen_hum_ema = NAN;
+constexpr float NET_SEN_EMA_ALPHA = 0.2f; // 20 % neuer Messwert, 80 % alter Mittelwert: ruhiger, aber traeger.
+float net_sen_temp_ema = NAN, net_sen_hum_ema = NAN; // NAN markiert "Filter noch nicht initialisiert".
 
 ErweiterterState erweiterterState = {
     NET_SEN_PRESSURE_UNGUELTIG, NET_SEN_GAS_OHM_UNGUELTIG,
@@ -251,10 +251,10 @@ void netSenDeviceSensorInit() {
                         NET_SEN_AIR_METRIC_UNGUELTIG};
     erweiterterStateGeaendert = true;
 
-    Wire.setClock(I2C_CLOCK_HZ);
+    Wire.setClock(I2C_CLOCK_HZ); // 100 kHz Standard-I2C; schnell genug, aber meist robuster als Fast-Mode bei langen Leitungen.
 
     bme280Bereit = initialisiereBme280();
-    if (bme280Bereit) { net_sen_temp_ema = NAN; net_sen_hum_ema = NAN; }
+    if (bme280Bereit) { net_sen_temp_ema = NAN; net_sen_hum_ema = NAN; } // Nach Sensor-Reinit Filter neu starten, damit alte Werte nicht hineinziehen.
     else logf("WARN", "BME280 nicht gefunden (0x%02X/0x%02X)",
          NET_SEN_ENV_BME280_PRIMARY_ADDRESS, NET_SEN_ENV_BME280_FALLBACK_ADDRESS);
 
@@ -372,27 +372,27 @@ bool netSenDeviceSensorPoll(
 
     // BME280-Messung: Temperatur, Feuchte und Druck werden auf Plausibilitaet geprueft.
     if (bme280Bereit) {
-        const float t = sensorBme280.readTemperature();
-        const float h = sensorBme280.readHumidity();
-        const float p = sensorBme280.readPressure();
-        const bool gueltig = isfinite(t) && isfinite(h) && isfinite(p) &&
+        const float t = sensorBme280.readTemperature(); // Adafruit liest intern I2C-Register und liefert Grad Celsius als float.
+        const float h = sensorBme280.readHumidity();    // Feuchte kommt als Prozentwert 0..100.
+        const float p = sensorBme280.readPressure();    // Druck kommt in Pascal, nicht hPa.
+        const bool gueltig = isfinite(t) && isfinite(h) && isfinite(p) && // isfinite filtert NaN/Inf aus kaputten Sensorlesungen.
             h >= 0.0f && h <= 100.0f && p >= 30000.0f && p <= 110000.0f;
         if (gueltig) {
-            const float tempConv = lroundf(t * 10.0f) + NET_SEN_TEMP_OFFSET_01C;
-            const float humConv = lroundf(h * 10.0f) + NET_SEN_HUM_OFFSET_01PCT;
-            if (isnan(net_sen_temp_ema)) { net_sen_temp_ema = tempConv; net_sen_hum_ema = humConv; }
+            const float tempConv = lroundf(t * 10.0f) + NET_SEN_TEMP_OFFSET_01C; // Zehntelgrad-Integer fuer kompaktes Protokoll.
+            const float humConv = lroundf(h * 10.0f) + NET_SEN_HUM_OFFSET_01PCT; // Zehntelprozent, z.B. 55.3 % -> 553.
+            if (isnan(net_sen_temp_ema)) { net_sen_temp_ema = tempConv; net_sen_hum_ema = humConv; } // Erste Messung setzt den Startwert ohne Mittelung.
             else {
                 net_sen_temp_ema = NET_SEN_EMA_ALPHA * tempConv + (1.0f - NET_SEN_EMA_ALPHA) * net_sen_temp_ema;
                 net_sen_hum_ema = NET_SEN_EMA_ALPHA * humConv + (1.0f - NET_SEN_EMA_ALPHA) * net_sen_hum_ema;
             }
-            nT = (int16_t)lroundf(net_sen_temp_ema);
-            nH = clampHum01pct((long)lroundf(net_sen_hum_ema));
-            nP = (uint32_t)lroundf(p);
+            nT = (int16_t)lroundf(net_sen_temp_ema); // int16_t reicht fuer Temperatur in Zehntelgrad und spart Speicher.
+            nH = clampHum01pct((long)lroundf(net_sen_hum_ema)); // clamp verhindert ungueltige Feuchtewerte im Payload.
+            nP = (uint32_t)lroundf(p); // Pascal bleibt als 32-bit-Wert erhalten.
             bmeOk = true;
         } else {
             bme280Bereit = false;
-            nT = INT16_MIN;
-            nH = 0xFFFFU;
+            nT = INT16_MIN; // Sentinel: "keine gueltige Temperatur".
+            nH = 0xFFFFU;   // Sentinel: "keine gueltige Feuchte".
             logBmeFehler(jetzt, "Messwerte unplausibel");
         }
     } else {
@@ -406,8 +406,8 @@ bool netSenDeviceSensorPoll(
         (jetzt - veml7700BereitSeitMs) < NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS;
     if (veml7700Bereit && !warmup) {
         const float l = sensorVeml7700.readLux();
-        if (isfinite(l) && l >= 0.0f) { nL = clampToU16((long)lroundf(l)); vemlOk = true; }
-        else { veml7700Bereit = false; nL = 0xFFFFU; logVemlFehler(jetzt, "Lux unplausibel"); }
+        if (isfinite(l) && l >= 0.0f) { nL = clampToU16((long)lroundf(l)); vemlOk = true; } // Lux wird auf uint16_t begrenzt, weil das Protokollfeld 16-bit ist.
+        else { veml7700Bereit = false; nL = 0xFFFFU; logVemlFehler(jetzt, "Lux unplausibel"); } // 0xFFFF = ungueltiger Luxwert.
     } else if (!veml7700Bereit) {
         nL = 0xFFFFU;
         logVemlFehler(jetzt, "Sensor nicht initialisiert");
@@ -423,7 +423,7 @@ bool netSenDeviceSensorPoll(
     }
 
     // Extended State: Druck nur bei signifikanter Aenderung als Zusatzwert melden.
-    const bool extGeaendert = updateAndCheckU32(
+    const bool extGeaendert = updateAndCheckU32( // Hilfsfunktion schreibt nur bei gueltigem Delta; spart unnoetige STATE-Meldungen.
         &erweiterterState.pressure_pa, nP, NET_SEN_PRESSURE_UNGUELTIG,
         NET_SEN_ENV_BME280_VEML_RAIN_PRESSURE_DELTA_PA);
     if (extGeaendert) erweiterterStateGeaendert = true;
@@ -440,7 +440,7 @@ bool netSenDeviceSensorPoll(
         letzterSnapshotLogMs = jetzt;
     }
 
-    return absDiffI16(nT, vT) >= NET_SEN_ENV_BME280_VEML_RAIN_TEMP_DELTA_01C ||
+    return absDiffI16(nT, vT) >= NET_SEN_ENV_BME280_VEML_RAIN_TEMP_DELTA_01C || // Delta-Schwellen verhindern Funkspam durch Sensorauschen.
            absDiffU16(nH, vH) >= NET_SEN_ENV_BME280_VEML_RAIN_HUM_DELTA_01PCT ||
            absDiffU16(nL, vL) >= NET_SEN_ENV_BME280_VEML_RAIN_LUX_DELTA ||
            vM != 0U || nF != vF;
