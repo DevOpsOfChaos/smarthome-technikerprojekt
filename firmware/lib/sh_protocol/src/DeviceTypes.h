@@ -22,6 +22,11 @@
 // ============================================================
 // Geräteklassen (device_class im HELLO-Payload)
 // ============================================================
+//
+// Diese Werte sind Teil des Funkvertrags zwischen Node und Master.
+// Deshalb bleiben sie als explizite Zahlen definiert statt als automatisch
+// hochzaehlendes enum: ein versehentlich geaenderter Zahlenwert wuerde alte
+// Firmware oder Master-Logik falsch interpretieren.
 
 // Netzbetriebener Node mit einem Relais.
 // Typisch: einfache Lampe, Schaltaktor.
@@ -130,6 +135,9 @@
 // Kombination zu 16-Bit-Wert: uint16_t caps = ((uint16_t)caps_hi << 8) | caps_lo;
 //
 // Pruefung auf Faehigkeit:    bool hatRelay = (caps & SH_CAP_RELAY) != 0;
+//
+// Wichtig: Jede Maske nutzt genau ein Bit. Dadurch koennen mehrere
+// Faehigkeiten gleichzeitig gesetzt sein, z.B. RELAY | TEMP | HUM.
 //
 // Bits 7..0 (caps_lo):
 

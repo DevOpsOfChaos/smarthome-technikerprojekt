@@ -33,6 +33,11 @@
 // ============================================================
 // PROTOKOLL-KONSTANTEN - Magic, Version, Puffergroessen
 // ============================================================
+//
+// ESP-NOW erlaubt auf ESP32 maximal 250 Bytes Nutzdaten. Der gemeinsame
+// Header belegt davon 10 Bytes; der Rest ist Payload. Diese Grenzen sind
+// bewusst zentral gehalten, damit Header- und Payload-Pruefungen denselben
+// Vertrag verwenden.
 
 #define SH_PROTO_MAGIC         0xA5U
 #define SH_PROTO_VERSION       1U
@@ -196,6 +201,10 @@
 // RELAY-COMFORT-FLAGS - Bitmaske fuer Auto-Light-Status
 //   Wird in STATE-Reports als auto_flags-Feld gesendet
 // ============================================================
+//
+// Ein Byte kann acht unabhaengige Statusbits tragen. Der Master kann damit
+// im Nachhinein unterscheiden, ob ein Licht wegen Praesenz, Lux-Grenze,
+// Server-Sperre oder fehlendem Sensorwert geschaltet bzw. blockiert wurde.
 
 #define SH_RELAY_COMFORT_FLAG_AUTO_REQUEST_ON           0x01U
 #define SH_RELAY_COMFORT_FLAG_AUTO_RELAY_OWNED          0x02U
@@ -207,6 +216,16 @@
 #define SH_RELAY_COMFORT_FLAG_LIGHT_GUARD_ENABLED       0x80U
 
 namespace SmartHome {
+
+/*
+ * Hinweis zum binaeren Layout:
+ *
+ * Alle Payload-Structs sind packed und werden per memcpy/ESP-NOW als rohe Bytes
+ * uebertragen. Feldreihenfolge, Feldbreite und sizeof(...) sind deshalb Teil des
+ * Protokolls. Neue Felder duerfen nicht einfach mitten in bestehende Structs
+ * eingefuegt werden, sonst lesen alte Empfaenger andere Bedeutungen aus denselben
+ * Bytes.
+ */
 
 /*
  * Kurzbeschreibung: ESP-NOW-Nachrichtenkopf (10 Bytes, packed).
@@ -953,6 +972,10 @@ static inline uint16_t calcPacketCrc(
     MsgHeader temp = header;
     temp.crc16 = 0;
 
+    // Der CRC wird ueber genau die Bytes berechnet, die auch gesendet werden:
+    // Header mit geloeschtem CRC-Feld, direkt dahinter der Payload. Pointer-
+    // Arithmetik mit buffer + sizeof(MsgHeader) springt auf das erste Payload-
+    // Byte im lokalen Gesamtpuffer.
     uint8_t buffer[SH_ESPNOW_MAX_BYTES] = {0};
     memcpy(buffer, &temp, sizeof(MsgHeader));
 
@@ -999,6 +1022,9 @@ static inline bool hasValidPacketCrc(const uint8_t* packet, size_t len) {
     if (!isValidHeader(header)) return false;
     if (len != (sizeof(MsgHeader) + header.payload_len)) return false;
 
+    // packet zeigt auf den Anfang des Rohpakets. Nach sizeof(MsgHeader) beginnt
+    // der Payload. Der Header wird vorher lokal kopiert, damit unaligned Zugriffe
+    // auf ESP32/Compiler-Seite kein Problem werden.
     const uint8_t* payload = packet + sizeof(MsgHeader);
     return calcPacketCrc(header, payload) == header.crc16;
 }

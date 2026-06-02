@@ -39,14 +39,14 @@ constexpr size_t MASTER_MAC_TEXT_LEN = 18U;
     Sie enthalten nur Werte, die mehrere Geraetetypen gemeinsam brauchen.
 */
 struct NodeBasisSettings {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t reserved;
-    uint32_t flags;
-    uint8_t masterMac[6];
-    uint8_t reservedMac[2];
-    uint32_t statusSendIntervalS;
-    uint32_t sensorSendIntervalS;
+    uint32_t magic;               // Kennwert gegen fremde/alte NVS-Bloecke
+    uint16_t version;             // Strukturversion fuer spaetere Migrationen
+    uint16_t reserved;            // bewusst frei, haelt Layout erweiterbar
+    uint32_t flags;               // Bitmaske, z.B. ob masterMac gueltig ist
+    uint8_t masterMac[6];         // rohe 6-Byte-MAC, nicht als Text gespeichert
+    uint8_t reservedMac[2];       // Auffuellung auf 4-Byte-Grenze
+    uint32_t statusSendIntervalS; // Sekundenwert fuer Statusmeldungen
+    uint32_t sensorSendIntervalS; // Sekundenwert fuer Sensormeldungen
 };
 
 // Kurzzeit-Sicherung der Basis-Einstellungen.
@@ -94,6 +94,8 @@ struct NodeProvisioningConfig {
           restartDelayMs(restartDelayMsValue),
           apChannel(apChannelValue) {}
 
+    // Diese const-char-Zeiger zeigen auf Stringliterale oder dauerhaft gueltige
+    // Puffer des Geraete-Codes. Der Controller kopiert die Texte nicht komplett.
     const char* setupApSsid = nullptr;
     const char* setupApPassword = nullptr;
     const char* storageNamespace = nullptr;
@@ -546,6 +548,10 @@ class NodeProvisioningController {
     uint32_t effectiveMaxSensorSendIntervalS() const;
 
     NodeProvisioningConfig config_;
+    // Runtime-Zeiger:
+    // Der Controller ist eine gemeinsame Bibliothek und besitzt diese Werte
+    // nicht selbst. Er schreibt direkt in Variablen des konkreten Nodes, damit
+    // bestehende Firmware-Pfade sofort dieselben Einstellungen sehen.
     bool* masterMacValid_;
     uint8_t* masterMac_;
     uint32_t* statusSendIntervalS_;
@@ -556,8 +562,8 @@ class NodeProvisioningController {
     unsigned long* restartRequestedAtMs_;
     char* setupApSsid_;
     size_t setupApSsidSize_;
-    DeviceProvisioningHandler* deviceHandler_;
-    SetupLogFn logFn_;
+    DeviceProvisioningHandler* deviceHandler_; // Polymorphe Grenze zum geraetespezifischen Setup
+    SetupLogFn logFn_;                         // Optionaler Logger-Callback, darf nullptr sein
     WebServer server_;
     bool routesConfigured_;
     bool initialized_;

@@ -324,6 +324,8 @@ bool NodeProvisioningController::parseMacText(const char* text, uint8_t outMac[6
         return false;
     }
 
+    // Ein Hex-Zeichen entspricht vier Bits, also einem "Nibble".
+    // Zwei Nibbles ergeben spaeter ein MAC-Byte: (high << 4) | low.
     auto parseHexNibble = [](char ch, uint8_t& outValue) -> bool {
         if (ch >= '0' && ch <= '9') {
             outValue = (uint8_t)(ch - '0');
@@ -430,6 +432,9 @@ void NodeProvisioningController::setStoredMasterMac(const uint8_t masterMac[6]) 
 void NodeProvisioningController::configureRoutes() {
     if (routesConfigured_) return;
 
+    // WebServer speichert Handler als Callbacks. Die Lambdas halten nur this
+    // fest und leiten in normale Methoden weiter; dadurch bleibt die eigentliche
+    // Request-Logik test- und lesbar in handleRoot()/handleSave().
     server_.on("/", HTTP_GET, [this]() { handleRoot(); });
     server_.on("/save", HTTP_POST, [this]() { handleSave(); });
     server_.onNotFound([this]() { handleRoot(); });
@@ -620,6 +625,9 @@ String NodeProvisioningController::buildPage(
     String page;
     page.reserve(9200U);
 
+    // Alle dynamischen Texte werden vor dem Einsetzen in HTML escaped. Das gilt
+    // auch fuer Werte aus Formularen, weil sie sonst HTML/Script in die Seite
+    // einschleusen koennten.
     const String escapedTitle = htmlEscape(String(deviceHandler_->pageTitle()));
     const String escapedIntro = htmlEscape(String(deviceHandler_->pageIntro()));
     const String escapedDeviceTitle = htmlEscape(String(deviceHandler_->deviceSectionTitle()));
@@ -630,6 +638,8 @@ String NodeProvisioningController::buildPage(
     const String escapedInfo = htmlEscape(infoText);
     const String escapedError = htmlEscape(errorText);
 
+    // F("...") legt Arduino-Stringliterale im Flash ab und reduziert RAM-Druck
+    // beim Zusammenbauen der Setup-Seite.
     page += F("<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">");
     page += F("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">");
     page += F("<title>");
@@ -1144,6 +1154,10 @@ bool NodeProvisioningController::saveCurrentState() {
     }
 
     if (!deviceHandler_->saveDeviceSettings(prefs)) {
+        // Basis- und Device-Daten muessen gemeinsam erfolgreich sein. Falls der
+        // geraetespezifische Save scheitert, wird der Basis-Blob wieder auf den
+        // vorherigen Zustand gesetzt, damit NVS keinen halb gespeicherten Zustand
+        // enthaelt.
         if (basisChanged && hadPreviousBasis) {
             const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
             prefs.putBytes(basisKey, &previousBasis, sizeof(previousBasis));
@@ -1196,6 +1210,8 @@ bool NodeProvisioningController::clearStoredSettings() {
 
     removeBasisFromStorage(prefs);
     if (!deviceHandler_->clearDeviceSettings(prefs)) {
+        // Gleiches Rollback-Prinzip wie beim Speichern: Die gemeinsame Basis
+        // wird wiederhergestellt, wenn das Loeschen der Device-Daten misslingt.
         if (hadPreviousBasis) {
             const char* basisKey = config_.basisStorageKey ? config_.basisStorageKey : "node_basis_v1";
             prefs.putBytes(basisKey, &previousBasis, sizeof(previousBasis));

@@ -35,8 +35,15 @@
 namespace SmartHome {
 namespace ShStorage {
 
+// Magic und Version schuetzen den Flashspeicher vor Fehlinterpretation:
+// Nur wenn beide Werte passen, wird ein gelesener Byteblock als aktuelle
+// SharedNodeSettings-Struktur akzeptiert.
 constexpr uint32_t SH_NODE_SETTINGS_MAGIC = 0x53484E50UL;
 constexpr uint16_t SH_NODE_SETTINGS_VERSION = 2U;
+
+// Flags sind einzelne Bits in einem uint32_t. Dadurch kann ein gespeicherter
+// Wert vorhanden sein, ohne dass ein eigener bool pro Feld im Flashlayout noetig
+// ist. Pruefung: (settings.flags & SH_NODE_SETTINGS_FLAG_...) != 0.
 constexpr uint32_t SH_NODE_SETTINGS_FLAG_MASTER_BOUND = 0x00000001UL;
 constexpr uint32_t SH_NODE_SETTINGS_FLAG_AUTO_OFF_DELAY_SET = 0x00000002UL;
 constexpr uint32_t SH_NODE_SETTINGS_FLAG_LIGHT_THRESHOLD_SET = 0x00000004UL;
@@ -59,18 +66,18 @@ static_assert(
     "Shared auto-off delay must fit into protocol uint16 cfg/state fields.");
 
 struct SharedNodeSettings {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t reserved;
-    uint32_t flags;
-    uint8_t master_mac[6];
-    uint8_t reserved_mac[2];
-    char device_name[SH_DEVICE_NAME_LEN];
-    uint32_t report_interval_s;
-    uint32_t wake_interval_s;
-    uint32_t auto_off_delay_s;
-    uint16_t light_threshold_on;
-    uint16_t reserved_cfg;
+    uint32_t magic;                         // Kennwert gegen fremde/alte NVS-Daten
+    uint16_t version;                       // Strukturversion fuer Migrationen
+    uint16_t reserved;                      // frei gehalten fuer spaetere Erweiterung
+    uint32_t flags;                         // Bitmaske fuer optionale gespeicherte Werte
+    uint8_t master_mac[6];                  // rohe MAC-Bytes, kein Textformat
+    uint8_t reserved_mac[2];                // Auffuellung auf 4-Byte-Grenze
+    char device_name[SH_DEVICE_NAME_LEN];   // nullterminierter Anzeigename
+    uint32_t report_interval_s;             // Sekundenwert fuer Netzgeraete
+    uint32_t wake_interval_s;               // Sekundenwert fuer Batteriegeraete
+    uint32_t auto_off_delay_s;              // Sekundenwert, 0 bedeutet deaktiviert
+    uint16_t light_threshold_on;            // Lux-Grenze fuer Auto-Licht
+    uint16_t reserved_cfg;                  // frei gehalten fuer weitere Komfortwerte
 };
 
 /*
