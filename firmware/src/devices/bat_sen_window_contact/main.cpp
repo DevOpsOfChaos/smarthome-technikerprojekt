@@ -38,13 +38,34 @@
 ===============================================================================
 */
 
+// Arduino.h stellt die GPIO- und Zeitfunktionen bereit, die dieser Adapter
+// direkt benutzt: pinMode(), digitalRead(), millis(), HIGH/LOW und die Arduino-
+// Datentypen. Ohne diesen Include kennt der Compiler die Arduino-API nicht.
 #include <Arduino.h>
 
+// DeviceConfig.h enthaelt die logische Geraetekonfiguration (ID, Caps,
+// Wake-/Sleep-Zeiten, Entprellzeit, Pegeldefinition). PinConfig.h enthaelt die
+// konkrete Verdrahtung dieses Boards. Diese Trennung ist wichtig: Die gleiche
+// Logik kann mit anderer Pinbelegung wiederverwendet werden.
 #include "DeviceConfig.h"
 #include "PinConfig.h"
 
+// Diese Defines sind kein normaler Laufzeit-Code, sondern Compile-Time-Schalter
+// fuer BatSenRuntime.h. Sie muessen vor dem Include gesetzt werden, weil der
+// Basistyp beim Einbinden entscheidet, welche Hook-Funktionen er erwartet.
+//
+// BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS:
+//   Aktiviert device_init_io(), device_poll_inputs(), device_build_state_channels()
+//   und device_map_event() aus dieser Datei.
+// BAT_SEN_DEVICE_HAS_DYNAMIC_WAKE_LEVEL:
+//   Aktiviert device_wake_level_high(), damit der Sleep-Wake-Pegel vor jedem
+//   Schlafen zum aktuellen Kontaktzustand passt.
 #define BAT_SEN_DEVICE_HAS_CUSTOM_HOOKS 1
 #define BAT_SEN_DEVICE_HAS_DYNAMIC_WAKE_LEVEL 1
+
+// Der Runtime-Include liefert absichtlich setup() und loop(). Diese Datei ist
+// deshalb ein Device-Adapter: Sie definiert nur die Hooks und lokalen Sensorwerte,
+// der Basistyp uebernimmt Funk, Provisioning, Batteriespannung und Deep-Sleep.
 #include "../../basetypes/bat_sen/BatSenRuntime.h"
 
 // =============================================================================

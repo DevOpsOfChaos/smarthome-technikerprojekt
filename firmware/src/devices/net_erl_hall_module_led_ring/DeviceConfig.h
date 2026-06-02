@@ -33,14 +33,21 @@
 
 #pragma once
 
+// DeviceTypes.h liefert den oeffentlichen Vertrag zum Master: Capabilities,
+// Profile, Control-Mode und Reporting-Mode.
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
+// Stabile HELLO-Identitaet. device_id nicht kosmetisch aendern, sonst entsteht
+// masterseitig eine neue Node.
 #define NET_ERL_DEVICE_ID "NET-ERL-002"
 #define NET_ERL_DEVICE_NAME "NET-ERL Hall Module LED Ring"
 #define NET_ERL_FW_VARIANT "net_erl_hall_module_led_ring"
-// Bitmaske: RELAY(0x0001)|TEMP(0x0004)|HUM(0x0008)|LUX(0x0010)|AQI(0x0020)|MOTION(0x0040)|BUTTON(0x0400)|LED_RING(0x1000)|GAS(0x4000)|PRESSURE(0x8000)
+// Bitmaske: RELAY(0x0001)|TEMP(0x0004)|HUM(0x0008)|LUX(0x0010)|AQI(0x0020)|MOTION(0x0040)|BUTTON(0x0400)|LED_RING(0x1000)|GAS(0x4000)|PRESSURE(0x8000).
+// Der Master nutzt diese Bits, um State-Felder zu erlauben oder auf Unknown zu setzen.
 #define NET_ERL_DEVICE_CAPS (SH_CAP_RELAY | SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_MOTION | SH_CAP_AQI | SH_CAP_PRESSURE | SH_CAP_BUTTON | SH_CAP_LED_RING | SH_CAP_GAS)
 
+// Relay-Light sagt dem Master: Relais darf geschaltet werden, Auto-Light-Meta
+// ist vorhanden. Das Profil markiert die LED-Ring-Variante fuer UI/Setup.
 #define NET_ERL_DEVICE_CONTROL_MODE SH_CONTROL_MODE_RELAY_LIGHT
 #define NET_ERL_DEVICE_CONFIG_PROFILE SH_PROFILE_HALL_MODULE_LED_RING
 #define NET_ERL_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
@@ -52,10 +59,12 @@
 #define NET_ERL_HEARTBEAT_INTERVAL_MS 20000UL   // 20000 Millisekunden = 20 Sekunden.
 #define NET_ERL_LOOP_INTERVAL_MS 20UL           // 20 Millisekunden Loop-Pause.
 
+// Konfigurierbarer Reportbereich fuer set_config(report_interval_s).
 #define NET_ERL_MIN_REPORT_INTERVAL_S 5U
 #define NET_ERL_MAX_REPORT_INTERVAL_S 600U
 #define NET_ERL_BOOT_COUNTER 1U
 
+// Defaultwerte fuer Runtime/Provisioning nach leerem NVS.
 #define NET_ERL_DEFAULT_REPORT_INTERVAL_S 10U
 #define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U
@@ -82,13 +91,16 @@
 
 #define NET_ERL_I2C_CLOCK_HZ 5000UL  // 5 kHz I2C-Takt fuer langen/stoeranfaelligen Sensorbus.
 
-// BME680
+// BME680: Primaer/Fallback wegen unterschiedlicher Breakout-Lotbruecken.
 #define NET_ERL_BME680_PRIMARY_ADDRESS 0x76
 #define NET_ERL_BME680_FALLBACK_ADDRESS 0x77
+// Gaswerte werden erst nach Warmup und Mindestanzahl Messungen gemeldet, damit
+// der Startzustand nicht als reale Luftqualitaet erscheint.
 #define NET_ERL_BME680_GAS_WARMUP_MS 180000UL      // 180000 Millisekunden = 3 Minuten.
 #define NET_ERL_BME680_GAS_WARMUP_MIN_READS 5U
 
-// ENS160
+// ENS160: Primaer/Fallback fuer 0x52/0x53. Warmup/Stale schuetzen den AQI-Wert
+// vor Startartefakten und alten Kompensationsdaten.
 #define NET_ERL_ENS160_PRIMARY_ADDRESS 0x52
 #define NET_ERL_ENS160_FALLBACK_ADDRESS 0x53
 #define NET_ERL_ENS160_WARMUP_MS 1200000UL         // 1200000 Millisekunden = 20 Minuten.

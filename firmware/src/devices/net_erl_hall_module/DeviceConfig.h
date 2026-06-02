@@ -34,15 +34,22 @@
 
 #pragma once
 
+// DeviceTypes.h liefert Capabilities, Control-Modes, Profile und Reporting-Modi,
+// die im HELLO-Payload an den Master gehen.
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
+// Stabile Identitaet des Nodes. Aenderungen an NET_ERL_DEVICE_ID erzeugen beim
+// Master eine neue Registry-Node; nur bewusst bei realem Geraetetausch aendern.
 #define NET_ERL_DEVICE_ID "NET-ERL-001"
 #define NET_ERL_DEVICE_NAME "NET-ERL Hall Module"
 #define NET_ERL_FW_VARIANT "net_erl_hall_module"
 
-// Druck bleibt trotz BME280 bewusst aussen vor (Aussenvertrag ohne PRESSURE)
+// Druck bleibt trotz BME280 bewusst aussen vor (Aussenvertrag ohne PRESSURE).
+// Der Master veroeffentlicht nur Capabilities, die hier gesetzt sind.
 #define NET_ERL_DEVICE_CAPS (SH_CAP_RELAY | SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_MOTION)
 
+// Control/Profile/Reporting beschreiben, wie der Master Kommandos validiert und
+// wie die UI das Geraet einordnet.
 #define NET_ERL_DEVICE_CONTROL_MODE SH_CONTROL_MODE_RELAY_LIGHT
 #define NET_ERL_DEVICE_CONFIG_PROFILE SH_PROFILE_HALL_LIGHT
 #define NET_ERL_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
@@ -54,10 +61,13 @@
 #define NET_ERL_HEARTBEAT_INTERVAL_MS 20000UL   // 20000 Millisekunden = 20 Sekunden.
 #define NET_ERL_LOOP_INTERVAL_MS 20UL           // 20 Millisekunden Loop-Pause.
 
+// Grenzen fuer konfigurierbare STATE-Intervalle. Master und Node validieren diese
+// Werte, damit ein falsches MQTT-CFG kein unbrauchbares Meldeintervall setzt.
 #define NET_ERL_MIN_REPORT_INTERVAL_S 5U
 #define NET_ERL_MAX_REPORT_INTERVAL_S 600U
 #define NET_ERL_BOOT_COUNTER 1U
 
+// Defaultwerte nach Factory-Reset oder erstem Start.
 #define NET_ERL_DEFAULT_REPORT_INTERVAL_S 10U
 #define NET_ERL_DEFAULT_AUTO_ON_LUX_THRESHOLD 250U  // Lux unter diesem Wert = einschalten
 #define NET_ERL_DEFAULT_AUTO_OFF_DELAY_S 15U        // 15 Sekunden Nachlaufzeit.

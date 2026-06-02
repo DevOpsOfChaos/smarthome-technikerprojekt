@@ -30,20 +30,29 @@
 
 #pragma once
 
+// I2C-Bus fuer BME680, VEML7700 und ENS160. Alle drei Sensoren teilen sich SDA/SCL.
 #define PIN_SENSOR_SDA 0
 #define PIN_SENSOR_SCL 1
+// Lokaler Button: zugleich Bedienbutton und Setup-Hold-Button.
 #define PIN_BUTTON_1 6
+// LD2410 OUT liefert ein digitales Praesenzsignal; UART-Pins sind fuer optionale
+// Konfiguration/Diagnose des Radars reserviert.
 #define PIN_LD2410_OUT 7
 #define PIN_LED_RING 4
 #define PIN_RELAY_1 10
 #define PIN_LD2410_UART_RX 20
 #define PIN_LD2410_UART_TX 21
 
+// LED_RING_COUNT muss zur realen Anzahl NeoPixel passen, sonst bleiben LEDs aus
+// oder nicht vorhandene Pixel werden im Puffer beschrieben.
 #define LED_RING_COUNT 17
 #define BUTTON_1_ACTIVE_LOW 1
 #define RELAY_1_ACTIVE_HIGH 1
+// Keine separate Status-LED; der NeoPixel-Ring ist die lokale Anzeige.
 #define PIN_STATUS_LED -1
 
+// Der Setup-Basistyp verwendet eigene SETUP_*-Namen. Hier werden sie bewusst auf
+// den lokalen Button gemappt, damit kein zweiter Setup-Taster noetig ist.
 #define SETUP_BUTTON_PIN PIN_BUTTON_1
 #define SETUP_BUTTON_ACTIVE_LOW BUTTON_1_ACTIVE_LOW
 #define SETUP_BUTTON_HOLD_MS 5000UL // 5000 Millisekunden = 5 Sekunden.

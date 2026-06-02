@@ -17,7 +17,8 @@
  - HardwarePinStandard.h: eigene Pin-Standardbibliothek fuer gemeinsam genutzte Pins.
 
  Pin-Belegung:
- - Fensterkontakt: GPIO3, Reed-Kontakt mit Pullup, HIGH bedeutet offen.
+ - Fensterkontakt: GPIO3, Reed-Kontakt mit externem 100-kOhm-Pullup,
+   HIGH bedeutet offen.
  - Batterie-ADC: HardwarePinStandard::PIN_BATTERY_ADC.
  - Setup-Button: GPIO2, active-LOW, 5000 Millisekunden Haltezeit.
  - Setup-LED: GPIO7, active-HIGH, 500 Millisekunden Blinkintervall.
@@ -31,20 +32,31 @@
 
 #pragma once
 
+// HardwarePinStandard.h buendelt projektweite Board-Konstanten. Der Fensterkontakt
+// nutzt daraus nur den Batterie-ADC; die uebrigen Pins sind hier bewusst lokal
+// festgelegt, weil sie zur konkreten Reed-/Setup-Verdrahtung gehoeren.
 #include "../../../include/HardwarePinStandard.h"
 
-// Fensterkontakt-Pin (GPIO3, C3-Wake-faehig, Pullup aktiv)
+// Fensterkontakt-Pin (GPIO3, C3-Wake-faehig, externer 100-kOhm-Pullup aktiv)
 // GPIO3 ist wake-faehig (C3: GPIO0..GPIO5) und trennt den
 // Fensterkontakt sauber vom Boot-Button-Standardpin GPIO9.
+// Wichtig: Der externe Pullup muss im Deep-Sleep unverfaelscht bleiben.
+// Die ESP-IDF kann bei HIGH-Wake sonst einen internen Pulldown zuschalten.
+// Mit 100 kOhm externem Pullup und ca. 45 kOhm internem Pulldown entsteht
+// ein Spannungsteiler auf etwa 1,02 V; das reicht nicht als HIGH-Pegel.
+// BatSenRuntime schuetzt die aktive Pad-Konfiguration deshalb per GPIO-Hold.
 #define BAT_SEN_WINDOW_CONTACT_PIN 3
 
-// Status-LED nicht bestueckt
+// -1 ist in dieser Firmware das Muster fuer "nicht bestueckt / nicht verwenden".
+// Runtime-Code prueft solche Pins vor pinMode()/digitalWrite().
 #define BAT_SEN_PIN_STATUS_LED -1
 
-// Batterie-ADC
+// Batterie-ADC aus dem gemeinsamen Hardwarestandard, damit alle BAT-SEN-Varianten
+// dieselbe Messschaltung und Kalibrierannahme nutzen.
 #define BAT_SEN_PIN_BATTERY_ADC SmartHome::HardwarePinStandard::PIN_BATTERY_ADC
 
-// Wake-Input = Fensterkontakt-Pin (GPIO-Wake bei Pegelwechsel)
+// Wake-Input = Fensterkontakt-Pin. Die Runtime nutzt diesen Pin fuer Deep-Sleep-
+// Wake; die konkrete Wake-Richtung kommt dynamisch aus device_wake_level_high().
 #define BAT_SEN_PIN_WAKE_INPUT BAT_SEN_WINDOW_CONTACT_PIN
 
 // Setup-Button: GPIO2, active-LOW, 5000 Millisekunden Haltezeit fuer Setup.

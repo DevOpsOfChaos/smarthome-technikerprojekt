@@ -32,11 +32,15 @@
 
 #pragma once
 
+// DeviceTypes.h definiert Capabilities und Reporting-Mode, die im HELLO-Payload
+// an den Master gemeldet werden.
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
+// Stabile Identitaet der Wetterstation. device_id ist master-/mqtt-relevant.
 #define NET_SEN_DEVICE_ID "NET-SEN-002"
 #define NET_SEN_DEVICE_NAME "NET-SEN Env BME280+VEML+Rain"
 #define NET_SEN_FW_VARIANT "net_sen_weather_station"
+// Capabilities bestimmen, welche State-Felder der Master als gueltig publiziert.
 #define NET_SEN_DEVICE_CAPS (SH_CAP_TEMP | SH_CAP_HUM | SH_CAP_LUX | SH_CAP_PRESSURE | SH_CAP_RAIN)
 #define NET_SEN_DEVICE_REPORTING_MODE SH_REPORTING_HYBRID
 
@@ -57,20 +61,24 @@
 #define NET_SEN_MAX_REPORT_INTERVAL_S 600U
 #define NET_SEN_LOOP_INTERVAL_MS 50UL           // 50 Millisekunden Loop-Pause.
 
-// Sensor-Timing
+// Sensor-Timing. 60 s Messintervall ist bewusst langsam, um Eigenerwaermung und
+// I2C-Dauerlast zu reduzieren.
 #define NET_SEN_ENV_BME280_VEML_RAIN_SENSOR_READ_INTERVAL_MS 60000UL // 60000 Millisekunden = 60 Sekunden.
 #define NET_SEN_ENV_BME280_VEML_RAIN_ERROR_LOG_INTERVAL_MS 15000UL   // 15000 Millisekunden = 15 Sekunden.
 #define NET_SEN_ENV_BME280_VEML_RAIN_SNAPSHOT_LOG_INTERVAL_MS 30000UL // 30000 Millisekunden = 30 Sekunden.
 
-// Hysterese
+// Hysterese/Delta-Schwellen fuer STATE-Reports. Kleine Sensorrauschen sollen
+// nicht jeden Poll als neuen MQTT-State melden.
 #define NET_SEN_ENV_BME280_VEML_RAIN_TEMP_DELTA_01C 10
 #define NET_SEN_ENV_BME280_VEML_RAIN_HUM_DELTA_01PCT 50U
 #define NET_SEN_ENV_BME280_VEML_RAIN_LUX_DELTA 25U
 #define NET_SEN_ENV_BME280_VEML_RAIN_PRESSURE_DELTA_PA 30UL
 
-// I2C-Adressen
+// I2C-Adressen. BME280 kann je nach SDO-Pin 0x76 oder 0x77 haben.
 #define NET_SEN_ENV_BME280_PRIMARY_ADDRESS 0x76
 #define NET_SEN_ENV_BME280_FALLBACK_ADDRESS 0x77
+// VEML7700 liefert direkt nach Init gerne Startartefakte; deshalb erste
+// Luxmessung erst nach kurzer Wartezeit.
 #define NET_SEN_ENV_VEML7700_FIRST_READ_DELAY_MS 1050UL // 1050 Millisekunden = 1,05 Sekunden.
 
 // Sensor-Offset-Kompensation (in Geraete-Nativeinheiten).

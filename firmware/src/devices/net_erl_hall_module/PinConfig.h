@@ -30,13 +30,20 @@
 
 #pragma once
 
+// Relais- und Sensorpins sind direkte GPIO-Nummern des ESP32-C3. Aenderungen
+// muessen zur realen Verdrahtung passen; der Compiler kann hier keine Hardware
+// pruefen.
 #define PIN_RELAY_1 10
 #define PIN_SENSOR_SDA 0
 #define PIN_SENSOR_SCL 1
 #define PIN_PIR 7
+// -1 bedeutet "nicht bestueckt"; Runtime-Code ueberspringt pinMode/digitalWrite.
 #define PIN_STATUS_LED -1
+// active-HIGH: HIGH zieht das Relais an. Bei active-LOW-Relais muss dieser Wert 0 sein.
 #define RELAY_1_ACTIVE_HIGH 1
 
+// Setup-Button und Setup-LED werden vom NET-ERL-Basistyp gelesen. Der Button ist
+// active-LOW, daher normalerweise mit Pullup betrieben.
 #define SETUP_BUTTON_PIN 2
 #define SETUP_BUTTON_ACTIVE_LOW 1
 #define SETUP_BUTTON_HOLD_MS 5000UL // 5000 Millisekunden = 5 Sekunden.

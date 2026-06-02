@@ -41,29 +41,43 @@
 ===============================================================================
 */
 
+// Arduino.h: GPIO, millis(), HIGH/LOW und Arduino-Grundtypen.
 #include <Arduino.h>
+// Wire.h: I2C-Bus fuer BME280 und VEML7700.
 #include <Wire.h>
+// math.h: isfinite(), isnan() und lroundf() fuer Messwertvalidierung.
 #include <math.h>
 
+// Adafruit-Sensorbibliotheken: Die Klassen kapseln die I2C-Registerzugriffe.
 #include <Adafruit_BME280.h>
 #include <Adafruit_VEML7700.h>
 
+// Eigene Konfigurations- und Utility-Dateien. MathUtils/SensorUtils kommen aus
+// dem Projekt und werden unten per using in den lokalen Namensraum geholt.
 #include "DeviceConfig.h"
 #include "PinConfig.h"
 #include "MathUtils.h"
 #include "SensorUtils.h"
 
-using SmartHome::clampToU16;
-using SmartHome::clampHum01pct;
-using SmartHome::absDiffU16;
-using SmartHome::absDiffI16;
-using SmartHome::recoveryIsDue;
-using SmartHome::updateAndCheckU32;
+// using-Deklarationen vermeiden lange SmartHome::-Praefixe im Messwertpfad.
+// Sie importieren nur einzelne Hilfsfunktionen, nicht den ganzen Namespace.
+using SmartHome::clampToU16;       // begrenzt Messwerte auf uint16_t-Protokollfeld.
+using SmartHome::clampHum01pct;    // begrenzt Feuchte auf 0..1000 (= 0,1 %-Schritte).
+using SmartHome::absDiffU16;       // Delta-Vergleich fuer unsigned 16-bit-Werte.
+using SmartHome::absDiffI16;       // Delta-Vergleich fuer signed 16-bit-Werte.
+using SmartHome::recoveryIsDue;    // Intervallpruefung fuer Sensor-Recovery.
+using SmartHome::updateAndCheckU32;// schreibt Extended-State und erkennt relevante Aenderungen.
 
+// Compile-Time-Hook-Schalter fuer NetSenRuntime.h. Sie muessen vor dem Include
+// stehen, weil der Basistyp damit entscheidet, welche Funktionen er aufruft.
 #define NET_SEN_DEVICE_HAS_CUSTOM_SENSOR_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EXTENDED_STATE_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_HOOKS 1
 #define NET_SEN_DEVICE_HAS_CUSTOM_EVENT_SEND_RESULT_HOOK 1
+
+// Forward-Deklarationen fuer die Hooks. NetSenRuntime.h wird direkt danach
+// eingebunden und kann die Funktionen dadurch schon referenzieren, obwohl ihre
+// Implementierung weiter unten in dieser Datei steht.
 void netSenDeviceSensorInit();
 bool netSenDeviceSensorPoll(int16_t*, uint16_t*, uint16_t*, uint8_t*, bool*);
 void netSenDeviceExtendedStateInit();
@@ -71,6 +85,8 @@ bool netSenDeviceExtendedStatePoll(uint32_t*, uint32_t*, uint16_t*, uint16_t*, u
 bool netSenDevicePollEvent(uint8_t*, uint8_t*, uint8_t*, uint16_t*);
 void netSenDeviceEventSendResult(bool, uint8_t, uint8_t, uint8_t, uint16_t);
 
+// Der Runtime-Include liefert setup()/loop(), ESP-NOW, MQTT-Bridge-Vertrag und
+// ruft die oben aktivierten Device-Hooks zyklisch auf.
 #include "../../basetypes/net_sen/NetSenRuntime.h"
 
 static_assert(NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN >= 0,

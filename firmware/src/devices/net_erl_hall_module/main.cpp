@@ -40,17 +40,31 @@
 ===============================================================================
 */
 
+// Arduino.h: GPIO, Zeitfunktionen, delay/delayMicroseconds und HIGH/LOW.
 #include <Arduino.h>
+// Wire.h: I2C-Busobjekt fuer BME280 und VEML7700. Die Busparameter werden
+// spaeter in netErlDeviceInit() gesetzt, weil die Pins aus PinConfig.h kommen.
 #include <Wire.h>
+// Adafruit-Klassen kapseln die Registerzugriffe der Sensoren. Der Device-Code
+// arbeitet dadurch mit readTemperature(), readHumidity() und readLux(), statt
+// selbst I2C-Register zu parsen.
 #include <Adafruit_BME280.h>
 #include <Adafruit_VEML7700.h>
+// math.h liefert isnan() und lroundf() fuer Plausibilitaet und Rundung.
 #include <math.h>
 
+// DeviceConfig.h beschreibt das logische Geraet, PinConfig.h die konkrete
+// Verdrahtung. Beide Dateien werden vor NetErlRuntime.h geladen, damit alle
+// Makros beim Runtime-Include bereits bekannt sind.
 #include "DeviceConfig.h"
 #include "PinConfig.h"
 
 // Baukasten-Defines fuer den NET-ERL-Basistyp. Diese Werte muessen vor
 // NetErlRuntime.h gesetzt sein, weil der Basistyp sie beim Einbinden auswertet.
+// Sie bilden den "Vertrag" zwischen Device-Adapter und Basistyp:
+// - STORAGE_NS/PERSISTED_* steuern NVS-Namespace und gespeichertes Layout.
+// - SENSOR_MASK/INPUT_MASK gehen in die HELLO-Meta und damit bis zum Master/MQTT.
+// - PAGE-/SECTION-Texte werden im Setup-Webformular des Basistyps angezeigt.
 #define NET_ERL_STORAGE_NS              "net_erl_hl"
 #define NET_ERL_SENSOR_MASK             "THLMXXXXXX"
 #define NET_ERL_INPUT_MASK              "XXXXX"
@@ -66,6 +80,8 @@
 #define NET_ERL_WDT_TIMEOUT_S           8UL // Watchdog-Zeit in Sekunden.
 
 // Aktiviert die Device-Hooks in dieser Datei.
+// Ohne diesen Schalter wuerde NetErlRuntime.h seine Default-Hooks nutzen und
+// BME280/VEML7700/PIR dieses Adapters nie abfragen.
 #define NET_ERL_DEVICE_HAS_CUSTOM_HOOKS 1
 
 // =============================================================================
@@ -77,6 +93,9 @@
 // DEVICE-SPEZIFISCHE OBJEKTE
 // =============================================================================
 
+// Globale Sensorobjekte bleiben bewusst ausserhalb des anonymen Namespace:
+// Die Adafruit-Bibliotheken erwarten langlebige Objekte; lokale Stack-Objekte
+// waeren nach initBme280()/initVeml7700() wieder zerstoert.
 Adafruit_BME280 bme280;
 Adafruit_VEML7700 veml7700 = Adafruit_VEML7700();
 

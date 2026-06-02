@@ -28,16 +28,20 @@
 
 #pragma once
 
+// Gemeinsamer I2C-Bus fuer BME280 und VEML7700.
 #define NET_SEN_PIN_SENSOR_SDA 0
 #define NET_SEN_PIN_SENSOR_SCL 1
 
-// Digitaler Regen-Signalpin (active-LOW, Pullup aktiv)
+// Digitaler Regen-Signalpin. active-LOW bedeutet: LOW am GPIO wird als "nass"
+// interpretiert. Pullup haelt den Eingang ohne Regen/Schaltkontakt auf HIGH.
 #define NET_SEN_ENV_BME280_VEML_RAIN_SIGNAL_PIN 3
 #define NET_SEN_ENV_BME280_VEML_RAIN_ACTIVE_LOW 1
 #define NET_SEN_ENV_BME280_VEML_RAIN_USE_PULLUP 1
 
+// -1 = keine Status-LED bestueckt.
 #define NET_SEN_PIN_STATUS_LED -1
 
+// Setup-Hold-Button und optionale Setup-LED werden vom NET-SEN-Basistyp genutzt.
 #define SETUP_BUTTON_PIN 2
 #define SETUP_BUTTON_ACTIVE_LOW 1
 #define SETUP_BUTTON_HOLD_MS 5000UL // 5000 Millisekunden = 5 Sekunden.

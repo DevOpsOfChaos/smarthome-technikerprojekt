@@ -31,17 +31,26 @@
 //   lib/sh_protocol (DeviceTypes.h, Protocol.h)
 // =============================================================================
 
+// Arduino.h: Serial, GPIO, millis(), delay() und Arduino-Grundtypen.
 #include <Arduino.h>
+// ShNodeProvisioning.h: Projektinterne Provisioning-Hilfe fuer Setup-AP,
+// Master-MAC, Sendeintervalle und NVS-gespeicherte Basiskonfiguration.
 #include <ShNodeProvisioning.h>
+// WiFi.h/esp_wifi.h: WLAN-STA-Modus und fester Funkkanal fuer ESP-NOW.
 #include <WiFi.h>
+// esp_now.h: Funktransport fuer HELLO, HEARTBEAT, STATE, EVENT, CMD, CFG und ACK.
 #include <esp_now.h>
 #include <esp_wifi.h>
+// Watchdog schuetzt gegen Haenger in Funk-, Setup- oder Bewegungslogik.
 #include <esp_task_wdt.h>
+// C-Standardbibliothek fuer formatierte Logs, Parser und Pufferoperationen.
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+// DeviceConfig.h liefert die per Device ueberschreibbaren NET_ZRL_*-Makros.
+// NetZrlProvisioning.h erzeugt die Config fuer das gemeinsame Provisioning-Framework.
 #include "DeviceConfig.h"
 #include "NetZrlProvisioning.h"
 #if __has_include(<esp_arduino_version.h>)
@@ -52,6 +61,7 @@
   #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
+// Projektweite Defaults, Version und das gemeinsame SmartHome-Protokoll.
 #include "../../../include/HardwarePinStandard.h"
 #include "../../../include/ProjectVersion.h"
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
@@ -72,6 +82,9 @@ constexpr char DATEI_VERSION[] = "0.4.0";
 // ESP-NOW Broadcast-Adresse (MAC FF:FF:FF:FF:FF:FF)
 const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+// Die NET_ZRL_*-Makros sind Build-/Device-Overrides. DeviceConfig.h kann sie
+// setzen; falls nicht, greifen diese Defaults. Danach werden sie in constexpr
+// ueberfuehrt, damit der restliche Code typisierte Konstanten nutzt.
 #ifndef NET_ZRL_DEVICE_ID
 #define NET_ZRL_DEVICE_ID "NET-ZRL-001"
 #endif
@@ -178,6 +191,8 @@ constexpr int PIN_LED_UP = NET_ZRL_LED_UP_PIN;
 constexpr int PIN_LED_DOWN = NET_ZRL_LED_DOWN_PIN;
 constexpr bool LED_ACTIVE_HIGH = NET_ZRL_LED_ACTIVE_HIGH != 0;
 constexpr bool BUTTON_ACTIVE_LOW = NET_ZRL_BUTTON_ACTIVE_LOW != 0;
+// Compile-Time-Pinpruefungen verhindern gefaehrliche Doppelbelegungen. Gerade
+// beim Rollladen darf ein Relais-Pin nie gleichzeitig Button- oder LED-Pin sein.
 static_assert(PIN_RELAY_A != PIN_RELAY_B, "Relais-Up und Relais-Down duerfen nicht denselben GPIO nutzen.");
 static_assert(PIN_BUTTON_UP != PIN_BUTTON_DOWN, "Button-Up und Button-Down duerfen nicht denselben GPIO nutzen.");
 static_assert(PIN_BUTTON_UP != PIN_BUTTON_STOP, "Button-Up und Button-Stop duerfen nicht denselben GPIO nutzen.");
@@ -511,26 +526,38 @@ bool istBroadcastMac(const uint8_t* mac) {
     return mac != nullptr && memcmp(mac, BROADCAST_MAC, sizeof(BROADCAST_MAC)) == 0;
 }
 
+// Aufgabe: Begrenzt Positionswerte auf den fachlich erlaubten Bereich 0..100.
+// Eingabewert: position kann aus MQTT/CMD, Schaetzung oder Setup kommen.
+// Ausgabewert: sichere Prozentposition fuer interne Berechnungen.
 int16_t begrenzePosition(int32_t position) {
     if (position < 0) return 0;
     if (position > 100) return 100;
     return (int16_t)position;
 }
 
+// Aufgabe: Prueft, ob eine Position als echte Cover-Position gilt.
+// Eingabewert: position ist int32_t, weil Parser/Schaetzung groessere Werte liefern koennen.
+// Ausgabewert: true fuer 0..100; false fuer Sentinel oder ungueltige Werte.
 bool istCoverPositionBekannt(int32_t position) {
     return position >= 0 && position <= 100;
 }
 
+// Aufgabe: Setzt die aktuelle Position auf "unbekannt".
+// Wird genutzt, wenn Kalibrierung fehlt oder geloescht wurde.
 void setzeCoverPositionUnbekannt() {
     runtime.coverPosition = COVER_POSITION_UNBEKANNT;
 }
 
+// Aufgabe: Wandelt die interne Position in den uint8_t-Protokollwert.
+// Ausgabewert: 0..100 bei bekannter Position, 255 als "unbekannt".
 uint8_t coverPositionFuerPayload() {
     return istCoverPositionBekannt(runtime.coverPosition)
                ? (uint8_t)begrenzePosition(runtime.coverPosition)
                : 255U;
 }
 
+// Aufgabe: Mappt die interne Bewegungsrichtung auf den SH_COVER_STATE_*-Code.
+// Ausgabewert: Code aus Protocol.h fuer STATE-Reports.
 uint8_t coverStateCodeAusRuntime() {
     if (runtime.coverState != CoverState::Moving) return SH_COVER_STATE_STOPPED;
     if (runtime.coverDirection == CoverDirection::Up) return SH_COVER_STATE_MOVING_UP;
@@ -538,29 +565,40 @@ uint8_t coverStateCodeAusRuntime() {
     return SH_COVER_STATE_STOPPED;
 }
 
+// Aufgabe: Entscheidet, ob ESP-NOW aktuell laufen darf.
+// Setup-AP und ESP-NOW teilen sich WLAN-Ressourcen; im Setup-Modus bleibt Funk aus.
 bool darfFunkAktivSein() {
     return !runtime.setupMode;
 }
 
+// Aufgabe: Liefert das STATE-Sendeintervall in Millisekunden.
+// sanitizeStatusSendInterval() begrenzt fehlerhafte Setup-/CFG-Werte vorher.
 unsigned long stateIntervalMs() {
     return (unsigned long)sanitizeStatusSendInterval(runtime.statusSendIntervalS) * 1000UL;
 }
 
+// Aufgabe: Markiert, dass beim naechsten Kommunikations-Tick ein STATE gesendet werden soll.
 void setzeStateReportOffen() {
     runtime.stateReportOffen = true;
 }
 
+// Aufgabe: Baut die Sensor-Maske fuer HELLO.
+// NET-ZRL hat keine Umweltsensoren, daher bleiben alle 10 Sensorpositionen X.
 void baueSensorMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
     SmartHome::safeCopyMask("XXXXXXXXXX", target, targetSize, 'X');
 }
 
+// Aufgabe: Baut die Input-Maske fuer HELLO.
+// BTN3X bedeutet: drei lokale Taster sind vorhanden, der letzte Slot ist frei.
 void baueInputMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
     SmartHome::safeCopyMask("BTN3X", target, targetSize, 'X');
 }
 
-// holeHelloZielMac – Bestimmt Ziel-MAC fuer HELLO (Master oder Broadcast)
+// Aufgabe: Bestimmt die Ziel-MAC fuer HELLO.
+// Wenn ein Master provisioniert ist, wird direkt an ihn gesendet; sonst per
+// Broadcast, damit ein neuer Master die Node finden kann.
 const uint8_t* holeHelloZielMac() {
     return runtime.masterMacValid ? runtime.masterMac : BROADCAST_MAC;
 }
@@ -569,7 +607,8 @@ const uint8_t* holeHelloZielMac() {
 // KOMMUNIKATION – ESP-NOW Senden: Peer, Paket, ACK, Sender-Validierung
 // =============================================================================
 
-// stellePeerSicher – Registriert eine MAC als ESP-NOW-Peer
+// Aufgabe: Registriert eine MAC als ESP-NOW-Peer, falls sie noch fehlt.
+// Broadcast wird als Sonderfall erlaubt, normale Ziele muessen gueltige Unicast-MACs sein.
 bool stellePeerSicher(const uint8_t* mac) {
     if (mac == nullptr) return false;
     if (!istBroadcastMac(mac) && !SmartHome::isValidMac(mac)) return false;
@@ -597,6 +636,10 @@ bool sendePaketMitOptionen(
     uint8_t flags,
     uint8_t* verwendeteSeq)
 {
+    // Diese Funktion baut den SmartHome-Header, kopiert den Payload dahinter,
+    // finalisiert die CRC und reicht das Paket an esp_now_send() weiter.
+    // verwendeteSeq ist ein Ausgabeparameter fuer Aufrufer, die spaeter ein ACK
+    // derselben Sequenz wiedererkennen muessen.
     if (!runtime.funkBereit || zielMac == nullptr || payloadLen > SH_MAX_PAYLOAD_BYTES) return false;
     if (!stellePeerSicher(zielMac)) return false;
 
@@ -668,6 +711,8 @@ bool sendePaketMitRetry(const uint8_t* zielMac, uint8_t msgType, const void* pay
 }
 
 bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_t status) {
+    // ACKs bestaetigen die Sequenz des empfangenen Pakets, nicht die lokale
+    // naechsteSeq. Deshalb wird ackSeq als Payload-Feld uebertragen.
     SmartHome::AckPayload payload = {};
     payload.ack_seq = ackSeq;
     payload.ack_msg_type = ackMsgType;
@@ -676,19 +721,23 @@ bool sendeAck(const uint8_t* zielMac, uint8_t ackSeq, uint8_t ackMsgType, uint8_
 }
 
 bool senderIstBekannterMaster(const uint8_t* senderMac) {
+    // Harte Sicherheitsgrenze: Kommandos werden nur von der provisionierten
+    // Master-MAC akzeptiert. Broadcast oder unbekannte MACs duerfen nie Relais bewegen.
     return runtime.masterMacValid &&
            senderMac != nullptr &&
            memcmp(senderMac, runtime.masterMac, sizeof(runtime.masterMac)) == 0;
 }
 
 String htmlEscapeLocal(const String& text) {
+    // Web-Provisioning schreibt Werte in HTML. Escaping verhindert, dass eine
+    // gespeicherte Geraete-ID oder Eingabe Markup zerlegt.
     String escaped;
     escaped.reserve(text.length() + 16U);
 
     for (size_t i = 0U; i < text.length(); ++i) {
         const char current = text[i];
         switch (current) {
-            case '&': escaped += F("&amp;"); break;
+            case '&': escaped += F("&amp;"); break;  //F() Makro speichert String im Flash statt RAM, spart also RAM
             case '<': escaped += F("&lt;"); break;
             case '>': escaped += F("&gt;"); break;
             case '"': escaped += F("&quot;"); break;
@@ -721,6 +770,9 @@ bool entprelleButton(
     unsigned long& changedAtMs,
     bool previousStableActive,  // Vorheriger stabiler Zustand (nicht Referenz)
     unsigned long jetztMs) {
+    // changedAtMs merkt den Zeitpunkt der letzten Rohwert-Aenderung. Erst wenn
+    // der Rohwert BUTTON_DEBOUNCE_MS stabil bleibt, wird der stabile Zustand
+    // uebernommen.
     if (rawActive != lastRawActive) {
         lastRawActive = rawActive;
         changedAtMs = jetztMs;
@@ -732,6 +784,8 @@ bool entprelleButton(
 }
 
 void schreibePin(int pin, bool active, bool activeHigh) {
+    // activeHigh bildet die elektrische Relais-/LED-Polung auf die fachliche
+    // Bedeutung "aktiv" ab. -1-Pins werden ignoriert.
     if (pin >= 0) {
         digitalWrite(pin, active == activeHigh ? HIGH : LOW);
     }
@@ -851,6 +905,8 @@ bool speicherePersistenzMitRollback(
     const NetZrlSetupSnapshot& deviceSnapshot);
 
 void holeNetZrlSetupSnapshot(NetZrlSetupSnapshot& snapshot) {
+    // Snapshot fuer Rollback: Vor einer Web-/Serial-Aenderung wird der aktuelle
+    // Zustand gesichert, damit ein fehlgeschlagener NVS-Write nicht halb gilt.
     snapshot.travelTimeUpMs = runtime.travelTimeUpMs;
     snapshot.travelTimeDownMs = runtime.travelTimeDownMs;
     snapshot.defaultEstimatedTravelTimeMs = runtime.defaultEstimatedTravelTimeMs;
@@ -858,6 +914,8 @@ void holeNetZrlSetupSnapshot(NetZrlSetupSnapshot& snapshot) {
 }
 
 void wendeNetZrlSetupSnapshotAn(const NetZrlSetupSnapshot& snapshot) {
+    // Rollback/Restore der device-spezifischen Setup-Werte. Danach muss der
+    // Kalibrierstatus neu berechnet werden, weil Fahrzeiten direkt daran haengen.
     runtime.travelTimeUpMs = snapshot.travelTimeUpMs;
     runtime.travelTimeDownMs = snapshot.travelTimeDownMs;
     runtime.defaultEstimatedTravelTimeMs = snapshot.defaultEstimatedTravelTimeMs;
@@ -866,6 +924,8 @@ void wendeNetZrlSetupSnapshotAn(const NetZrlSetupSnapshot& snapshot) {
 }
 
 NetZrlPersistedSetupData baueNetZrlPersistenzdatenAusRuntime() {
+    // Nur validierte Werte werden persistiert. Ungueltige Fahrzeiten werden als
+    // 0 gespeichert, damit ein Neustart keine Scheinkalibrierung erzeugt.
     NetZrlPersistedSetupData data = {};
     data.magic = NET_ZRL_SETUP_MAGIC;
     data.version = NET_ZRL_SETUP_VERSION;
@@ -887,10 +947,13 @@ bool netZrlPersistenzdatenSindGleich(
 }
 
 bool netZrlPersistenzdatenGueltig(const NetZrlPersistedSetupData& data) {
+    // Magic und Version schuetzen gegen alte oder fremde NVS-Blobs.
     return data.magic == NET_ZRL_SETUP_MAGIC && data.version == NET_ZRL_SETUP_VERSION;
 }
 
 void wendeNetZrlPersistenzdatenAn(const NetZrlPersistedSetupData& data) {
+    // Laden aus NVS ist konservativ: jede Fahrzeit wird noch einmal validiert,
+    // bevor sie den Runtime-Zustand kalibriert macht.
     runtime.travelTimeUpMs = isTravelTimeValid(data.travelTimeUpMs) ? data.travelTimeUpMs : 0UL;
     runtime.travelTimeDownMs = isTravelTimeValid(data.travelTimeDownMs) ? data.travelTimeDownMs : 0UL;
     runtime.defaultEstimatedTravelTimeMs =
@@ -2394,7 +2457,11 @@ void verarbeiteHelloAck(const uint8_t* senderMac, const SmartHome::HelloAckPaylo
     logf("INFO", "HELLO_ACK empfangen");
 }
 
-// Extrahiert: Verarbeitet SET_POSITION und sendet ggf. Cover-Event
+// Aufgabe: Verarbeitet SET_POSITION und sendet bei gestarteter Fahrt ein Cover-Event.
+// Eingabewert: zielPosition ist 0 bis 100 Prozent.
+// Ausgabewert: SH_ACK_OK bei angenommener Fahrt, sonst SH_ACK_REJECTED.
+// Hinweis: Ohne Kalibrierung sind nur Endlagen belastbar; Zwischenpositionen
+// brauchen gemessene Fahrzeiten.
 static uint8_t verarbeitePositionCmd(int16_t zielPosition) {
     if (!runtime.isCalibrated) {
         // Ohne Kalibrierung: Endlagenfahrt mit geschaetzter Zeit
@@ -2420,7 +2487,10 @@ static uint8_t verarbeitePositionCmd(int16_t zielPosition) {
     return SH_ACK_OK;
 }
 
-// Extrahiert: Verarbeitet den Kommando-Typ und Rueckgabe des ACK-Status
+// Aufgabe: Verarbeitet den CMD-Payload und gibt den spaeteren ACK-Status zurueck.
+// Eingabewert: payload kommt aus Protocol.h und enthaelt cmd_type/param1/param2.
+// Ausgabewert: SH_ACK_OK, SH_ACK_REJECTED oder SH_ACK_ERROR.
+// Aufrufer: verarbeiteCmd() nach Sender- und Duplikatpruefung.
 static uint8_t verarbeiteCmdTyp(const SmartHome::CmdPayload& payload) {
     // --- STATE ANFORDERUNG ---
     if (payload.cmd_type == SH_CMD_STATE_REQUEST) {
@@ -2511,6 +2581,15 @@ void verarbeiteCmd(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
     }
 }
 
+// Aufgabe: Verarbeitet ein eingehendes CFG-Kommando vom Master.
+// Eingabewerte:
+// - senderMac ist die ESP-NOW-Absenderadresse.
+// - header enthaelt Sequenznummer und ACK-Request-Flag.
+// - payload enthaelt param_id und value aus dem Master.
+// Ausgabewert: keiner; ACK wird bei SH_FLAG_ACK_REQUEST direkt gesendet.
+//
+// Wichtig: CFG ist getrennt von CMD, damit der Master Konfig-ACKs und
+// Bedien-ACKs nicht verwechselt. Die Sequenz wird separat dedupliziert.
 void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header, const SmartHome::CfgPayload& payload) {
     if (!senderIstBekannterMaster(senderMac)) {
         logf("WARN", "CFG ignoriert: Sender ist nicht der bekannte Master");
@@ -2542,7 +2621,16 @@ void verarbeiteCfg(const uint8_t* senderMac, const SmartHome::MsgHeader& header,
 // ESP-NOW – Paket-Empfang, Callbacks, Funk-Initialisierung
 // =============================================================================
 
-// verarbeiteEspNowPaket – Validiert CRC und leitet an Handler weiter (switch/msg_type)
+// Aufgabe: Validiert ein rohes ESP-NOW-Paket und leitet es anhand msg_type weiter.
+// Eingabewerte:
+// - senderMac ist die Absender-MAC aus dem ESP-NOW-Callback.
+// - data zeigt auf Header + Payload im gemeinsamen SmartHome-Protokollformat.
+// - len ist die gesamte Paketlaenge in Bytes.
+// Ausgabewert: keiner.
+//
+// Die reinterpret_casts sind nur nach CRC- und Laengenpruefung erlaubt. Der
+// Protokollheader legt payload_len fest; jeder case prueft diese Laenge gegen
+// den erwarteten Payload-Typ, bevor der Rohspeicher als Struktur gelesen wird.
 void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int len) {
     if (!senderMac || !data || len < (int)sizeof(SmartHome::MsgHeader)) return;
     if (!SmartHome::hasValidPacketCrc(data, (size_t)len)) {
@@ -2578,22 +2666,36 @@ void verarbeiteEspNowPaket(const uint8_t* senderMac, const uint8_t* data, int le
 }
 
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
+// Aufgabe: ESP-NOW-Receive-Callback fuer Arduino-ESP32 ab Version 3.
+// Die neue Signatur liefert esp_now_recv_info_t; die Nutzlogik bleibt in
+// verarbeiteEspNowPaket(), damit nicht zwei Codepfade gepflegt werden muessen.
 void onEspNowReceive(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
     if (!info) return;
     verarbeiteEspNowPaket(info->src_addr, data, len);
 }
 #else
+// Aufgabe: ESP-NOW-Receive-Callback fuer Arduino-ESP32 Version 2.
+// Die alte Signatur liefert die Sender-MAC direkt.
 void onEspNowReceive(const uint8_t* senderMac, const uint8_t* data, int len) {
     verarbeiteEspNowPaket(senderMac, data, len);
 }
 #endif
 
+// Aufgabe: ESP-NOW-Send-Callback fuer Arduino-ESP32 ab Version 3.
+// Eingabewert: status ist nur die Transportbestaetigung von esp_now_send(),
+// nicht das fachliche ACK des Masters.
 void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
         logf("WARN", "ESP-NOW Versand fehlgeschlagen");
     }
 }
 
+// Aufgabe: Initialisiert WLAN-STA-Modus, ESP-NOW, Callbacks und Peers.
+// Eingabewerte: keine.
+// Ausgabewert: keiner; runtime.funkBereit wird bei Erfolg true.
+//
+// Setup-Modus blockiert ESP-NOW bewusst, weil der Setup-AP ebenfalls WLAN nutzt
+// und die Funkrolle sonst unklar waere.
 void initialisiereFunk() {
     if (runtime.funkBereit || runtime.setupMode) return;
     static uint8_t espNowInitFails = 0;

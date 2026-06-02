@@ -19,6 +19,8 @@
 
 #pragma once
 
+// Arduino.h wird fuer Arduino-Typen genutzt, ShNodeProvisioning.h definiert die
+// NodeProvisioningConfig-Struktur und das Web-/NVS-Provisioning-Framework.
 #include <Arduino.h>
 #include <ShNodeProvisioning.h>
 
@@ -29,13 +31,16 @@ namespace NetZrlProvisioning {
 // KONSTANTEN – Setup-AP und Storage
 // =============================================================================
 
-// Passwort fuer den Setup-AccessPoint
+// Passwort fuer den Setup-AccessPoint. Es ist kein Produktgeheimnis, sondern
+// ein Bring-up-/Service-Passwort fuer lokale Inbetriebnahme.
 constexpr const char* SETUP_AP_PASSWORD = "net-zrl-setup";
 
-// Storage-Namespace fuer Preferences (NVS-Partition)
+// Storage-Namespace fuer Preferences (NVS-Partition). Muss zu main.cpp passen,
+// sonst werden Master-MAC und Intervalle aus einem anderen Namespace gelesen.
 constexpr const char* STORAGE_NAMESPACE = "net_zrl";
 
-// Storage-Key fuer den NodeBasis-Datensatz (Version v1)
+// Storage-Key fuer den NodeBasis-Datensatz (Version v1). Version im Key macht
+// inkompatible Layoutwechsel explizit.
 constexpr const char* STORAGE_KEY_NODE_BASIS = "node_basis_v1";
 
 // WLAN-Kanal des Setup-AccessPoints
@@ -48,13 +53,16 @@ constexpr unsigned long RESTART_DELAY_MS = 1500UL;
 // FACTORY-FUNKTION – NodeProvisioningConfig erzeugen
 // =============================================================================
 
-// makeConfig – Erstellt eine vollstaendige NodeProvisioning-Konfiguration
-//   Parameter: deviceId(const char*) – Geraete-ID (z.B. "NET-ZRL-001")
-//              defaultStatusSendIntervalS(uint32_t) – Default STATE-Intervall in s
-//              defaultSensorSendIntervalS(uint32_t) – Default Sensor-Intervall in s
-//              minSendIntervalS(uint32_t) – Minimal zulaessiges Intervall
-//              maxSendIntervalS(uint32_t) – Maximal zulaessiges Intervall
-//   Rückgabe: NodeProvisioningConfig (Struktur mit allen Setup-Parametern)
+// Aufgabe: Erstellt eine vollstaendige NodeProvisioning-Konfiguration.
+// Eingabewerte:
+// - deviceId: Geraete-ID, wird fuer Setup-SSID/Anzeige verwendet.
+// - defaultStatusSendIntervalS: Default-STATE-Intervall in Sekunden.
+// - defaultSensorSendIntervalS: Default-Sensor-Intervall in Sekunden.
+// - minSendIntervalS/maxSendIntervalS: erlaubter Bereich fuer Setup-Werte.
+// Ausgabewert: NodeProvisioningConfig fuer ShNodeProvisioning.
+//
+// Diese Factory haelt Storage-Keys und AP-Parameter an einer Stelle. main.cpp
+// muss dadurch nicht wissen, wie die generische Provisioning-Struktur aufgebaut ist.
 inline ShNodeProvisioning::NodeProvisioningConfig makeConfig(
     const char* deviceId,
     uint32_t defaultStatusSendIntervalS,

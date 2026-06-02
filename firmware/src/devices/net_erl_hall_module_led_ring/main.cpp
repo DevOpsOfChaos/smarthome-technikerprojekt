@@ -54,22 +54,32 @@
 ===============================================================================
 */
 
+// Arduino.h stellt GPIO, Zeitfunktionen, delay(), Serial-nahe Typen und HIGH/LOW bereit.
 #include <Arduino.h>
+// Wire.h ist der gemeinsame I2C-Bus fuer BME680, VEML7700 und ENS160.
 #include <Wire.h>
+// Externe Sensor-/LED-Klassen: Sie kapseln Registerzugriffe und Timingdetails,
+// sodass dieser Device-Adapter nur Messwerte und Anzeigezustand verarbeitet.
 #include <Adafruit_BME680.h>
 #include <Adafruit_VEML7700.h>
 #include <Adafruit_NeoPixel.h>
 #include <ScioSense_ENS160.h>
 
 #ifndef ENS160_REG_TEMP_IN
+// Einige ENS160-Bibliotheksversionen exportieren das Temperatur-Register nicht.
+// Der Fallback haelt die Firmware gegen diese Versionsabweichung kompilierbar.
 #define ENS160_REG_TEMP_IN 0x13
 #endif
 
+// DeviceConfig.h liefert Identitaet, Capabilities, Sensoradressen und Timer.
+// PinConfig.h liefert die konkrete GPIO-Belegung fuer dieses LED-Ring-Board.
 #include "DeviceConfig.h"
 #include "PinConfig.h"
 
 // Baukasten-Defines fuer den NET-ERL-Basistyp. Diese Werte muessen vor
 // NetErlRuntime.h gesetzt sein, weil der Basistyp sie beim Einbinden auswertet.
+// Diese Makros konfigurieren den generischen Basistyp fuer genau diese Variante:
+// HELLO-Meta, NVS-Speicher, Setup-Webtexte, Button-Support und Indicator-Hook.
 #define NET_ERL_STORAGE_NS              "net_erl_hlr"
 #define NET_ERL_SENSOR_MASK             "THLPGAMXXX"
 #define NET_ERL_INPUT_MASK              "BXXXX"
@@ -82,6 +92,8 @@
 #define NET_ERL_HAS_INDICATOR_UPDATE
 
 // Aktiviert die Device-Hooks in dieser Datei.
+// Der Basistyp ruft dadurch netErlDeviceInit(), netErlDevicePollSensors(),
+// netErlDeviceFillStatePayload() und weitere Hook-Funktionen aus diesem Adapter.
 #define NET_ERL_DEVICE_HAS_CUSTOM_HOOKS 1
 
 // =============================================================================
@@ -93,12 +105,15 @@
 // DEVICE-SPEZIFISCHE OBJEKTE
 // =============================================================================
 
+// Sensor- und LED-Objekte sind langlebige globale Objekte. Die Bibliotheken
+// halten internen Zustand (Adresse, Messmodus, LED-Puffer), der zwischen
+// Initialisierung und jedem Poll erhalten bleiben muss.
 Adafruit_BME680 bme680;
 Adafruit_VEML7700 veml = Adafruit_VEML7700();                          // Adafruit_VEML7700-Instanz (Kurzform "veml" wegen Lesbarkeit, entspricht "veml7700" in anderen Geraeten).
-ScioSense_ENS160 ens160Addr52(NET_ERL_ENS160_PRIMARY_ADDRESS);
-ScioSense_ENS160 ens160Addr53(NET_ERL_ENS160_FALLBACK_ADDRESS);
-ScioSense_ENS160* ens160 = nullptr;
-Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800);
+ScioSense_ENS160 ens160Addr52(NET_ERL_ENS160_PRIMARY_ADDRESS);          // ENS160 an primaerer Adresse 0x52.
+ScioSense_ENS160 ens160Addr53(NET_ERL_ENS160_FALLBACK_ADDRESS);         // ENS160 an Fallback-Adresse 0x53.
+ScioSense_ENS160* ens160 = nullptr;                                     // Zeigt nach erfolgreicher Init auf die tatsaechlich gefundene ENS160-Instanz.
+Adafruit_NeoPixel ledRing(LED_RING_COUNT, PIN_LED_RING, NEO_GRB + NEO_KHZ800); // LED-Puffer + Datenpin fuer den NeoPixel-Ring.
 
 // =============================================================================
 // DIAGNOSTIC-MODUS (compile-time sensor isolation for bring-up/debug)

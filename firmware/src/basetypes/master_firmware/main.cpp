@@ -47,13 +47,20 @@
 ===============================================================================
 */
 
+// Arduino.h: Serial, millis(), delay() und Arduino-Basistypen.
 #include <Arduino.h>
+// WiFi.h/esp_wifi.h: WLAN-Verbindung und fester Kanal fuer ESP-NOW-Kompatibilitaet.
 #include <WiFi.h>
+// Preferences.h: NVS-Speicher fuer wiederherstellbare Node-Meta.
 #include <Preferences.h>
+// PubSubClient.h: MQTT-Client fuer Status-, State-, Event- und ACK-Topics.
 #include <PubSubClient.h>
+// esp_now.h: Low-Level-Funktransport zwischen Master und Nodes.
 #include <esp_now.h>
 #include <esp_wifi.h>
+// esp_task_wdt.h: Watchdog, damit ein haengender Master im Betrieb neu startet.
 #include <esp_task_wdt.h>
+// C-Standardbibliothek: formatierte Logs, String-/JSON-Parsing, Offsets und Limits.
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
@@ -69,17 +76,23 @@
   #define ESP_ARDUINO_VERSION_MAJOR 2
 #endif
 
+// Eigene Firmware-Konfiguration. AppConfig.h erzeugt aus Makros stabile
+// constexpr-Werte, PinConfig.h enthaelt optionale Master-Hardware.
 #include "AppConfig.h"
 #include "PinConfig.h"
+// Projektweite Version/Debug-Schalter und das gemeinsame SmartHome-Protokoll.
 #include "../../../include/ProjectVersion.h"
 #include "../../../include/DebugConfig.h"
 #include "../../../lib/sh_protocol/src/Protocol.h"
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
+// Storage-Grenzen werden auch auf Master-Seite validiert, bevor CFG gesendet wird.
 #include "../../../lib/sh_storage/src/ShStorage.h"
 
 #if __has_include("../../../include/Secrets.h")
   #include "../../../include/Secrets.h"
 #else
+  // Fallbackwerte machen den Sketch kompilierbar, sind aber absichtlich
+  // unbrauchbar. Echte Zugangsdaten gehoeren nicht ins oeffentliche Repo.
   #warning "Keine Secrets.h gefunden. Bitte aus Secrets.example.h erstellen."
   #define WIFI_SSID         "KEIN_SSID"
   #define WIFI_PASSWORD     "KEIN_PASSWORT"
@@ -338,6 +351,14 @@ bool mqttBrokerNutzeDirekteIp = false;
 Preferences registryPrefs;
 MasterState masterStatus = {};
 NodeRuntime nodeStates[MAX_DYNAMIC_NODES] = {};
+
+// Objekt-Lebensdauer:
+// - wifiClient muss laenger leben als mqttClient, weil PubSubClient ihn als
+//   Transportreferenz nutzt.
+// - registryPrefs wird nur kurz fuer NVS-Operationen geoeffnet und danach wieder
+//   geschlossen; dadurch bleiben keine Flash-Handles dauerhaft offen.
+// - masterStatus und nodeStates sind die zentrale Runtime-Quelle fuer MQTT und
+//   ESP-NOW. Persistiert wird nur ein kleiner HELLO-Meta-Ausschnitt.
 
 // Log-Level-Konvention:
 // INFO  – Normalbetrieb, Verbindungsaufbau, State-Wechsel
@@ -1793,6 +1814,9 @@ void verarbeiteHeartbeat(const uint8_t* senderMac, const SmartHome::HeartbeatPay
 
 template <typename StatePayload>
 static void kopiereRelayComfortBasisFelder(size_t nodeIndex, const StatePayload& state) {
+    // Template statt doppeltem Code: RelayComfortState und RelayComfortConfigState
+    // haben dieselben Live-Felder am Anfang. static_asserts oben sichern die
+    // Layoutannahmen gegen spaetere Protokollaenderungen ab.
     nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
     nodeStates[nodeIndex].temp_01c = state.temp_01c;
     nodeStates[nodeIndex].hum_01pct = state.hum_01pct;
@@ -1804,6 +1828,8 @@ static void kopiereRelayComfortBasisFelder(size_t nodeIndex, const StatePayload&
 
 template <typename StatePayload>
 static void kopiereRelayComfortExtendedFelder(size_t nodeIndex, const StatePayload& state, uint32_t gasOhm) {
+    // gasOhm wird separat uebergeben, weil nicht jede Extended-Variante ein
+    // Gasfeld besitzt. Fehlende Gaswerte werden als Sentinel gesetzt.
     kopiereRelayComfortBasisFelder(nodeIndex, state);
     nodeStates[nodeIndex].pressure_pa = state.pressure_pa;
     nodeStates[nodeIndex].gas_ohm = gasOhm;
@@ -1814,6 +1840,8 @@ static void kopiereRelayComfortExtendedFelder(size_t nodeIndex, const StatePaylo
 
 template <typename StatePayload>
 static void kopiereZrlLiveFelder(size_t nodeIndex, const StatePayload& state) {
+    // NET-ZRL Config-State erweitert den normalen State, aber die Live-Felder
+    // bleiben identisch. Diese Funktion isoliert genau diesen gemeinsam genutzten Teil.
     nodeStates[nodeIndex].relay_1 = (state.relay_1 != 0U);
     nodeStates[nodeIndex].relay_2 = (state.relay_2 != 0U);
     nodeStates[nodeIndex].cover_mode = (state.cover_mode != 0U);

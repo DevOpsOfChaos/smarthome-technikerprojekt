@@ -31,14 +31,19 @@
 
 #pragma once
 
+// DeviceTypes.h liefert Capability-, Profil- und Control-Mode-Konstanten fuer
+// den HELLO-Payload des eigenstaendigen Shutter-Moduls.
 #include "../../../lib/sh_protocol/src/DeviceTypes.h"
 
-// Geraete-Identifikation.
+// Geraete-Identifikation. NET_ZRL_DEVICE_ID ist die stabile Registry-/MQTT-ID;
+// nicht kosmetisch aendern, sonst entsteht fuer den Master ein neues Geraet.
 #define NET_ZRL_DEVICE_ID           "NET-ZRL-002"
 #define NET_ZRL_DEVICE_NAME         "NET-ZRL Shutter"
 #define NET_ZRL_FW_VARIANT          "net_zrl_shutter_module"
 
 // Geraete-Faehigkeiten, Steuermodus, Profil und Meldeverhalten.
+// RELAY/RELAY2 sind intern vorhanden, werden masterseitig aber ueber COVER-
+// Kommandos gesteuert. SH_CAP_COVER ist deshalb die fachlich wichtigste Cap.
 #define NET_ZRL_DEVICE_CAPS             (SH_CAP_RELAY | SH_CAP_RELAY2 | SH_CAP_COVER | SH_CAP_MULTIBUTTON)
 #define NET_ZRL_DEVICE_CONTROL_MODE     SH_CONTROL_MODE_COVER
 #define NET_ZRL_DEVICE_CONFIG_PROFILE   SH_PROFILE_COVER_BASIC
@@ -47,24 +52,27 @@
 // Debug-Ausgaben fuer Entwicklung und Inbetriebnahme.
 #define NET_ZRL_DEBUG_ENABLED       1
 
-// Relais-Pin-Mapping.
+// Relais-Pin-Mapping. Up/Down duerfen niemals gleichzeitig aktiv sein; main.cpp
+// erzwingt Dead-Time und gegenseitiges Abschalten.
 #define NET_ZRL_RELAY_UP_PIN        10
 #define NET_ZRL_RELAY_DOWN_PIN      5
+// active-HIGH: HIGH am GPIO zieht das jeweilige Relais an.
 #define NET_ZRL_RELAY_UP_ACTIVE_HIGH    1
 #define NET_ZRL_RELAY_DOWN_ACTIVE_HIGH  1
 
-// Taster-Pins.
+// Taster-Pins fuer lokale Bedienung. active-LOW ist unten separat gesetzt.
 #define NET_ZRL_BUTTON_UP_PIN       20
 #define NET_ZRL_BUTTON_DOWN_PIN     4
 #define NET_ZRL_BUTTON_STOP_PIN     3
 
-// LED-Pins.
+// LED-Pins fuer lokale Richtungs-/Kalibrier-Rueckmeldung.
 #define NET_ZRL_LED_UP_PIN          7
 #define NET_ZRL_LED_DOWN_PIN        6
 #define NET_ZRL_LED_ACTIVE_HIGH     1
 
-// Pegel-Logik.
+// Pegel-Logik der Taster. 0 bedeutet active-HIGH; gedrueckt = HIGH.
 #define NET_ZRL_BUTTON_ACTIVE_LOW   0
 
-// Fahrzeit-Fallback, bis reale Kalibrierwerte vorliegen.
+// Fahrzeit-Fallback, bis reale Kalibrierwerte vorliegen. Damit sind nur
+// Endlagenfahrten sinnvoll; Zwischenpositionen brauchen Kalibrierung.
 #define NET_ZRL_DEFAULT_ESTIMATED_TRAVEL_TIME_MS 100000UL

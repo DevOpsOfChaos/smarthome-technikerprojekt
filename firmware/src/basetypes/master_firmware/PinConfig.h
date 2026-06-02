@@ -29,6 +29,9 @@
 
 #pragma once
 
+// HardwarePinStandard.h stellt gemeinsame Board-Pins bereit. Beim Master sind
+// die meisten Pins deaktiviert, aber die Aliase bleiben vorhanden, damit
+// Hardware-Initialisierung und optionale Erweiterungen einheitliche Namen nutzen.
 #include "../../../include/HardwarePinStandard.h"
 
 // Status-LED (optional). Zeigt Verbindungszustand an: AUS = Trennung, AN = verbunden.
@@ -41,7 +44,8 @@
 #define MASTER_PIN_BUTTON_1 -1
 #endif
 
-// Nicht genutzt auf dem Master (Default: -1 = deaktiviert):
+// Nicht genutzt auf dem Master (Default: -1 = deaktiviert). Die Defines bleiben
+// als Platzhalter, damit alle Basistypen eine aehnliche PinConfig-Struktur haben.
 #ifndef MASTER_PIN_RELAY_1
 #define MASTER_PIN_RELAY_1 -1
 #endif
@@ -50,6 +54,8 @@
 #define MASTER_PIN_RELAY_2 -1
 #endif
 
+// I2C-Defaults sind aktuell ungenutzt, dokumentieren aber die Board-Standardpins
+// fuer spaetere Master-Hardwarediagnose oder Statusmodule.
 #ifndef MASTER_PIN_SENSOR_SDA
 #define MASTER_PIN_SENSOR_SDA SmartHome::HardwarePinStandard::PIN_I2C_SDA
 #endif
@@ -66,6 +72,8 @@
 // INTERNE ALIAS-DEFINES - Mappen auf Kurznamen
 // =============================================================================
 
+// Kurzaliase fuer main.cpp. constexpr statt Makro reduziert Seiteneffekte und
+// macht Typen klar; -1 bedeutet weiterhin "nicht verwenden".
 constexpr int PIN_STATUS_LED = MASTER_PIN_STATUS_LED;       // Status-LED (optional)
 constexpr int PIN_BUTTON_1   = MASTER_PIN_BUTTON_1;         // Reset-Taster (optional)
 constexpr int PIN_RELAY_1    = MASTER_PIN_RELAY_1;          // (ungenutzt auf Master)

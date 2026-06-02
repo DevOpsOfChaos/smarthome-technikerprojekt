@@ -31,10 +31,17 @@
 
 #pragma once
 
+// Diese Datei ist die Compile-Time-Konfiguration des Masters. Die #ifndef-Blöcke
+// erlauben Build-Overrides per PlatformIO build_flags, ohne diese Datei anfassen
+// zu muessen. Unten werden die Makros in constexpr-Konstanten ueberfuehrt, damit
+// main.cpp typisierte Namen nutzt.
+
 // =============================================================================
 // PROFIL-SYSTEM - Geraete-Identitaet je nach Profil (Primary/Secondary)
 // =============================================================================
 
+// Profil-IDs fuer mehrere Master-Varianten. Wichtig: Die Profile aendern nur
+// Identitaet/Firmware-Variante, nicht den Protokollvertrag.
 #define SH_MASTER_PROFILE_PRIMARY    1U
 #define SH_MASTER_PROFILE_SECONDARY  2U
 
@@ -99,12 +106,14 @@
 // ACK / PENDING - Timeout und Retries fuer Befehle an Nodes
 // =============================================================================
 
-// Timeout bis zum ersten Retry (ms)
+// Timeout bis zum ersten Retry (ms). Dieser Wert ist bewusst kurz, weil ESP-NOW-
+// Kommandos lokal im WLAN-Kanal laufen. Zu lang wuerde MQTT-Antworten traege machen.
 #ifndef MASTER_COMMAND_ACK_TIMEOUT_MS
 #define MASTER_COMMAND_ACK_TIMEOUT_MS 800UL
 #endif
 
-// Maximale Anzahl Retries bevor "timeout" gemeldet wird
+// Maximale Anzahl Retries bevor "timeout" gemeldet wird.
+// 2 Retries bedeuten: Erstversuch + 2 Wiederholungen = 3 Funkversuche.
 #ifndef MASTER_COMMAND_MAX_RETRIES
 #define MASTER_COMMAND_MAX_RETRIES 2U
 #endif
@@ -134,12 +143,14 @@
 // MQTT - Buffer-Groesse und Loop-Intervall
 // =============================================================================
 
-// MQTT-Puffergroesse (B) fuer eingehende Nachrichten
+// MQTT-Puffergroesse (B) fuer eingehende Nachrichten. Muss gross genug fuer
+// JSON-Kommandos mit request_id und values-Objekt sein.
 #ifndef MASTER_MQTT_BUFFER_BYTES
 #define MASTER_MQTT_BUFFER_BYTES 1024U
 #endif
 
-// Loop-Ausfuehrungsintervall (ms)
+// Loop-Ausfuehrungsintervall (ms). Die eigentliche Arbeit passiert nicht in
+// delay(), sondern in pruefeWlan/MQTT/Pending/Offline innerhalb loop().
 #ifndef MASTER_LOOP_INTERVAL_MS
 #define MASTER_LOOP_INTERVAL_MS 10UL
 #endif
