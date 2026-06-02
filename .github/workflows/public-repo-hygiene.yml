@@ -14,7 +14,7 @@ jobs:
       - name: Fail on root protocol files
         shell: bash
         run: |
-          files="$(git ls-files 'PROTOKOLL_*.txt' | grep -v '^PROTOKOLL/')"
+          files="$(git ls-files 'PROTOKOLL_*.txt' | grep -v '^PROTOKOLL/' || true)"
           if [ -n "$files" ]; then
             echo "Root protocol files are not allowed."
             printf '%s\n' "$files"

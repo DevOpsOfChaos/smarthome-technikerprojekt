@@ -33,6 +33,7 @@
 #include <esp_sleep.h>
 #include <esp_wifi.h>
 #include <esp_task_wdt.h>
+#include <driver/gpio.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -323,6 +324,53 @@ void fuegeWakePinHinzu(uint64_t* highMask, uint64_t* lowMask, int pin, bool wake
     } else {
         *lowMask |= (1ULL << (uint8_t)pin);
     }
+}
+
+// loeseWakePinHold – Gibt gehaltene Wake-Pins nach einem Deep-Sleep wieder frei.
+// Der ESP32-C3 nutzt Hold, damit INPUT_PULLUP/INPUT_PULLDOWN im Deep-Sleep nicht
+// von der IDF-Wake-Vorbereitung ueberschrieben werden.
+void loeseWakePinHold(uint64_t mask) {
+#if CONFIG_IDF_TARGET_ESP32C3
+    if (mask == 0ULL) return;
+
+    for (uint8_t pin = 0U; pin < 64U; ++pin) {
+        const uint64_t bit = (1ULL << pin);
+        if ((mask & bit) == 0ULL) continue;
+        gpio_hold_dis((gpio_num_t)pin);
+    }
+#else
+    (void)mask;
+#endif
+}
+
+// halteWakePinKonfiguration – Haelt Pull-/Pad-Konfiguration fuer den Deep-Sleep.
+// Wichtig fuer Reed-Kontakte mit Pullup: HIGH-Wake darf den Pullup nicht durch
+// den automatisch gesetzten Pulldown der C3-GPIO-Wake-Vorbereitung verlieren.
+// Sonst bildet z.B. 100 kOhm extern gegen ca. 45 kOhm intern nur etwa 1,02 V.
+void halteWakePinKonfiguration(uint64_t mask) {
+#if CONFIG_IDF_TARGET_ESP32C3
+    if (mask == 0ULL) return;
+
+    bool holdAktiv = false;
+    for (uint8_t pin = 0U; pin < 64U; ++pin) {
+        const uint64_t bit = (1ULL << pin);
+        if ((mask & bit) == 0ULL) continue;
+
+        const esp_err_t holdErr = gpio_hold_en((gpio_num_t)pin);
+        if (holdErr == ESP_OK) {
+            holdAktiv = true;
+        } else {
+            logf("WARN", "GPIO %u konnte nicht fuer Deep-Sleep gehalten werden (err=%d)",
+                 pin, (int)holdErr);
+        }
+    }
+
+    if (holdAktiv) {
+        gpio_deep_sleep_hold_en();
+    }
+#else
+    (void)mask;
+#endif
 }
 
 // =============================================================================
@@ -856,6 +904,33 @@ void onEspNowSend(const wifi_tx_info_t* /*mac*/, esp_now_send_status_t status) {
     }
 }
 
+// wendeWifiStaMacOverrideAn – Optionaler Device-spezifischer Soft-MAC-Wechsel.
+// Muss vor ESP-NOW-Init passieren, damit der Master das HELLO unter der neuen
+// Absender-MAC sieht.
+void wendeWifiStaMacOverrideAn() {
+#ifdef BAT_SEN_WIFI_STA_MAC_OVERRIDE
+    const uint8_t overrideMac[6] = BAT_SEN_WIFI_STA_MAC_OVERRIDE;
+    if (!SmartHome::isValidMac(overrideMac) || (overrideMac[0] & 0x01U) != 0U) {
+        logf("WARN", "BAT_SEN_WIFI_STA_MAC_OVERRIDE ungueltig, echte STA-MAC bleibt aktiv");
+        return;
+    }
+
+    const esp_err_t err = esp_wifi_set_mac(WIFI_IF_STA, overrideMac);
+    if (err != ESP_OK) {
+        logf("WARN", "STA-MAC-Override fehlgeschlagen (err=%d)", (int)err);
+        return;
+    }
+
+    logf("INFO", "STA-MAC-Override aktiv: %02X:%02X:%02X:%02X:%02X:%02X",
+         overrideMac[0],
+         overrideMac[1],
+         overrideMac[2],
+         overrideMac[3],
+         overrideMac[4],
+         overrideMac[5]);
+#endif
+}
+
 // =============================================================================
 // INITIALISIERUNG – Funk, IO-GPIOs
 // =============================================================================
@@ -868,6 +943,7 @@ void initialisiereFunk() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     WiFi.setSleep(false);
+    wendeWifiStaMacOverrideAn();
 
     const esp_err_t kanalErr = esp_wifi_set_channel((uint8_t)WLAN_KANAL, WIFI_SECOND_CHAN_NONE);
     if (kanalErr != ESP_OK) {
@@ -1105,6 +1181,8 @@ void aktiviereWakeQuellen() {
 
     if (wakeErr != ESP_OK) {
         logf("WARN", "GPIO-Wake konnte nicht aktiviert werden (err=%d)", (int)wakeErr);
+    } else {
+        halteWakePinKonfiguration(wakeHighMask | wakeLowMask);
     }
 #endif
 }
@@ -1230,6 +1308,19 @@ void setup() {
 
     nodeStatus = {};
     setupBootUndStatus(nodeStatus);
+
+#if CONFIG_IDF_TARGET_ESP32C3
+    gpio_deep_sleep_hold_dis();
+#if BAT_SEN_ENABLE_GPIO_WAKE
+    loeseWakePinHold(device_wake_candidates());
+    if (PIN_WAKE_INPUT >= 0 && PIN_WAKE_INPUT < 64) {
+        loeseWakePinHold(1ULL << (uint8_t)PIN_WAKE_INPUT);
+    }
+#endif
+#if SETUP_BUTTON_PIN >= 0
+    loeseWakePinHold(1ULL << (uint8_t)SETUP_BUTTON_PIN);
+#endif
+#endif
 
     initialisiereIO();
     nodeStatus.kanaele = leseDeviceKanaele();
