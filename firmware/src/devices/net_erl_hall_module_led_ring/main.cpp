@@ -149,7 +149,7 @@ namespace {
     uint8_t  i2c_recovery_count = 0;
     unsigned long last_i2c_recovery_ms = 0;
     constexpr uint32_t I2C_RECOVERY_COOLDOWN_MS = 30000UL;               // 30 s zwischen I2C-Recoveries.
-    constexpr uint8_t  SENSOR_MAX_FAIL_BEFORE_RECOVERY = 3;              // Nach 3 Fehlern → I2C-Recovery.
+    constexpr uint8_t  SENSOR_MAX_FAIL_BEFORE_RECOVERY = 3;              // Nach 3 Fehlern I2C-Recovery, damit ein einzelner Ausreisser keinen Bus-Reset ausloest.
     constexpr uint32_t SENSOR_RETRY_COOLDOWN_MS = 30000UL;               // 30 s zwischen Sensor-Retries.
     constexpr uint32_t SENSOR_STAGGER_MS = 300UL;                         // 300 ms Versatz zwischen Sensoren.
 
@@ -388,16 +388,19 @@ namespace {
     // Aufgabe: Konfiguriert den VEML7700 fuer Luxmessungen.
     // Eingabewerte: keine.
     // Ausgabewert: keiner; 400 ms Integrationszeit bedeuten 0,4 Sekunden Lichtmessung.
-    void konfVeml() { veml.setGain(VEML7700_GAIN_1); veml.setIntegrationTime(VEML7700_IT_400MS); }
+    void konfVeml() {
+        veml.setGain(VEML7700_GAIN_1);              // Gain x1 verhindert schnelles Saettigen bei hellen Fluren.
+        veml.setIntegrationTime(VEML7700_IT_400MS); // 400 ms macht Luxwerte ruhiger, kostet aber Reaktionszeit.
+    }
 
     // Aufgabe: Scannt den I2C-Bus und gibt gefundene Adressen als Log aus.
     // Erwartete Adressen: 0x10 (VEML7700), 0x52 (ENS160), 0x77 (BME680).
     void scanI2cBus() {
         logMsg("INFO", "I2C scan start (SDA=%d SCL=%d)", PIN_SENSOR_SDA, PIN_SENSOR_SCL);
         uint8_t found = 0;
-        for (uint8_t addr = 1; addr < 127; ++addr) {
-            Wire.beginTransmission(addr);
-            if (Wire.endTransmission() == 0) {
+        for (uint8_t addr = 1; addr < 127; ++addr) { // 7-bit-I2C-Adressen laufen von 1 bis 126.
+            Wire.beginTransmission(addr);            // Startet nur eine Adressprobe, noch keine Sensordaten.
+            if (Wire.endTransmission() == 0) {       // Rueckgabe 0 bedeutet: Geraet hat auf diese Adresse geantwortet.
                 logMsg("INFO", "I2C device found at 0x%02X", addr);
                 found++;
             }
@@ -407,10 +410,10 @@ namespace {
 
     // Aufgabe: I2C-Bus-Recovery via SCL-Pulse (holt SDA aus stuck-LOW).
     void i2cBusRecoveryPulse() {
-        pinMode(PIN_SENSOR_SCL, OUTPUT);
-        pinMode(PIN_SENSOR_SDA, INPUT_PULLUP);
+        pinMode(PIN_SENSOR_SCL, OUTPUT);      // SCL wird kurz als normaler GPIO benutzt, um Taktpulse zu erzeugen.
+        pinMode(PIN_SENSOR_SDA, INPUT_PULLUP); // SDA bleibt Eingang, damit ein festhaengender Sensor die Leitung loslassen kann.
         for (int i = 0; i < 12; i++) {
-            digitalWrite(PIN_SENSOR_SCL, LOW);
+            digitalWrite(PIN_SENSOR_SCL, LOW);  // LOW/HIGH-Pulse simulieren I2C-Takte.
             delayMicroseconds(20);
             digitalWrite(PIN_SENSOR_SCL, HIGH);
             delayMicroseconds(20);
@@ -434,13 +437,13 @@ namespace {
         i2c_recovery_count++;
         logMsg("WARN", "I2C recovery #%u reason=%s", i2c_recovery_count, reason ? reason : "?");
 
-        Wire.end();
+        Wire.end(); // I2C-Treiber stoppen, bevor die Pins manuell als GPIO getaktet werden.
         delay(50);
         i2cBusRecoveryPulse();
         delay(10);
-        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
-        Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
-        Wire.setTimeOut(I2C_TIMEOUT_MS);
+        Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL); // I2C nach Recovery neu initialisieren.
+        Wire.setClock(NET_ERL_I2C_CLOCK_HZ);        // Langsamer Takt bleibt auch nach Recovery gesetzt.
+        Wire.setTimeOut(I2C_TIMEOUT_MS);            // Timeout muss nach Wire.begin() erneut gesetzt werden.
         delay(10);
         return true;
     }
@@ -475,9 +478,9 @@ namespace {
     bool initBme() {
         uint8_t addrs[] = {(uint8_t)NET_ERL_BME680_PRIMARY_ADDRESS, (uint8_t)NET_ERL_BME680_FALLBACK_ADDRESS};
         for (uint8_t a : addrs) {
-            if (!bme680.begin(a, &Wire)) continue;
-            bme680.setTemperatureOversampling(BME680_OS_8X); bme680.setHumidityOversampling(BME680_OS_2X);
-            bme680.setPressureOversampling(BME680_OS_4X); bme680.setIIRFilterSize(BME680_FILTER_SIZE_3);
+            if (!bme680.begin(a, &Wire)) continue; // begin() prueft, ob der BME680 auf dieser I2C-Adresse antwortet.
+            bme680.setTemperatureOversampling(BME680_OS_8X); bme680.setHumidityOversampling(BME680_OS_2X); // Oversampling glattet Messwerte, braucht aber mehr Messzeit.
+            bme680.setPressureOversampling(BME680_OS_4X); bme680.setIIRFilterSize(BME680_FILTER_SIZE_3); // IIR-Filter daempft Spruenge im Druckwert.
             bme680.setGasHeater(320U, 150U); // 320 °C Heiztemperatur, 150 ms Heizdauer (BME680-Gasprofil).
             logMsg("INFO", "BME680 init ok addr=0x%02X", a);
             return true;
@@ -503,8 +506,8 @@ namespace {
         ens160 = &sensor;
         // ENS160 begin() macht intern einen Reset. Danach Wire frisch aufsetzen
         // um sauberen I2C-Status zu garantieren (hat im Test Sensordaten geliefert).
-        bool result = ens160->begin();
-        Wire.end();
+        bool result = ens160->begin(); // ENS160-Bibliothek initialisiert den Chip und kann den I2C-Zustand veraendern.
+        Wire.end();                    // Danach Bus bewusst neu aufsetzen, weil ENS160-Init im Test empfindlich war.
         delay(50);
         i2cBusRecoveryPulse();
         delay(10);
@@ -535,7 +538,7 @@ namespace {
     }
 
     bool setEnsStandardMode() {
-        if (!ens160 || !ens160->setMode(ENS160_OPMODE_STD)) {
+        if (!ens160 || !ens160->setMode(ENS160_OPMODE_STD)) { // Standardmodus startet die ENS160-Luftqualitaetsmessung.
             ens_ok = false;
             resetEnsValues();
             return false;
@@ -585,8 +588,8 @@ void netErlDeviceInit() {
     // und ggf. den I2C-NG-Treiber stressen.
     if (diagScanOnly()) {
         scanI2cBus();
-        logMsg("INFO", "SENSOR_DIAG_MODE=SCAN_ONLY – skipping sensor init");
-        pinMode(PIN_LD2410_OUT, INPUT);
+        logMsg("INFO", "SENSOR_DIAG_MODE=SCAN_ONLY - skipping sensor init");
+        pinMode(PIN_LD2410_OUT, INPUT); // Radar-Pin trotzdem setzen, auch wenn Sensor-Init im Diag-Modus ausfaellt.
         ensureRingInitialized();
         return;
     }
@@ -602,7 +605,7 @@ void netErlDeviceInit() {
 
     // VEML7700 (nur wenn per Diag-Mode aktiviert).
     if (diagVemlEnabled()) {
-        if (!veml.begin()) {
+        if (!veml.begin()) { // VEML7700 begin() prueft die I2C-Erreichbarkeit des Luxsensors.
             markSensorFailed(lux_ok, veml_fail_count, "VEML7700", "init");
         } else {
             lux_ok = true; konfVeml();
@@ -627,7 +630,7 @@ void netErlDeviceInit() {
         logMsg("INFO", "ENS160 disabled by SENSOR_DIAG_MODE=%d", SENSOR_DIAG_MODE);
     }
 
-    pinMode(PIN_LD2410_OUT, INPUT);
+    pinMode(PIN_LD2410_OUT, INPUT); // LD2410 OUT ist ein digitaler Eingang, HIGH bedeutet Praesenz.
     ensureRingInitialized();
 }
 
@@ -659,7 +662,7 @@ bool netErlDeviceReadPresence() {
 // Eingabewert: on=true bedeutet Relais soll aktiv sein.
 // Ausgabewert: keiner; RELAY_1_ACTIVE_HIGH legt fest, ob HIGH oder LOW aktiv bedeutet.
 void netErlDeviceSetRelayOutput(bool on) {
-    digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
+    digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW); // active-HIGH/LOW-Polung auf echten GPIO-Pegel abbilden.
 }
 
 // Aktualisiert die lokale LED-Ring-Anzeige. Teil der Technikerarbeit ist nur die

@@ -228,9 +228,9 @@ constexpr uint8_t RESET_CONFIRM_BLINK_PULSES = 10U;
 constexpr uint32_t RELAY_DEAD_TIME_MS = 300UL;  // Mindestpause zwischen Richtungswechsel; schuetzt Motor/Relais vor Gegenlauf.
 constexpr int NET_ZRL_WDT_TIMEOUT_S = 10;       // Watchdog-Reset, wenn loop() laenger als 10 s nicht mehr laeuft.
 constexpr size_t SERIAL_BUFFER_SIZE = 128U;     // Fester Puffer statt String, damit kein Heap fragmentiert.
-constexpr size_t MASTER_MAC_TEXT_LEN = SmartHome::ShNodeProvisioning::MASTER_MAC_TEXT_LEN;
-constexpr size_t SETUP_SSID_BUFFER_SIZE = 32U;
-constexpr const char* STORAGE_KEY_NET_ZRL_BLOB = "net_zrl_v1";
+constexpr size_t MASTER_MAC_TEXT_LEN = SmartHome::ShNodeProvisioning::MASTER_MAC_TEXT_LEN; // Laenge fuer Textform "AA:BB:CC:DD:EE:FF".
+constexpr size_t SETUP_SSID_BUFFER_SIZE = 32U; // WLAN-SSID darf maximal 32 Bytes haben.
+constexpr const char* STORAGE_KEY_NET_ZRL_BLOB = "net_zrl_v1"; // NVS-Key fuer den binaeren NET-ZRL-Konfigblock.
 static_assert(
     sizeof(DEVICE_ID) <= SETUP_SSID_BUFFER_SIZE,
     "NET_ZRL_DEVICE_ID muss als Setup-SSID in den AP-SSID-Puffer passen.");
@@ -475,15 +475,15 @@ bool isSendIntervalValid(uint32_t valueS) {
 }
 
 uint32_t sanitizeEstimatedTravelTime(uint32_t valueMs) {
-    return isTravelTimeValid(valueMs) ? valueMs : DEFAULT_ESTIMATED_TRAVEL_TIME_MS;
+    return isTravelTimeValid(valueMs) ? valueMs : DEFAULT_ESTIMATED_TRAVEL_TIME_MS; // Ungueltige Fahrzeiten nie in Runtime/Persistenz uebernehmen.
 }
 
 uint32_t sanitizeStatusSendInterval(uint32_t valueS) {
-    return isSendIntervalValid(valueS) ? valueS : DEFAULT_STATUS_SEND_INTERVAL_S;
+    return isSendIntervalValid(valueS) ? valueS : DEFAULT_STATUS_SEND_INTERVAL_S; // Schutz gegen kaputte NVS-/CFG-Werte.
 }
 
 uint32_t sanitizeSensorSendInterval(uint32_t valueS) {
-    return isSendIntervalValid(valueS) ? valueS : DEFAULT_SENSOR_SEND_INTERVAL_S;
+    return isSendIntervalValid(valueS) ? valueS : DEFAULT_SENSOR_SEND_INTERVAL_S; // Auch ungenutztes Sensorintervall bleibt validiert.
 }
 
 void clearStoredMasterMac() {
@@ -509,17 +509,17 @@ void formatMacText(const uint8_t mac[6], bool isValid, char* buffer, size_t buff
 }
 
 bool parseMacText(const char* text, uint8_t outMac[6]) {
-    return SmartHome::ShNodeProvisioning::NodeProvisioningController::parseMacText(text, outMac);
+    return SmartHome::ShNodeProvisioning::NodeProvisioningController::parseMacText(text, outMac); // Parser schreibt genau 6 MAC-Rohbytes in outMac.
 }
 
 void copyText(char* target, size_t targetSize, const char* source) {
     if (!target || targetSize == 0U) return;
     if (!source) {
-        target[0] = '\0';
+        target[0] = '\0'; // Nullterminator macht aus leerem Puffer einen gueltigen C-String.
         return;
     }
-    strncpy(target, source, targetSize - 1U);
-    target[targetSize - 1U] = '\0';
+    strncpy(target, source, targetSize - 1U); // Kopiert maximal Pufferlaenge minus Platz fuer '\0'.
+    target[targetSize - 1U] = '\0';          // strncpy terminiert nicht immer selbst; deshalb manuell absichern.
 }
 
 bool istBroadcastMac(const uint8_t* mac) {
@@ -574,7 +574,7 @@ bool darfFunkAktivSein() {
 // Aufgabe: Liefert das STATE-Sendeintervall in Millisekunden.
 // sanitizeStatusSendInterval() begrenzt fehlerhafte Setup-/CFG-Werte vorher.
 unsigned long stateIntervalMs() {
-    return (unsigned long)sanitizeStatusSendInterval(runtime.statusSendIntervalS) * 1000UL;
+    return (unsigned long)sanitizeStatusSendInterval(runtime.statusSendIntervalS) * 1000UL; // Sekunden nach millis()-Einheit umrechnen.
 }
 
 // Aufgabe: Markiert, dass beim naechsten Kommunikations-Tick ein STATE gesendet werden soll.
@@ -586,14 +586,14 @@ void setzeStateReportOffen() {
 // NET-ZRL hat keine Umweltsensoren, daher bleiben alle 10 Sensorpositionen X.
 void baueSensorMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
-    SmartHome::safeCopyMask("XXXXXXXXXX", target, targetSize, 'X');
+    SmartHome::safeCopyMask("XXXXXXXXXX", target, targetSize, 'X'); // Fuellt fehlende Slots sicher mit X statt den Puffer zu ueberlaufen.
 }
 
 // Aufgabe: Baut die Input-Maske fuer HELLO.
 // BTN3X bedeutet: drei lokale Taster sind vorhanden, der letzte Slot ist frei.
 void baueInputMask(char* target, size_t targetSize) {
     if (!target || targetSize == 0U) return;
-    SmartHome::safeCopyMask("BTN3X", target, targetSize, 'X');
+    SmartHome::safeCopyMask("BTN3X", target, targetSize, 'X'); // Maske bleibt C-String-kompatibel und passend zur Protokoll-Laenge.
 }
 
 // Aufgabe: Bestimmt die Ziel-MAC fuer HELLO.
@@ -663,7 +663,7 @@ bool sendePaketMitOptionen(
     }
 
     if (verwendeteSeq != nullptr) {
-        *verwendeteSeq = seq;
+        *verwendeteSeq = seq; // Ausgabeparameter: Aufrufer merkt, welche Sequenz spaeter im ACK erwartet wird.
     }
     return true;
 }
@@ -760,7 +760,7 @@ String travelTimeText(uint32_t valueMs) {
 // leseButtonAktiv – Liest physischen Taster-Pin (beruecksichtigt active-HIGH/LOW)
 bool leseButtonAktiv(int pin) {
     if (pin < 0) return false;
-    const int raw = digitalRead(pin);
+    const int raw = digitalRead(pin); // Arduino liest HIGH/LOW; fachlich "gedrueckt" haengt von BUTTON_ACTIVE_LOW ab.
     return BUTTON_ACTIVE_LOW ? (raw == LOW) : (raw == HIGH);
 }
 
@@ -774,8 +774,8 @@ bool entprelleButton(
     // der Rohwert BUTTON_DEBOUNCE_MS stabil bleibt, wird der stabile Zustand
     // uebernommen.
     if (rawActive != lastRawActive) {
-        lastRawActive = rawActive;
-        changedAtMs = jetztMs;
+        lastRawActive = rawActive; // Rohwert kann prellen; deshalb noch nicht sofort als stabil uebernehmen.
+        changedAtMs = jetztMs;     // Startzeit fuer das Entprellfenster.
     }
     if (previousStableActive != rawActive && (jetztMs - changedAtMs) >= BUTTON_DEBOUNCE_MS) {
         return rawActive;
@@ -787,7 +787,7 @@ void schreibePin(int pin, bool active, bool activeHigh) {
     // activeHigh bildet die elektrische Relais-/LED-Polung auf die fachliche
     // Bedeutung "aktiv" ab. -1-Pins werden ignoriert.
     if (pin >= 0) {
-        digitalWrite(pin, active == activeHigh ? HIGH : LOW);
+        digitalWrite(pin, active == activeHigh ? HIGH : LOW); // activeHigh uebersetzt fachliches "aktiv" in den elektrischen Pegel.
     }
 }
 
@@ -2157,7 +2157,7 @@ void verarbeiteSerielleBefehle() {
         if (ch == '\r') continue;
 
         if (ch == '\n') {
-    runtime.serialBuffer[runtime.serialLength] = '\0'; // C-String muss nullterminiert sein, bevor der Parser ihn liest.
+            runtime.serialBuffer[runtime.serialLength] = '\0'; // C-String muss nullterminiert sein, bevor der Parser ihn liest.
             verarbeiteBefehl(runtime.serialBuffer);
             runtime.serialLength = 0U;
             runtime.serialBuffer[0] = '\0'; // Puffer leeren, damit kein halber alter Befehl weiterverarbeitet wird.

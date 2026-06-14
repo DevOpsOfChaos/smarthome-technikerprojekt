@@ -237,9 +237,9 @@ namespace {
 // Ausgabewert: keiner; die lokalen Sensor-OK-Flags werden gesetzt.
 // Aufrufer: NetErlRuntime ruft diesen Hook einmal beim Boot auf.
 void netErlDeviceInit() {
-    Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL);
-    Wire.setClock(NET_ERL_I2C_CLOCK_HZ);
-    Wire.setTimeOut(NET_ERL_I2C_TIMEOUT_MS);
+    Wire.begin(PIN_SENSOR_SDA, PIN_SENSOR_SCL); // Startet I2C auf den Pins aus PinConfig.h statt auf Arduino-Defaultpins.
+    Wire.setClock(NET_ERL_I2C_CLOCK_HZ);        // 5 kHz ist langsam, aber robuster bei langen oder gestoerten Leitungen.
+    Wire.setTimeOut(NET_ERL_I2C_TIMEOUT_MS);    // Timeout verhindert, dass ein defekter I2C-Sensor die loop() dauerhaft blockiert.
 
     bme280_ok = initBme280();
     if (!bme280_ok) markSensorFailed(bme280_ok, bme_fail_count, "BME280", "init");
@@ -250,7 +250,7 @@ void netErlDeviceInit() {
     else markSensorOk(veml7700_ok, veml_fail_count, veml_last_ok_ms, millis(), "VEML7700");
 
     pinMode(PIN_PIR, INPUT);
-// Status LED not used when PIN_STATUS_LED < 0
+// Status-LED nur initialisieren, wenn sie wirklich bestueckt ist.
 #if PIN_STATUS_LED >= 0
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
@@ -258,8 +258,7 @@ void netErlDeviceInit() {
     
 #if SETUP_INDICATOR_LED_PIN >= 0
     pinMode(SETUP_INDICATOR_LED_PIN, OUTPUT);
-    /* set setup indicator off (respect active polarity) */
-    digitalWrite(SETUP_INDICATOR_LED_PIN, SETUP_INDICATOR_LED_ACTIVE_HIGH ? LOW : HIGH);
+    digitalWrite(SETUP_INDICATOR_LED_PIN, SETUP_INDICATOR_LED_ACTIVE_HIGH ? LOW : HIGH); // LED aus, aber mit richtiger active-HIGH/LOW-Polung.
 #endif
 }
 
@@ -275,7 +274,7 @@ void netErlDeviceResetSensorDefaults() {
 // Eingabewerte: keine; PIN_PIR kommt aus PinConfig.h.
 // Ausgabewert: true bedeutet, der PIR-Pin steht auf HIGH und Bewegung wurde erkannt.
 bool netErlDeviceReadPresence() {
-    pir_raw = (digitalRead(PIN_PIR) == HIGH);
+    pir_raw = (digitalRead(PIN_PIR) == HIGH); // PIR-Module liefern hier HIGH bei Bewegung; keine Entprellung noetig wie bei Tastern.
     return pir_raw;
 }
 
@@ -284,7 +283,7 @@ bool netErlDeviceReadPresence() {
 // Ausgabewert: keiner; digitalWrite setzt die GPIO-Pegel.
 // RELAY_1_ACTIVE_HIGH legt fest, ob HIGH oder LOW den aktiven Relaiszustand bedeutet.
 void netErlDeviceSetRelayOutput(bool on) {
-    digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW);
+    digitalWrite(PIN_RELAY_1, on == RELAY_1_ACTIVE_HIGH ? HIGH : LOW); // Ternary bildet fachliches "an" auf elektrische Relais-Polung ab.
 #if PIN_STATUS_LED >= 0
     digitalWrite(PIN_STATUS_LED, on ? HIGH : LOW);
 #endif
