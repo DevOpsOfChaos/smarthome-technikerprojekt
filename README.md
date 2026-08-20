@@ -83,4 +83,4 @@ Nach Abschluss der Prüfung behält sich der Autor einen Wechsel auf eine freiz�
 
 ## Autor
 
-Manuel Ries – Heinrich-Hertz-Schule Hamburg – Technikerarbeit 2026
+Manuel Ries – Heinrich-Hertz-Schule Karlsruhe – Technikerarbeit 2026
